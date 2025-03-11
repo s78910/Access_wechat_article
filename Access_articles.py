@@ -42,7 +42,7 @@ class AccessPosts:
         """
         # 整理文章关键信息
         nickname = re.search(r'var nickname.*"(.*?)".*', article_content).group(1)  # 公众号名称
-        article_link = re.search(r'var msg_link = .*"(.*?)".*', article_content).group(1)  # 文章短链接
+        article_link = re.search(r'var msg_link = .*"(.*?)".*', article_content).group(1)  # 文章链接
         createTime = re.search(r"var createTime = '(.*?)'.*", article_content).group(1)  # 文章创建时间
         # year, month, day = createTime.split(" ")[0].split("-")      # 年，月，日
         # hour, minute = createTime.split(" ")[1].split(":")          # 小时，分钟
@@ -121,8 +121,15 @@ class AccessPosts:
         # 验证请求
         if 'var createTime = ' in res.text:  # 正常获取到文章内容
             print('正常获取到文章内容，开始保存操作')
-            self.save_one_article(res.text, img_save_flag, content_save_flag)  # 开始保存单篇文章
-            return {'content_flag': 1, 'content': res.text}  # 用来获取公众号主页链接
+            try:
+                self.save_one_article(res.text, img_save_flag, content_save_flag)  # 开始保存单篇文章
+                return {'content_flag': 1, 'content': res.text}  # 用来获取公众号主页链接
+            except:
+                article_title = re.search(r"var title = '(.*?)'.*", res.text)  # 文章标题
+                if article_title: article_title = article_title.group(1)
+                print('检测到抓取出错，文章名>>>>    ' + article_title)
+                print('检测到抓取出错，文章链接>>>>    ' + url)
+                return {'content_flag': 0}
         elif '>当前环境异常，完成验证后即可继续访问。<' in res.text:
             print('当前环境异常，请检查链接后访问！！！')  # 代码访问遇到人机验证，需进行验证操作
             return {'content_flag': 0}
@@ -599,29 +606,7 @@ class ArticleDetail(AccessPosts):
         if read_num == [] or read_num == '':
             return '', '', '', ''
         else:
-            print(local_time, createTime, article_title, link, article_texts,   # 本地创建时间，文章发布时间，标题，链接，文本，
-                    read_num[0], like_num[0], share_num[0], show_read[0],         # 阅读量，点赞数，转发数，在看数，
-                    comments, comments_star_nums)                                          # 评论，评论点赞
             return (local_time, createTime, article_title, link, article_texts,  # 本地创建时间，文章发布时间，标题，链接，文本，
                     read_num[0], like_num[0], share_num[0], show_read[0],  # 阅读量，点赞数，转发数，在看数，
                     comments, comments_star_nums)  # 评论，评论点赞
 
-
-# url = 'https://mp.weixin.qq.com/s/JcsoqS2u2qC_J1V4EdlWmg'
-# url = 'http://mp.weixin.qq.com/s?__biz=MjM5MjAxNDM4MA==&mid=2666927281&idx=1&sn=e5608f6bc1f681f2495550596605d73e&chksm=bc94670a04237bf6638785f637da33b013d5971ff012073f44b73b199e8ea2e0497b3dc17060&scene=27'
-
-# # url = 'http://mp.weixin.qq.com/s?__biz=Mzg2MzUzNTA3MA==&amp;mid=2247625647&amp;idx=2&amp;sn=aab4c87e990845af7299bd506837d81d&amp;chksm=cf1218503cb08eec0a81148e7911689ae04a68de12ef672ddd591504bf2142b46a3ae573e59f&amp;scene=27'
-# access_token = 'https://mp.weixin.qq.com/mp/profile_ext?action=home&__biz=MjM5MjAxNDM4MA==&scene=124&uin=MTM1NDgyNTcyNw%3D%3D&key=daf9bdc5abc4e8d0fc74d77961957e5251665583011fa0c9de5108844084772e40373d4806a7b8ed6dc20c64c8cfb3af2892e050f37dd255af53bdba182a541be14e5178d05dff7b365afa3390f9c4af1c47272125eb8e8e37f1a9855530feb33245128692baf6801dceca5f4f25f2243429a419322cc1d5fc69fbfaf3cc8c48&devicetype=Windows+11+x64&version=63090c2d&lang=zh_CN&a8scene=1&acctmode=0&pass_ticket=PNwCUSrnyMnXHGldjYvgys9R6BSA%2FhSd6VFTeCBWd74jJFF%2F1FvGh1G2cLSpcDe8&wx_header=1'
-
-
-# ap = ArticleDetail()
-# # ap.access_origin_list(access_token, 2)  # 获取公众号的前2页文章并保存，默认获取全部文章
-# # ap.get_list_article(url, False)    # 此处url是公众号下任意一篇文章
-# ap.get_detail_list(access_token)
-
-# 检验access_token是否合法
-# ap.biz = str(re.search('biz=(.*?)&', access_token).group(1))
-# ap.uin = str(re.search('uin=(.*?)&', access_token).group(1))
-# ap.key = str(re.search('key=(.*?)&', access_token).group(1))
-# ap.pass_ticket = str(re.search('pass_ticket=(.*?)&', access_token).group(1))
-# ap.get_detail_new(url)

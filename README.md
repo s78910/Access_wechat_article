@@ -6,7 +6,7 @@
 
 如果感兴趣，请复制项目后自行研究使用
 
-使用过程中如遇到错误，请提交**[issues](https://github.com/yeximm/Access_wechat_article/issues)**。
+使用过程中如遇到错误，请提交[issues](https://github.com/yeximm/Access_wechat_article/issues)。
 
 ## 一、主要功能
 
@@ -104,7 +104,11 @@ pip install -r requirements.txt
 开源不易，若此项目有帮到你，望你能动用你的发财小手支持一下
 你的鼓励是这个项目继续更新的最大动力
 
-![20250316180200](./README/20250316180200.jpg)
+<p align = "center">    
+<img  src="https://github.com/yeximm/Access_wechat_article/blob/master/README/20250316180200.jpg" width="200" />
+</p>
+
+
 
 ## 六、程序流程图
 

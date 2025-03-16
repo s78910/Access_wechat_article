@@ -105,8 +105,9 @@ pip install -r requirements.txt
 你的鼓励是这个项目继续更新的最大动力
 
 <p align = "center">    
-<img  src="https://github.com/yeximm/Access_wechat_article/blob/master/README/20250316180200.jpg" width="200" />
+<img  src="https://github.com/yeximm/Access_wechat_article/blob/master/README/20250316180200.jpg" width="500" />
 </p>
+
 
 
 

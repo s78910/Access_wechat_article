@@ -101,15 +101,13 @@ pip install -r requirements.txt
 
 ## 五、鼓励一下
 
-开源不易，若此项目有帮到你，望你能动用你的发财小手支持一下
-你的鼓励是这个项目继续更新的最大动力
+开源不易，若此项目有帮到你，望你能动用你的发财小手**Star**☆一下。
+
+如有遇到代码方面的问题，欢迎一起讨论，你的鼓励是这个项目继续更新的最大动力！
 
 <p align = "center">    
-<img  src="https://github.com/yeximm/Access_wechat_article/blob/master/README/20250316180200.jpg" width="500" />
+<img  src="https://github.com/yeximm/Access_wechat_article/blob/master/README/qrcode_1749894334903.jpg" width="500" />
 </p>
-
-
-
 
 ## 六、程序流程图
 

@@ -25,7 +25,8 @@ if __name__=="__main__":
             access_token = input('\n以下内容需要用到fiddler工具！！！！！\n（1）在微信客户端打开步骤1获取到的链接，\n'
                   '（2）在fiddler中查看——主机地址为https://mp.weixin.qq.com，URL地址为：/mp/profile_ext?acti\n'
                   '（3）选中此项后按快捷键：Ctrl+U，复制此网址到剪贴板\n（4）将该内容粘贴到此处 (づ￣ 3￣)づ\n请输入复制的链接：')
-            pages = input('（默认获取全部历史文章）请输入需要下载的最新发布文章的页数(例：1)：') or None
+            pages = input('\n########## 默认获取第 1 页文章（约15篇）。如需公众号下全部文章，请输入：0 ##########\n'
+                          '请估算后输入需要下载的最新发布文章的页数(例：1)：') or 1
             app.access_origin_list(access_token, int(pages))
             print('\n' + screen_text)
 

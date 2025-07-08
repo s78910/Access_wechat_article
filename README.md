@@ -27,7 +27,7 @@
 ### 3.1下载 / Download
 
 - 下载地址：[https://github.com/yeximm/Access_wechat_article/releases](https://github.com/yeximm/Access_wechat_article/releases)
-  - 👆👆👆以上为本项目发布页地址，选取相关版本下载即可。
+  - 👆👆👆以上为本项目发布页地址，选取所需版本下载即可。
 
 
 - 存储库快照：[Github_master](https://github.com/yeximm/Access_wechat_article/archive/refs/heads/master.zip)
@@ -37,7 +37,7 @@
 
 （1）创建虚拟环境
 
-```
+```bash
 python -m venv access_wechat
 ```
 
@@ -47,29 +47,29 @@ python -m venv access_wechat
 
 - Windows
 
-  ```
+  ```bash
   .\access_wechat\Scripts\activate
   ```
 
 - Unix/macOS
 
-  ```
+  ```bash
   source access_wechat/bin/activate
   ```
 
 （3）退出环境
 
-```
+```bash
 deactivate
 ```
 
 ### 3.3 安装包文件
 
-[requirements.txt](https://github.com/yeximm/Access_wechat_article/blob/master/requirements.txt)中包含所需python包文件名称，用来批量安装python包文件
+`requirements.txt`中包含所需python包文件名称，用来批量安装python包文件
 
 安装命令：
 
-```
+```bash
 pip install -r requirements.txt
 ```
 
@@ -85,13 +85,13 @@ pip install -r requirements.txt
    
    3. 在项目目录运行：
    
-      - ```python
+      - ```bash
         python main.py
         ```
    
    4. 根据控制台提示输入
    
-   5. 如需自定义功能，参照`main.py`中的函数调用方式自行编写。
+   5. 如需**自定义功能**，参照`main.py`中的函数调用方式自行编写。
 
 ## 四、功能截图
 
@@ -136,13 +136,14 @@ pip install -r requirements.txt
 [![Forkers repo roster for @yeximm/Access_wechat_article](https://reporoster.com/forks/yeximm/Access_wechat_article)](https://github.com/yeximm/Access_wechat_article/network/members)
 
 ## LICENSE
-本作品采用许可协议 <a rel="license" href="http://creativecommons.org/licenses/by-nc-sa/4.0/">Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International</a> ,简称 **[CC BY-NC-SA 4.0](http://creativecommons.org/licenses/by-nc-sa/4.0/)**。所有以任何方式查看本仓库内容的人、或直接或间接使用本仓库内容的使用者都应仔细阅读此声明。本仓库管理者保留随时更改或补充此免责声明的权利。一旦使用、复制、修改了本仓库内容，则视为您已接受此免责声明。
+
+本作品采用许可协议 <a rel="license" href="http://creativecommons.org/licenses/by-nc-sa/4.0/">Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International</a> ,简称 **[CC BY-NC-SA 4.0](http://creativecommons.org/licenses/by-nc-sa/4.0/)**。
+
+所有以任何方式查看本仓库内容的人、或直接或间接使用本仓库内容的使用者都应仔细阅读此声明。本仓库管理者保留随时更改或补充此免责声明的权利。一旦使用、复制、修改了本仓库内容，则视为您已接受此免责声明。
 
 项目内容仅供学习研究，请勿用于商业用途。如对本仓库内容的功能有需求，应自行开发相关功能。所有基于本仓库内容的源代码，进行的任何修改，为其他个人或组织的自发行为，与本仓库内容没有任何直接或间接的关系，所造成的一切后果亦与本仓库内容和本仓库管理者无关。
 
 本仓库内容中涉及的第三方硬件、软件等，与本仓库内容没有任何直接或间接的关系。本仓库内容仅对部署和使用过程进行客观描述，不代表支持使用任何第三方硬件、软件。使用任何第三方硬件、软件，所造成的一切后果由使用的个人或组织承担，与本仓库内容无关。
-
-
 
 ## Star History
 

@@ -26,32 +26,35 @@
 
 ### 3.1下载 / Download
 
-- [Github / Download](https://github.com/yeximm/Access_wechat_article/archive/refs/heads/master.zip)
+- 下载地址：[https://github.com/yeximm/Access_wechat_article/releases](https://github.com/yeximm/Access_wechat_article/releases)
+  - 👆👆👆以上为本项目发布页地址，选取相关版本下载即可。
 
-👆👆👆以上为本项目文件，直接clone该项目，或下载此链接均可。
+
+- 存储库快照：[Github_master](https://github.com/yeximm/Access_wechat_article/archive/refs/heads/master.zip)
+  - 存储库快照等同于 [Releases](https://github.com/yeximm/Access_wechat_article/releases) 中的 [Source Code (zip)](https://github.com/yeximm/Access_wechat_article/archive/refs/heads/master.zip) 等，包含 `README` 等内容
 
 ### 3.2 Python环境配置
 
 （1）创建虚拟环境
 
 ```
-python -m venv venv
+python -m venv access_wechat
 ```
 
 `venv`指定存放环境的目录，一般使用 `venv`，这是一个不成文的规定。
 
-（2）激活环境
+（2）**激活**环境
 
 - Windows
 
   ```
-  .\venv\Scripts\activate
+  .\access_wechat\Scripts\activate
   ```
 
 - Unix/macOS
 
   ```
-  source venv/bin/activate
+  source access_wechat/bin/activate
   ```
 
 （3）退出环境
@@ -72,10 +75,23 @@ pip install -r requirements.txt
 
 ### 3.4 运行参数
 
-1. 项目主文件为：`main.py`，另外几个文件为功能文件，为主文件服务
-   项目存储路径为：`./all_data/`（程序会自动创建）
+1. 项目主文件为：`main.py`，其功能调用方式详见于此。
+   项目中**生成文件的存储路径**为：`./all_data`（该目录由程序**自动创建**）
 2. 运行命令：
-   - 进入项目目录后运行：`python main.py`
+   
+   1. 首先进入**虚拟环境**（详见**激活**虚拟环境）
+   
+   2. 安装python包文件（如已安装则进行下一步）
+   
+   3. 在项目目录运行：
+   
+      - ```python
+        python main.py
+        ```
+   
+   4. 根据控制台提示输入
+   
+   5. 如需自定义功能，参照`main.py`中的函数调用方式自行编写。
 
 ## 四、功能截图
 
@@ -110,24 +126,23 @@ pip install -r requirements.txt
 如有遇到代码方面的问题，欢迎一起讨论，你的鼓励是这个项目继续更新的最大动力！
 
 <p align = "center">    
-<img  src="https://github.com/yeximm/Access_wechat_article/blob/master/README/qrcode_1749894334903.jpg" width="500" />
+<img  src="https://github.com/yeximm/Access_wechat_article/blob/master/README/qrcode_1749894334903.jpg" width="300" />
 </p>
+
 
 另外，十分感谢大家对于本项目的关注。
 
 [![Stargazers repo roster for @yeximm/Access_wechat_article](https://reporoster.com/stars/yeximm/Access_wechat_article)](https://github.com/yeximm/Access_wechat_article/stargazers)
 [![Forkers repo roster for @yeximm/Access_wechat_article](https://reporoster.com/forks/yeximm/Access_wechat_article)](https://github.com/yeximm/Access_wechat_article/network/members)
 
-## 七、免责声明
+## LICENSE
+本作品采用许可协议 <a rel="license" href="http://creativecommons.org/licenses/by-nc-sa/4.0/">Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International</a> ,简称 **[CC BY-NC-SA 4.0](http://creativecommons.org/licenses/by-nc-sa/4.0/)**。所有以任何方式查看本仓库内容的人、或直接或间接使用本仓库内容的使用者都应仔细阅读此声明。本仓库管理者保留随时更改或补充此免责声明的权利。一旦使用、复制、修改了本仓库内容，则视为您已接受此免责声明。
 
-所有以任何方式查看本仓库内容的人、或直接或间接使用本仓库内容的使用者都应仔细阅读此声明。本仓库管理者保留随时更改或补充此免责声明的权利。一旦使用、复制、修改了本仓库内容，则视为您已接受此免责声明。
+项目内容仅供学习研究，请勿用于商业用途。如对本仓库内容的功能有需求，应自行开发相关功能。所有基于本仓库内容的源代码，进行的任何修改，为其他个人或组织的自发行为，与本仓库内容没有任何直接或间接的关系，所造成的一切后果亦与本仓库内容和本仓库管理者无关。
 
 本仓库内容中涉及的第三方硬件、软件等，与本仓库内容没有任何直接或间接的关系。本仓库内容仅对部署和使用过程进行客观描述，不代表支持使用任何第三方硬件、软件。使用任何第三方硬件、软件，所造成的一切后果由使用的个人或组织承担，与本仓库内容无关。
 
-本项目仅供学习研究，禁止用于商业用途，所有直接或间接使用本仓库内容的个人和组织，应 24 小时内完成学习和研究，并及时删除本仓库内容。如对本仓库内容的功能有需求，应自行开发相关功能。所有基于本仓库内容的源代码，进行的任何修改，为其他个人或组织的自发行为，与本仓库内容没有任何直接或间接的关系，所造成的一切后果亦与本仓库内容和本仓库管理者无关。
 
-## LICENSE
-本作品采用 <a rel="license" href="http://creativecommons.org/licenses/by-nc-sa/4.0/">Attribution-NonCommercial-ShareAlike 4.0 International</a> 进行许可。
 
 ## Star History
 

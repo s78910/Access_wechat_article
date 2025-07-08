@@ -115,8 +115,8 @@ pip install -r requirements.txt
 
 另外，十分感谢大家对于本项目的关注。
 
-[![Stargazers repo roster for @datawhalechina/leedl-tutorial](./README/leedl-tutorial.svg+xml)](https://github.com/datawhalechina/leedl-tutorial/stargazers)
-[![Forkers repo roster for @datawhalechina/leedl-tutorial](./README/leedl-tutorial-1751962216621-1.svg+xml)](https://github.com/datawhalechina/leedl-tutorial/network/members)
+[![Stargazers repo roster for @yeximm/Access_wechat_article](https://reporoster.com/stars/yeximm/Access_wechat_article)](https://github.com/yeximm/Access_wechat_article/stargazers)
+[![Forkers repo roster for @yeximm/Access_wechat_article](https://reporoster.com/forks/yeximm/Access_wechat_article)](https://github.com/yeximm/Access_wechat_article/network/members)
 
 ## 七、免责声明
 

@@ -99,7 +99,11 @@ pip install -r requirements.txt
 
 ![function4](./README/function4.png)
 
-## 五、鼓励一下
+## 五、程序流程图
+
+![wechat_article_drawio](./README/wechat_article_drawio.png)
+
+## 六、鼓励一下
 
 开源不易，若此项目有帮到你，望你能动用你的发财小手**Star**☆一下。
 
@@ -109,9 +113,10 @@ pip install -r requirements.txt
 <img  src="https://github.com/yeximm/Access_wechat_article/blob/master/README/qrcode_1749894334903.jpg" width="500" />
 </p>
 
-## 六、程序流程图
+另外，十分感谢大家对于本项目的关注。
 
-![wechat_article_drawio](./README/wechat_article_drawio.png)
+[![Stargazers repo roster for @datawhalechina/leedl-tutorial](./README/leedl-tutorial.svg+xml)](https://github.com/datawhalechina/leedl-tutorial/stargazers)
+[![Forkers repo roster for @datawhalechina/leedl-tutorial](./README/leedl-tutorial-1751962216621-1.svg+xml)](https://github.com/datawhalechina/leedl-tutorial/network/members)
 
 ## 七、免责声明
 
@@ -123,4 +128,5 @@ pip install -r requirements.txt
 
 ## Star History
 
-[![Star History Chart](https://api.star-history.com/svg?repos=yeximm/Access_wechat_article&type=Date)](https://www.star-history.com/#yeximm/Access_wechat_article&Date)](https://www.star-history.com/#yeximm/Access_wechat_article&Date)
+[![Star History Chart](https://api.star-history.com/svg?repos=yeximm/Access_wechat_article&type=Date)](https://www.star-history.com/#yeximm/Access_wechat_article&Date)
+

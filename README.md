@@ -1,4 +1,4 @@
-## 微信文章获取（Access_wechat_article）
+## 微信公众号/文章 获取（Access_wechat_article）
 
 更新时间：2025年7月
 

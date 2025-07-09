@@ -4,9 +4,11 @@
 
 目前支持 Windows / Linux 开箱即用，**建议使用虚拟环境运行项目**
 
-如果感兴趣，请复制项目后自行研究使用
+如果感兴趣，请 **Fork** 项目后自行研究使用
 
-使用过程中如遇到错误，请提交[issues](https://github.com/yeximm/Access_wechat_article/issues)。
+使用过程中如遇到错误，欢迎提交 [issues](https://github.com/yeximm/Access_wechat_article/issues) 来讨论
+
+**注：**请在 [GitHub](https://github.com/) 平台提交 [issues](https://github.com/yeximm/Access_wechat_article/issues)
 
 ## 一、主要功能
 

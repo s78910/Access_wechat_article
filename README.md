@@ -23,8 +23,8 @@
 
 1. 系统环境：Windows 10 ×64
 2. 程序运行环境：python 3.13
-3. 涉及应用：微信**PC版**，当前项目已适配的微信版本：**`4.0.6.26`**
-4. 使用工具：fiddler，当前项目适配的fiddler版本：**`v5.0.20253.3311`**
+3. 涉及应用：微信**PC版**，当前项目已适配的微信版本：**`4.1.0.34`**
+4. 使用工具：[Fiddler Classic](https://www.telerik.com/fiddler/fiddler-classic)，当前项目适配的Fiddler Classic版本：**`v5.0.20253.3311`**
 
 ## 三、程序使用
 

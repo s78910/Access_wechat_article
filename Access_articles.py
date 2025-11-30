@@ -9,14 +9,14 @@ import pandas as pd  # 修改excel
 from bs4 import BeautifulSoup
 from fake_useragent import UserAgent  # 生成随机浏览器标识
 import sys
-import logging
+# import logging
 from urllib import parse    # 用于解析获取url参数
 
-logging.basicConfig(  # 配置日志记录
-    filename='app.log',
-    level=logging.ERROR,
-    format='%(asctime)s - %(levelname)s - %(message)s'
-)
+# logging.basicConfig(  # 配置日志记录
+#     filename='app.log',
+#     level=logging.ERROR,
+#     format='%(asctime)s - %(levelname)s - %(message)s'
+# )
 requests.packages.urllib3.disable_warnings()  # 去除网络请求警告
 
 
@@ -48,7 +48,7 @@ class AccessPosts:
         # year, month, day = createTime.split(" ")[0].split("-")      # 年，月，日
         # hour, minute = createTime.split(" ")[1].split(":")          # 小时，分钟
         author = re.search(r'var author = "(.*?)".*', article_content).group(1)  # 文章作者
-        article_title = re.search(r"var title = '(.*?)'.*", article_content).group(1)  # 文章标题
+        article_title = re.search(r"var title = (.*?);", article_content).group(1)  # 文章标题
         article_title_win = re.sub(r'[\\/*?:"<>|].', '_', article_title)  # Windows下标题
         article_title_win = article_title_win.replace('.', '')  # Windows下标题，去除小数点，防止自动省略报错
 
@@ -126,7 +126,7 @@ class AccessPosts:
                 self.save_one_article(res.text, img_save_flag, content_save_flag)  # 开始保存单篇文章
                 return {'content_flag': 1, 'content': res.text}  # 用来获取公众号主页链接
             except:
-                article_title = re.search(r"var title = '(.*?)'.*", res.text)  # 文章标题
+                article_title = re.search(r"var title = (.*?);", res.text)  # 文章标题
                 if article_title: article_title = article_title.group(1)
                 print('\n检测到抓取出错，文章名>>>>    ' + article_title + '\n'
                       '检测到抓取出错，文章链接>>>>    ' + url + '\n'
@@ -350,9 +350,9 @@ class ArticleDetail(AccessPosts):
             res = requests.get(url=url, headers=self.headers, timeout=10, verify=False)
         except:
             print('失败！！！获取第 ' + str(page + 1) + ' 页文章列表失败！！！')
-            print('请检查错误类型，详情记录在日志中')
-            exc_type, exc_value, exc_traceback = sys.exc_info()  # 获取当前异常的信息
-            logging.error(f'发生异常: {exc_type.__name__}: {exc_value}', exc_info=True)
+            # print('请检查错误类型，详情记录在日志中')
+            # exc_type, exc_value, exc_traceback = sys.exc_info()  # 获取当前异常的信息
+            # logging.error(f'发生异常: {exc_type.__name__}: {exc_value}', exc_info=True)
             res = ArticleDetail()  # 保证返回值不会报错
         if 'app_msg_ext_info' in res.text:
             # 解码json数据
@@ -472,7 +472,7 @@ class ArticleDetail(AccessPosts):
         # article_link = re.search(r'var msg_link = .*"(.*?)".*', contents['content']).group(1)  # 文章短链接
         createTime = re.search(r"var createTime = '(.*?)'.*", contents['content']).group(1)  # 文章发布时间 detail_time
         # author = re.search(r'var author = "(.*?)".*', contents['content']).group(1)  # 文章作者
-        article_title = re.search(r"var title = '(.*?)'.*", contents['content']).group(1)  # 文章标题
+        article_title = re.search(r"var title = (.*?);", contents['content']).group(1)  # 文章标题
         # 将文字内容转换为列表形式存储
         soup = BeautifulSoup(contents['content'], 'html.parser')
         original_texts = soup.getText().split('\n')  # 将页面所有的文本内容提取，并转为列表形式

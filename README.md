@@ -139,7 +139,7 @@ pip install -r requirements.txt
 为预防被封禁, 短延时：0.906秒
 正常获取到文章内容
 当前文章为>>>> 法国总统马克龙抵达北京开始访华
-公众号名称：新华网，
+公众号名称：新华网
 公众号主页: https://mp.weixin.qq.com/mp/profile_ext?action=home&__biz=MzA4MjQxNjQzMA==&scene=124#wechat_redirect
 将此链接 （￣︶￣）↗ ↗ ↗ ↗ 粘贴发送到 "微信PC端-文件传输助手"
 按回车键继续...

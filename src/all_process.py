@@ -26,7 +26,7 @@ class AccessWechatArticle:
             self.base_spider.format_content(content['content'])
             self.nickname = self.base_spider.nickname
             public_main_link = self.base_spider.public_main_link
-            print(f'公众号名称：{self.nickname}\n公众号主页: {public_main_link}')
+            print(f'公众号名称：{self.nickname}\n公众号主页: ↘ ↘ ↘ ↘\n{public_main_link}')
             print('将此链接 （￣︶￣）↗ ↗ ↗ ↗ 粘贴发送到 "微信PC端-文件传输助手"')
         else:
             print('获取文章内容失败')

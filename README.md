@@ -1,6 +1,6 @@
 ## 微信公众号/文章 获取（Access_wechat_article）
 
-更新时间：2025-12-03
+更新时间：2026-02-01
 
 本项目是基于Python语言的爬虫程序，支持对微信公众号文章内容获取
 
@@ -12,39 +12,44 @@
 
 **注**：请在 [GitHub](https://github.com/) 平台提交 [issues](https://github.com/yeximm/Access_wechat_article/issues)
 
-## 一、主要功能
+## 1 主要功能
 
-1. 获取**公众号主页链接**，通过微信内置浏览器可直接打开
-2. 获取公众号**已发布**的文章列表（**微信公众号**下的历史文章）
-3. 批量下载公众号文章的**网页文本数据**
-4. 获取微信公众号文章的**所有信息**，如阅读量、点赞数、转发数、评论、评论点赞等信息。
+- 获取**公众号主页链接**，通过微信内置浏览器可直接打开
+- 获取公众号**已发布**的文章列表（**微信公众号**下的历史文章）
+- 批量下载公众号文章的**网页文本数据**
+- 获取微信公众号文章的**所有信息**，如阅读量、点赞数、转发数、评论、评论点赞等信息。
 
-## 二、项目开发环境及工具
+## 2 项目开发环境及工具
 
-1. 系统环境：Windows 11 ×64
-2. 程序运行环境：python 3.13
-3. 涉及应用：微信**PC版**，当前项目已适配的微信版本：**`4.1.5.16`**
-4. 使用工具：[Fiddler Classic](https://www.telerik.com/fiddler/fiddler-classic)，当前项目适配的Fiddler Classic版本：**`v5.0.20253.3311`**
+- 系统环境：Windows 10/11 ×64
+- 程序运行环境：python 3.13 或更高版本
+- 涉及应用：微信**PC版**，当前项目已适配的微信版本：**`4.1.5.16`**
+- 使用工具：[Fiddler Classic](https://www.telerik.com/fiddler/fiddler-classic)，当前项目适配的Fiddler Classic版本：**`v5.0.20253.3311`**
+- 
 
 **目录架构**
 
 ```bash
 Access_wechat_article/
-├── .venv/                # 虚拟环境目录
-├── src/                  # 源代码目录 
-│   ├── all_process.py    # 流程汇总
-│   ├── base_spider.py    # 基础爬虫模块
-│   ├── save_to_excel.py  # 存储模块
-│   ├── tools.py          # 其他工具模块
-│   └── wechat_funcs.py   # 微信token模块
-├── LICENSE               # 许可凭证
+├── .venv/             # 虚拟环境目录
+├── src/               # 源代码目录 
+│   ├── core/          # 核心代码
+│   │   ├── base_spider.py     # 基础爬虫模块
+│   │   └── wechat_funcs.py    # 微信token模块
+│   ├── save_module    # 存储代码
+│   │   ├── save_to_html.py    # (核心模块)下载页面内容到本地 html
+│   │   └── save_to_excel.py   # 转 html 到 excel
+│   ├── utils          # 工具代码
+│   │   └── tools.py           # 常用工具
+│   └── all_process.py # 流程汇总
 ├── main.py               # 项目主文件
-├── README/               # 项目说明文档资源（图片、文件）
-├── README.md             # 项目说明文档
-└── requirements.txt      # 项目依赖列表
+├── requirements.txt      # 项目依赖列表
+├── LICENSE       # 许可凭证
+├── README/       # 项目说明文档资源（图片、文件）
+└── README.md     # 项目说明文档
 ```
 
-## 三、程序使用
+## 3 程序使用
 
 ### 3.1下载 / Download
 
@@ -95,7 +100,82 @@ deactivate
 pip install -r requirements.txt
 ```
 
-### 3.4 运行参数
+> 注：使用 pip 命令在虚拟环境中安装 python 包时可能会出现 **false 目录**，该目录是 pip 的缓存文件，可直接删除。
+>
+> 使用 `pip cache dir` 查看 pip 的缓存目录，即：
+>
+> ```bash
+> pip cache dir
+> # your_project_dir\access_wechat_article\false
+> ```
+
+### 3.4 Playwright内核
+
+（1）**激活**环境, 以Windows为例
+
+激活成功后，命令行提示符前会显示 `(.venv)`
+
+```bash
+.\.venv\Scripts\activate
+```
+
+（2）创建浏览器安装目录，安装在`(.venv)`目录下
+
+```bash
+# 使用 Python 创建目录并安装
+python -c "import os; os.makedirs('.venv/.playwright-browsers', exist_ok=True)"
+```
+
+（3）手动设置环境变量
+
+- **Windows PowerShell**
+
+  - ```bash
+    $env:PLAYWRIGHT_BROWSERS_PATH="$PWD\.venv\.playwright-browsers"
+    ```
+
+- **Windows CMD**
+
+  - ```bash
+    set PLAYWRIGHT_BROWSERS_PATH=%CD%\.venv\.playwright-browsers
+    ```
+
+- **Linux/Mac**
+
+  - ```bash
+    export PLAYWRIGHT_BROWSERS_PATH="$(pwd)/.venv/.playwright-browsers"
+    ```
+
+（4）**安装 chromium 内核**
+
+```bash
+playwright install chromium
+```
+
+**注：**项目已配置自动使用本地浏览器路径（在 `src/all_process.py` 中）
+
+（5）查看安装结果
+
+打开`.venv\.playwright-browsers`目录，查看目录名称中是否包含 `chromium`
+
+（6）**卸载步骤**（安装错误时使用）
+
+如果需要卸载Playwright浏览器内核，请先**手动设置环境变量**
+
+这里以 Windows PowerShell 为例，运行：
+
+```bash
+# 进入虚拟环境
+.\.venv\Scripts\activate
+
+# 手动设置环境变量
+$env:PLAYWRIGHT_BROWSERS_PATH="$PWD\.venv\.playwright-browsers"
+
+# 卸载所有浏览器
+playwright uninstall
+```
+
+### 3.5 运行参数
 
 1. 项目主文件为：`main.py`，其功能调用方式详见于此。
    项目中**生成文件的存储路径**为：`./all_data`（该目录由程序**自动创建**）
@@ -115,7 +195,7 @@ pip install -r requirements.txt
    
    5. 如需**自定义功能**，参照`main.py`中的函数调用方式自行编写。
 
-## 四、功能示例
+## 4 功能示例
 
 ### 4.1 功能1
 
@@ -203,6 +283,8 @@ pip install -r requirements.txt
 
 ### 4.3 功能3
 
+默认下载网页所有内容存储为 `html` 形式！
+
 ```bash
 请输入数字键！
         数字键1: 获取公众号主页链接
@@ -221,11 +303,6 @@ pip install -r requirements.txt
 输入: 已下载文章列表的公众号名称 (例如: 研招网资讯) 或 公众号的一篇文章链接
 (若当前会话已执行过步骤2, 可按回车跳过)
 请输入: 新华网
-```
-
-```bash
-########## 是否保存图片 ##########
-是否保存图片? 是(输入任意值), 否(默认，按回车跳过):y
 ```
 
 **程序执行结果**
@@ -288,7 +365,7 @@ pip install -r requirements.txt
 按回车键继续...
 ```
 
-## 五、鼓励一下
+## 5 鼓励一下
 
 开源不易，若此项目有帮到你，望你能动用你的发财小手**Star**☆一下。
 
@@ -305,9 +382,9 @@ pip install -r requirements.txt
 [![Stargazers repo roster for @yeximm/Access_wechat_article](https://reporoster.com/stars/yeximm/Access_wechat_article)](https://github.com/yeximm/Access_wechat_article/stargazers)
 [![Forkers repo roster for @yeximm/Access_wechat_article](https://reporoster.com/forks/yeximm/Access_wechat_article)](https://github.com/yeximm/Access_wechat_article/network/members)
 
-## 六、程序流程图
+## 6 程序流程图
 
-![wechat_article_drawio](./README/wechat_article_drawio.png)
+![wechat_article_drawio](./README/1769576432444.svg)
 
 ### 6.1 基础爬虫模块
 

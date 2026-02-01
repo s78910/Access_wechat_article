@@ -8,7 +8,8 @@ import json
 import random
 import jsonpath
 
-from src.base_spider import BaseSpider
+from src.core.base_spider import BaseSpider
+from src.utils.tools import *
 
 
 class ArticleDetail(BaseSpider):
@@ -76,7 +77,7 @@ class ArticleDetail(BaseSpider):
                     print('请求结束，文章列表获取完毕！')
                     break
                 page = page + 1
-                self.delay_time()   # 随机延时做模拟手动操作，预防被封禁
+                delay_time()   # 随机延时做模拟手动操作，预防被封禁
             all_article_link = passage_list
         else:
             # 遍历指定页数的文章链接
@@ -90,7 +91,7 @@ class ArticleDetail(BaseSpider):
                 else:
                     print('请求结束，文章列表获取完毕！')
                     break
-                self.delay_time()   # 随机延时做模拟手动操作，预防被封禁
+                delay_time()   # 随机延时做模拟手动操作，预防被封禁
             all_article_link = passage_list
         # print('********************共获取到 ' + str(len(all_article_link)) + ' 篇文章，开始保存文章，若为 0 篇请检查错误！！！\n')
         if not all_article_link: 
@@ -215,10 +216,6 @@ class ArticleDetail(BaseSpider):
         first_content = self.get_an_article(first_page_list[article_index][6])   # 提取nickname
         if first_content['content_flag'] == 0:
             print('提取第 ' + str(article_index + 1) + ' 篇文章的公众号名称失败')
-            for i in range(1, len(first_page_list)):
-                first_content = self.get_detail_nickname(first_page_list[i][6])   # 提取nickname
-                if first_content['content_flag'] == 1:
-                    break
             return None
         self.format_content(first_content['content'])   # 将公众号名称填入类属性
     
@@ -232,7 +229,7 @@ class ArticleDetail(BaseSpider):
                 当前文章的详情数据
         """
         # 设置延时
-        self.delay_time()
+        delay_time()
         # 构建关键参数
         r = ''
         for rand in range(0, 16):
@@ -304,8 +301,10 @@ class ArticleDetail(BaseSpider):
                     comments, comments_star_nums)  # 评论，评论点赞
         
 
+if __name__ == '__main__':
+    token = ""
 
-        
+    
 
 
 

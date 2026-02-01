@@ -1,13 +1,19 @@
 """
     爬虫基类模块
     主要通过单篇文章获取信息
+    保存文章信息到excel文件
+    主要涉及4个文件:
+        1. article_list.xlsx
+        2. article_contents.xlsx
+        3. article_details.xlsx
+        4. error_links.xlsx
 """
 
 import pandas as pd  # 修改excel
 import os
 import time
 
-from src.tools import *
+from src.utils.tools import *
 
 
 class SaveToExcel():
@@ -15,19 +21,14 @@ class SaveToExcel():
         功能描述：
             保存文章信息到excel文件
     """
-    def __init__(self,data_path, nickname):
-        self.nickname = nickname
-        # 创建excel文件保存目录
-        self.excel_save_path = os.path.join(data_path, '公众号----' + nickname)
-        # print('excel文件保存目录: ', self.excel_save_path)
-        os.makedirs(self.excel_save_path, exist_ok=True)  # 创建数据存储目录
+    def __init__(self, nickname_path):
+        self.nickname_path = nickname_path
+        self.article_raw_path = os.path.join(self.nickname_path, '文章列表 (article_list).xlsx')
+        self.article_contents_path = os.path.join(self.nickname_path, '文章内容 (article_contents).xlsx')
+        self.article_details_path = os.path.join(self.nickname_path, '文章详情 (article_detiles).xlsx')
+        self.article_error_path = os.path.join(self.nickname_path, '问题链接 (error_links).xlsx')
 
-        self.article_raw_path = os.path.join(self.excel_save_path, '文章列表 (article_list).xlsx')
-        self.article_contents_path = os.path.join(self.excel_save_path, '文章内容 (article_contents).xlsx')
-        self.article_details_path = os.path.join(self.excel_save_path, '文章详情 (article_detiles).xlsx')
-        self.article_error_path = os.path.join(self.excel_save_path, '问题链接 (error_links).xlsx')
-
-    def read_article_list(self, article_list_path):
+    def read_article_list(self):
         """
             功能描述：
                 读取文章列表
@@ -36,13 +37,17 @@ class SaveToExcel():
             输出：
                 文章列表
         """
+        if not os.path.exists(self.article_raw_path):
+            print('文章列表文件不存在')
+            return None
         # 读取文章列表
-        article_list = pd.read_excel(article_list_path)
+        article_list = pd.read_excel(self.article_raw_path)
         all_article_list = []
+        # 数据清洗
         for index, row in article_list.iterrows():
             if pd.isna(row.iloc[6]):
-                    print('检测到存在空数据，跳过')
-                    continue
+                print('检测到存在空数据，跳过')
+                continue
             else:
                 all_article_list.append(row.to_list())
         return all_article_list

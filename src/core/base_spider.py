@@ -12,11 +12,9 @@ from bs4 import BeautifulSoup
 import lxml
 import os
 import re
-import time
-import random
 
 
-from src.tools import *
+from src.utils.tools import *
 
 
 class BaseSpider:
@@ -32,40 +30,6 @@ class BaseSpider:
         self.cookies = {}
         self.nickname = ''      # 公众号名称
         self.public_main_link = ''  # 公众号主页链接
-    
-    def delay_time(self):
-        """
-            功能描述：
-                延时函数, 用于避免频繁请求导致的IP被封禁
-            输入：
-                无
-            输出：
-                无
-        """
-        second_max_num = 7
-        second_min_num = 3
-        second_num = random.uniform(second_min_num, second_max_num)
-        second_num = round(second_num, 3)   # 保留3位小数
-        print('为预防被封禁,开始延时操作，延时时间：' + str(second_num) + '秒')
-
-        time.sleep(second_num)
-    
-    def delay_short_time(self):
-        """
-            功能描述：
-                延时函数, 用于避免频繁请求导致的IP被封禁
-            输入：
-                无
-            输出：
-                无
-        """
-        second_max_num = 1.5
-        second_min_num = 0.1
-        second_num = random.uniform(second_min_num, second_max_num)
-        second_num = round(second_num, 3)   # 保留3位小数
-        print('为预防被封禁, 短延时：' + str(second_num) + '秒')
-
-        time.sleep(second_num)
 
     def get_an_article(self, content_url):
         """
@@ -77,14 +41,11 @@ class BaseSpider:
                 1.状态码
                 2.文章内容
         """
-        res = self.session.get(
-            url=content_url, 
-            headers=self.headers, 
-            cookies=self.cookies, 
-            verify=False)
-        self.delay_short_time()
+        res = self.session.get(url=content_url, headers=self.headers, cookies=self.cookies, verify=False)
+        delay_short_time()
         # 验证请求
-        if 'var createTime = ' in res.text:  # 正常获取到文章内容
+        # if 'var createTime = ' in res.text:  # 正常获取到文章内容
+        if 'wx_follow_nickname' in res.text:
             print('正常获取到文章内容')
             # save_cache(res.text)  # 保存文章内容到缓存文件，方便后续检查内容
             return {'content_flag': 1, 'content': res.text}
@@ -122,27 +83,48 @@ class BaseSpider:
 
         # 整理文章关键信息
         soup = BeautifulSoup(content, 'lxml')
-        self.nickname = soup.find("a", id="js_name").get_text().strip()  # 公众号名称  
+        
+        # 尝试多种方式提取公众号名称（兼容不同版本的微信公众号HTML结构）
+        nickname_element = None
+        # 方法1: 尝试新版结构 - class="wx_follow_nickname"
+        nickname_element = soup.find("div", class_="wx_follow_nickname")
+        if nickname_element:
+            self.nickname = nickname_element.get_text().strip()
+        else:
+            # 方法2: 尝试旧版结构 - id="js_name"
+            nickname_element = soup.find("a", id="js_name")
+            if nickname_element:
+                self.nickname = nickname_element.get_text().strip()
+            else:
+                # 方法3: 尝试通过aria-labelledby属性查找
+                nickname_element = soup.find("div", {"aria-labelledby": "js_wx_follow_nickname"})
+                if nickname_element:
+                    self.nickname = nickname_element.get_text().strip()
+                else:
+                    print("警告: 无法提取公众号名称，尝试使用默认值")
+                    self.nickname = "未知公众号"
+        
         author = soup.find("meta", {"name": "author"}).get("content").strip()  # 文章作者
         article_link = soup.find("meta", property="og:url").get("content")  # 文章链接
-        article_title = soup.find("h1", id="activity-name").get_text().strip()  # 文章标题
+        article_title = soup.find("meta", property="og:title").get("content").strip()  # 文章标题（使用meta标签）
         print('当前文章为>>>> ' + article_title)
 
         # 将文字内容转换为列表形式存储
         original_texts = soup.getText().split('\n')  # 将页面所有的文本内容提取，并转为列表形式
         format_texts = list(filter(lambda x: bool(x.strip()), original_texts))  # filter() 函数可以根据指定的函数对可迭代对象进行过滤
         
-        # 正则方式
-        createTime = re.search(r"var createTime = '(.*?)'.*", content).group(1)  # 文章创建时间
+        # 正则方式提取时间（从 create_time: JsDecode('...') 中提取）
+        createTime = re.search(r"create_time:\s*JsDecode\('(.*?)'\)", content).group(1)  # 文章创建时间
         year, month, day = createTime.split(" ")[0].split("-")      # 年，月，日
         hour, minute = createTime.split(" ")[1].split(":") 
         
-        # 提取公众号biz值, 拼凑主页链接
-        appuin = re.search(r"var appuin = (.*?);", content).group(1)  # 公众号biz值
-        quoted_values = re.findall(r'["\']([^"\']*)["\']', appuin)
-        for value in quoted_values:
-            if value:
-                self.biz = value
+        # 提取公众号biz值（从 var cgiData 的 biz 字段中提取）
+        biz_match = re.search(r"biz:\s*'([^']+)'", content)
+        if biz_match:
+            self.biz = biz_match.group(1)
+        else:
+            print("警告: 无法提取公众号biz值")
+            return None
         # 公众号主页链接
         self.public_main_link = ('https://mp.weixin.qq.com/mp/profile_ext?action=home&__biz=' 
                                  + self.biz + '&scene=124#wechat_redirect')
@@ -166,20 +148,14 @@ class BaseSpider:
             输出：
                 None
         """
-        # 文章图片保存目录
-        nickname_path = os.path.join(data_path, '公众号----' + self.nickname)
-        os.makedirs(nickname_path, exist_ok=True)  # 创建数据存储目录
+        # 公众号数据保存目录
+        nickname_path = set_nickname_path(data_path, self.nickname)
 
-        # 适配Windows系统路径
+        # 文章保存目录
         article_title = content_info['article_title']  # 文章标题
-        article_title_win = re.sub(r'[\\/*?:"<>|].', '_', article_title)  # Windows下标题
-        article_title_win = article_title_win.replace('.', '')  # Windows下标题，去除小数点，防止自动省略报错
-        title_time = content_info['createTime'].replace(':', '_')  # 文章发布时间，Windows下文件名不能包含冒号 
-
-        # 创建图片保存目录
-        img_save_path = os.path.join(nickname_path, title_time + ' ---- ' + article_title_win)
-        os.makedirs(img_save_path, exist_ok=True)
-        print('设置文章图片存储路径>>>> ' + img_save_path)
+        title_time = content_info['createTime']        # 文章发布时间
+        article_path = set_article_path(nickname_path, title_time, article_title)
+        print('设置文章存储路径>>>> ' + article_path)
 
         # 保存该文章图片内容
         images = content_info['content'].split('https://mmbiz.qpic.cn/')
@@ -191,8 +167,8 @@ class BaseSpider:
             image_name = ''
 
             try:
-                # 添加随机延迟，避免请求过快
-                time.sleep(0.5 + random.random())
+                # # 添加随机延迟，避免请求过快
+                # time.sleep(0.5 + random.random())
 
                 # 使用session发送请求，设置超时
                 response = self.session.get(image_url, verify=False, timeout=self.timeout)
@@ -215,6 +191,15 @@ class BaseSpider:
                     print(f"无法下载图片，状态码: {response.status_code}")
             except Exception as e:
                 print(f"下载图片时出错：{str(e)}")
-                time.sleep(1)  # 重试前等待
+                # time.sleep(1)  # 重试前等待
         print('已保存文章图片>>>> ' + article_title)
 
+
+if __name__ == '__main__':
+    url = "https://mp.weixin.qq.com/s/C8MbsIePo9p8fu1904A5KQ"
+    spider = BaseSpider()
+    content_info = spider.get_an_article(url)
+    if content_info['content_flag'] == 1:
+        print('获取文章内容成功')
+        content_info = spider.format_content(content_info['content'])
+        print(content_info)

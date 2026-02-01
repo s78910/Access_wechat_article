@@ -56,10 +56,7 @@ if __name__=="__main__":
                             '(若当前会话已执行过步骤2, 可按回车跳过)\n' + \
                             '请输入: '
             nickname = input(screen_text31)
-            screen_text32 = '\n########## 是否保存图片 ##########\n' + \
-                            '是否保存图片? 是(输入任意值), 否(默认，按回车跳过): '
-            save_img = input(screen_text32)
-            AWA.save_article_content(str(nickname), save_img)
+            AWA.save_article_content(str(nickname))
             
             input("按回车键继续...")
             print('\n' + screen_text)

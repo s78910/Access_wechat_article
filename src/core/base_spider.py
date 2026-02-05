@@ -118,8 +118,9 @@ class BaseSpider:
         year, month, day = createTime.split(" ")[0].split("-")      # 年，月，日
         hour, minute = createTime.split(" ")[1].split(":") 
         
-        # 提取公众号biz值（从 var cgiData 的 biz 字段中提取）
-        biz_match = re.search(r"biz:\s*'([^']+)'", content)
+        # 提取公众号biz值（支持单引号、双引号，以及带默认值的格式）
+        # 匹配格式: biz: "xxx" 或 biz: 'xxx' 或 biz: "xxx" || ""
+        biz_match = re.search(r'biz:\s*["\']([^"\']+)["\']', content)
         if biz_match:
             self.biz = biz_match.group(1)
         else:

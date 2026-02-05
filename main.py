@@ -15,8 +15,8 @@ if __name__=="__main__":
         text = str(input('请输入功能数字: '))
 
         if text == '1':
-            screen_text1 = '########## 默认公众号主页链接为“研招网资讯”，按回车键使用。##########\n' + \
-                           '########## 若需获取其他公众号主页链接，请输入公众号下任意一篇已发布的文章链接。##########\n' + \
+            screen_text1 = '########## 该功能为获取公众号主页链接。##########\n' + \
+                           '########## 请输入公众号下已发布的任意一篇文章的链接。##########\n' + \
                            '请输入文章链接：'
             temporary_url = (input(screen_text1) or 'https://mp.weixin.qq.com/s/4r_LKJu0mOeUc70ZZXK9LA')
             AWA.get_public_main_link(temporary_url)

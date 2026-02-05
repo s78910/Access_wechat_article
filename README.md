@@ -36,7 +36,7 @@ Access_wechat_article/
 │   ├── core/          # 核心代码
 │   │   ├── base_spider.py     # 基础爬虫模块
 │   │   └── wechat_funcs.py    # 微信token模块
-│   ├── save_module    # 存储代码
+│   ├── storage        # 存储代码
 │   │   ├── save_to_html.py    # (核心模块)下载页面内容到本地 html
 │   │   └── save_to_excel.py   # 转 html 到 excel
 │   ├── utils          # 工具代码
@@ -111,6 +111,8 @@ pip install -r requirements.txt
 
 ### 3.4 Playwright内核
 
+使用Playwright提供的浏览器内核进行网页访问。
+
 （1）**激活**环境, 以Windows为例
 
 激活成功后，命令行提示符前会显示 `(.venv)`
@@ -152,7 +154,7 @@ python -c "import os; os.makedirs('.venv/.playwright-browsers', exist_ok=True)"
 playwright install chromium
 ```
 
-**注：**项目已配置自动使用本地浏览器路径（在 `src/all_process.py` 中）
+**注：** 项目已配置自动使用本地浏览器路径（在 `src/all_process.py` 中）
 
 （5）查看安装结果
 

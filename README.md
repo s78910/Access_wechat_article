@@ -1,28 +1,51 @@
-## 微信公众号/文章 获取（Access_wechat_article）
+## Access_wechat_article — 微信公众号文章获取与行为数据提取工具
 
-更新时间：2026-02-05
+**最近更新**：2026-02-06
 
-本项目是基于Python语言的爬虫程序，支持对微信公众号文章内容获取
+**Access_WeChat_Article** 是一种基于Python 的技术工具，用于辅助研究人员系统性地处理微信公众号公开文章及其元数据（如阅读趋势、互动指标等）。该工具强调**可控性、可复现性与科研可用性**，可用于传播学、社会科学、公共舆论、数据挖掘等领域的**学术研究**与**定量分析**。
 
-目前支持 Windows / Linux 开箱即用，**建议使用虚拟环境运行项目**
+>  📌 **注意事项**   
+>
+> 本项目为科研工具，**仅限学术研究、非商业用途**使用。
+>
+> 项目本身不提供、不存储、也不传播任何受著作权保护的内容。
+>
+> 使用者必须遵守微信平台服务协议、《网络安全法》及相关法律法规，不得用于侵犯他人著作权、隐私权、商业竞争或其他非法目的。任何违反法律法规的使用行为与本项目无关，使用者自行承担全部法律责任。
 
-如果感兴趣，请 **Fork** 项目后自行研究使用
+---
 
-使用过程中如遇到错误，欢迎提交 [issues](https://github.com/yeximm/Access_wechat_article/issues) 来讨论
+## 📦 开发指南与贡献方式
+
+本项目支持 Windows / Linux 开箱即用，请 **Fork** 项目后自行研究使用，**建议使用虚拟环境运行项目**。
+
+欢迎对自动化技术、数据结构化方案和性能优化策略进行探讨与改进：
+
+- 提交  [issues](https://github.com/yeximm/Access_wechat_article/issues) 讨论技术细节
+- 提交 pull request 优化代码
+- 引入自动化测试与 CI/CD 流水线增强项目质量
 
 **注**：请在 [GitHub](https://github.com/) 平台提交 [issues](https://github.com/yeximm/Access_wechat_article/issues)
 
-## 1 主要功能
+## 1 适用场景与主要功能
+
+本工具主要服务于以下**科研场景**：
+
+- 长期追踪特定议题/机构的微信传播表现 
+- 分析公众号内容生产与受众互动规律
+- 研究虚假信息传播、舆论极化、议程设置等传播现象
+- 构建微信生态数据集用于机器学习/自然语言处理任务
+
+**主要功能**包括：
 
 - 获取**公众号主页链接**，通过微信内置浏览器可直接打开
 - 获取公众号**已发布**的文章列表（**微信公众号**下的历史文章）
 - 批量下载公众号文章的**网页文本数据**
-- 获取微信公众号文章的**所有信息**，如阅读量、点赞数、转发数、评论、评论点赞等信息。
+- 获取微信公众号文章的**所有信息**，如阅读量、点赞数、转发数、评论、评论点赞等信息
 
-## 2 项目开发环境及工具
+## 2 技术环境及工具
 
-- 系统环境：Windows 10/11 ×64
-- 程序运行环境：python 3.13 或更高版本
+- 操作系统：**Windows 10/11 ×64** 或 **Linux**
+- Python 版本：>= 3.13
 - 涉及应用：微信**PC版**，当前项目已适配的微信版本：**`4.1.5.16`**
 - 使用工具：[Fiddler Classic](https://www.telerik.com/fiddler/fiddler-classic)，当前项目适配的Fiddler Classic版本：**`v5.0.20253.3311`**
 
@@ -43,6 +66,10 @@ Access_wechat_article/
 │   └── all_process.py # 流程汇总
 ├── main.py               # 项目主文件
 ├── requirements.txt      # 项目依赖列表
+├── .python-version		  # 添加uv支持
+├── pyproject.toml		  # 添加uv支持
+├── uv.lock				  # 添加uv支持
+├── .gitignore			  # 添加gitignore
 ├── LICENSE       # 许可凭证
 ├── README/       # 项目说明文档资源（图片、文件）
 └── README.md     # 项目说明文档
@@ -60,6 +87,8 @@ Access_wechat_article/
   - 存储库快照等同于 [Releases](https://github.com/yeximm/Access_wechat_article/releases) 中的 [Source Code (zip)](https://github.com/yeximm/Access_wechat_article/archive/refs/heads/master.zip) 等，包含 `README` 等内容
 
 ### 3.2 Python环境配置
+
+此处提供原生python虚拟环境的创建流程，uv 安装依赖请使用 [`uv sync`](https://www.runoob.com/python3/uv-tutorial.html)，安装好依赖后请参考 **3.4 Playwright内核**。
 
 （1）创建虚拟环境
 

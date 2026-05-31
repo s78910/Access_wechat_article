@@ -113,8 +113,28 @@ class BaseSpider:
         original_texts = soup.getText().split('\n')  # 将页面所有的文本内容提取，并转为列表形式
         format_texts = list(filter(lambda x: bool(x.strip()), original_texts))  # filter() 函数可以根据指定的函数对可迭代对象进行过滤
         
-        # 正则方式提取时间（从 create_time: JsDecode('...') 中提取）
-        createTime = re.search(r"create_time:\s*JsDecode\('(.*?)'\)", content).group(1)  # 文章创建时间
+        # 正则方式提取时间（支持多种格式）
+        createTime = None
+        # 尝试格式1: create_time: JsDecode('...')
+        match = re.search(r"create_time:\s*JsDecode\('(.*?)'\)", content)
+        if match:
+            createTime = match.group(1)
+        else:
+            # 尝试格式2: var createTime = '...'
+            match = re.search(r"var createTime\s*=\s*'(.*?)'", content)
+            if match:
+                createTime = match.group(1)
+            else:
+                # 尝试格式3: "createTime":"..."
+                match = re.search(r'"createTime"\s*:\s*"(.*?)"', content)
+                if match:
+                    createTime = match.group(1)
+
+        if not createTime:
+            print("警告: 无法提取文章创建时间，使用当前时间作为默认值")
+            from datetime import datetime
+            createTime = datetime.now().strftime("%Y-%m-%d %H:%M")
+
         year, month, day = createTime.split(" ")[0].split("-")      # 年，月，日
         hour, minute = createTime.split(" ")[1].split(":") 
         

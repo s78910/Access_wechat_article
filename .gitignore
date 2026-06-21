@@ -223,5 +223,26 @@ $RECYCLE.BIN/
 # End of https://www.toptal.com/developers/gitignore/api/windows,visualstudiocode,python
 
 # Custom rules (everything added below won't be overriden by 'Generate .gitignore File' if you use 'Update' option)
-all_data/
-old/
+old-version/
+# vue 页面构建目录
+vue-project/
+# 数据存储目录
+storages/
+# 运行时数据目录：保留 data/custom.yaml，数据库、日志和临时文件不纳入版本管理
+data/*
+!data/
+!data/custom.yaml
+# 临时文件
+tmp/    
+# 测试文件
+tests/
+
+# 环境
+.mitmproxy
+
+# sqlite数据库文件
+data/awa_public.sqlite3
+# 开发入口
+dev_server.py
+# AGENTS规则
+AGENTS.md

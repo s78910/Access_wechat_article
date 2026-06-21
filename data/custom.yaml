@@ -1,0 +1,27 @@
+# 用户可修改配置。修改后重启软件生效。
+
+# 内容自动保存：true 时，mitm 捕获到文章列表后写入 SQLite。
+auto_save_content: true
+
+# 自动清理临时文件：当前先保留配置项，后续接入临时文件清理逻辑。
+auto_clean_temp_files: true
+
+# 开启代理：true 时，打开软件后自动启动 mitm 监听。
+auto_start_proxy: true
+
+# 当前开发版本号，供主服务页运行环境区域显示。
+version: 2.0.0
+
+# 系统代理：true 时，开启代理后自动接管系统代理；软件关闭时恢复原代理。
+enable_system_proxy: true
+
+proxy:
+  host: 127.0.0.1
+  port: 18000
+  startup_delay_seconds: 3
+  verification_url: 'http://mitm.it/'
+  confdir: ../.mitmproxy
+  ssl_insecure: true
+
+storage:
+  db_path: awa_public.sqlite3

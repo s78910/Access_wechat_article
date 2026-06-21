@@ -153,6 +153,8 @@ flowchart LR
 <p align="center">
   <img src="README/assets/screenshots/settings.png" alt="系统配置页面运行图" width="92%">
 </p>
+
+
 ---
 
 ## 支持与鼓励

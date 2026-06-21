@@ -6,9 +6,8 @@
 
 ```text
 src/webview 静态页面
-  -> WebviewStaticServer 本地静态服务
   -> pywebview 桌面窗口
-  -> /api 代理到 FastAPI
+  -> FastAPI 同源加载页面和 /api 接口
   -> WebviewApi / TaskManager
 ```
 
@@ -43,10 +42,10 @@ cd D:\a_personal\Github-240809_Access_wechat_article
 启动流程：
 
 1. Python 检查 `src/webview/index.html` 是否存在。
-2. 启动本地静态服务，默认地址为 `127.0.0.1:8765`。
-3. 启动 FastAPI 服务，默认地址为 `127.0.0.1:8766`。
-4. pywebview 打开 `http://127.0.0.1:8765/index.html`。
-5. 页面业务请求通过 `/api/...` 代理到 FastAPI。
+2. 启动 FastAPI 服务，默认地址为 `127.0.0.1:8766`。
+3. FastAPI 挂载 `src/webview` 静态页面和 `/api/...` 业务接口。
+4. pywebview 打开 `http://127.0.0.1:8766/index.html`。
+5. 页面业务请求继续调用同源 `/api/...`。
 
 ## 启动独立后端服务
 

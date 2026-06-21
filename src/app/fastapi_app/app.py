@@ -8,9 +8,12 @@ from typing import Any
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from src.app.pywebview_app.webview_api import WebviewApi
+from src.app.pywebview_app.config import WEBVIEW_DIR
 from src.config.runtime_config import load_runtime_config
 from src.core.config import AppRuntimeConfig
 from src.modules.storage.archive_delete_service import ArchiveDeleteService
@@ -274,7 +277,29 @@ def create_app(api: WebviewApi | None = None, runtime_config: AppRuntimeConfig |
     def test_proxy_connection():
         return parse_api_payload(webview_api.test_proxy_connection())
 
+    mount_webview_static_files(app)
+
     return app
+
+
+def mount_webview_static_files(app: FastAPI, webview_dir: Path = WEBVIEW_DIR) -> None:
+    """让 FastAPI 同时提供 Vue 构建产物，pywebview 不再需要单独静态服务。"""
+    if not (webview_dir / "index.html").exists():
+        return
+
+    assets_dir = webview_dir / "assets"
+    if assets_dir.exists():
+        app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="webview-assets")
+
+    @app.get("/")
+    def serve_webview_root():
+        return FileResponse(webview_dir / "index.html")
+
+    @app.get("/index.html")
+    def serve_webview_index():
+        return FileResponse(webview_dir / "index.html")
+
+    app.mount("/", StaticFiles(directory=str(webview_dir)), name="webview-static")
 
 
 class CertificateDeletePayload(BaseModel):

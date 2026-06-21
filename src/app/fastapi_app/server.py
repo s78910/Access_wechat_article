@@ -31,6 +31,10 @@ class FastApiServer:
     def url(self) -> str:
         return f"http://{self.host}:{self.port}"
 
+    @property
+    def webview_url(self) -> str:
+        return f"{self.url}/index.html"
+
     def start(self) -> None:
         if self._server is not None:
             return

@@ -11,7 +11,7 @@ src/app/fastapi_app/
   FastAPI 应用、路由和嵌入式 uvicorn 服务
 
 src/app/pywebview_app/
-  pywebview 桌面壳、WebviewApi、本地静态服务、窗口尺寸工具
+  pywebview 桌面壳、WebviewApi、窗口尺寸工具，以及旧静态服务 fallback
 
 src/webview/
   Vue 构建后的静态页面，供 pywebview 加载
@@ -47,9 +47,9 @@ Chrome
 main.py
   -> WebviewApi
   -> FastApiServer 127.0.0.1:8766
-  -> WebviewStaticServer 127.0.0.1:8765
-  -> pywebview 加载 src/webview/index.html
-  -> /api 由静态服务代理到 FastAPI
+  -> FastAPI 挂载 src/webview 静态页面
+  -> pywebview 加载 http://127.0.0.1:8766/index.html
+  -> 前端同源调用 /api
 ```
 
 桌面启动命令：
@@ -85,6 +85,7 @@ npm run build
 - Vue 页面业务调用统一走 `vue-project/src/bridge/pythonApi.ts`。
 - `window.pywebview.api` 只保留桌面壳特有能力，例如窗口尺寸调整。
 - 现阶段 FastAPI 路由复用 `WebviewApi`，避免重复实现 TaskManager 调用逻辑；后续可逐步抽服务层。
+- pywebview 默认不再启动独立 `8765` 静态服务，减少一层 `/api` 转发和一处端口占用。
 
 ## 后续演进建议
 

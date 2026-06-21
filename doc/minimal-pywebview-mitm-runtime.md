@@ -6,8 +6,7 @@
 
 ```text
 pywebview UI
-  -> WebviewStaticServer
-  -> /api 代理到 FastAPI
+  -> FastAPI 直接提供 index.html、静态资源和 /api
   -> WebviewApi
   -> TaskManager
   -> ProcessManager
@@ -20,7 +19,8 @@ pywebview UI
 
 - `src/app/fastapi_app/`：FastAPI 应用、路由和嵌入式 uvicorn 服务。
 - `src/app/pywebview_app/webview_api.py`：暴露给 Vue / FastAPI 复用的本地业务 API。
-- `src/app/pywebview_app/webview_server.py`：pywebview 静态文件服务，并把 `/api` 代理到 FastAPI。
+- `src/app/fastapi_app/`：同时提供 `/api` 业务接口和 `src/webview` 静态页面。
+- `src/app/pywebview_app/webview_server.py`：旧静态服务兼容实现，保留为 fallback，不再作为默认桌面链路。
 - `src/webview/`：Vue 构建后的静态页面。
 - `data/custom.yaml`：用户可修改的运行配置。
 - `src/core/task_manager.py`：任务总控，负责启动、停止、状态和日志。

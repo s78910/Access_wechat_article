@@ -27,13 +27,13 @@ def calculate_outer_size_for_content(
     content_height: int,
     min_size: Size,
 ) -> Size:
-    """根据网页内容高度，计算需要设置到原生窗口外框上的尺寸。"""
-    target_width, min_height = min_size
-    _outer_width, outer_height = outer_size
+    """根据网页内容高度计算外框尺寸，同时保留用户手动拉伸后的窗口宽度。"""
+    min_width, min_height = min_size
+    outer_width, outer_height = outer_size
     _client_width, client_height = client_size
 
     frame_height = max(0, outer_height - client_height)
+    next_width = max(min_width, outer_width)
     next_height = max(min_height, int(round(content_height)) + frame_height)
 
-    # 当前需求是“打开后窗口宽度固定 1200，页面按此宽度缩放”，因此高度自适应时也要把外框宽度压回配置宽度。
-    return target_width, next_height
+    return next_width, next_height

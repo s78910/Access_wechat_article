@@ -1,447 +1,143 @@
-## Access_wechat_article — 微信公众号文章获取与行为数据提取工具
+<h1 align="center">Access WeChat Article</h1>
 
-**最近更新**：2026-05-31
+<p align="center">
+  <strong>面向学术研究与公开文章材料整理的科研辅助工具</strong>
+</p>
 
-**Access_WeChat_Article** 是一种基于Python 的技术工具，用于辅助研究人员系统性地处理微信公众号公开文章及其元数据（如阅读趋势、互动指标等）。该工具强调**可控性、可复现性与科研可用性**，可用于传播学、社会科学、公共舆论、数据挖掘等领域的**学术研究**与**定量分析**。
+<p align="center">
+  <img src="https://img.shields.io/badge/Python-3.13-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python 3.13">
+  <img src="https://img.shields.io/badge/requests-http-009688?style=flat-square&logo=python&logoColor=white" alt="requests http">
+  <img src="https://img.shields.io/badge/Vue_3-webview-42B883?style=flat-square&logo=vuedotjs&logoColor=white" alt="Vue 3 webview">
+  <img src="https://img.shields.io/badge/SQLite-storage-003B57?style=flat-square&logo=sqlite&logoColor=white" alt="SQLite storage">
+  <img src="https://img.shields.io/badge/License-CC_BY--NC--SA_4.0-6C5CE7?style=flat-square" alt="License CC BY-NC-SA 4.0">
+</p>
 
->  📌 **注意事项**   
+<p align="center">
+  <img src="./README/6b365eb7-fdc7-4031-bbda-ffc26196033e.png" alt="Access WeChat Article research workbench hero" width="92%">
+</p>
+
+Access WeChat Article 是一个面向学术科研场景的公开文章研究辅助项目，主要用于帮助研究者围绕微信公众号公开文章进行材料整理、字段记录、任务管理和后续分析准备。
+
+它的目标不是替代研究判断，也不是提供面向商业化或大规模自动化用途的工具链，而是为传播学、社会科学、公共议题研究、内容分析和数据整理工作提供一个更清晰、可复核、可持续维护的本地研究工作台。
+
+>  📌**注意事项**
 >
-> 本项目为科研工具，**仅限学术研究、非商业用途**使用。
+>  本项目为科研辅助工具，**仅限学术研究、个人学习和非商业用途**使用。
 >
-> 项目本身不提供、不存储、也不传播任何受著作权保护的内容。
+>  项目本身不提供、不存储、不传播任何受著作权保护的内容，也不鼓励任何规避平台规则或侵犯他人权益的使用方式。
 >
-> 使用者必须遵守微信平台服务协议、《网络安全法》及相关法律法规，不得用于侵犯他人著作权、隐私权、商业竞争或其他非法目的。任何违反法律法规的使用行为与本项目无关，使用者自行承担全部法律责任。
+>  使用者必须遵守微信平台服务协议、《网络安全法》及相关法律法规，不得用于侵犯他人著作权、隐私权、商业竞争或其他非法目的。
+>
+>  任何违反法律法规、平台规则或研究伦理的使用行为均与本项目无关，使用者应自行承担全部责任。
 
 ---
 
-## 📦 开发指南与贡献方式
+## 项目定位
 
-本项目支持 Windows / Linux 开箱即用，请 **Fork** 项目后自行研究使用，**建议使用虚拟环境运行项目**。
+在公众号公开文章相关研究中，研究者常常需要面对大量材料：文章标题、发布时间、账号信息、主题线索、互动指标、任务状态和后续分析字段分散在不同位置，手工整理成本高，也容易缺少一致的记录标准。
 
-欢迎对自动化技术、数据结构化方案和性能优化策略进行探讨与改进：
+Access WeChat Article 希望解决的是这个问题：把公开文章研究材料整理成更稳定的结构，帮助研究者把注意力放回研究问题本身。
 
-- 提交  [issues](https://github.com/yeximm/Access_wechat_article/issues) 讨论技术细节
-- 提交 pull request 优化代码
-- 引入自动化测试与 CI/CD 流水线增强项目质量
+它更适合被理解为一个“研究材料管理工作台”，而不是一个单纯的技术脚本。
 
-**注**：请在 [GitHub](https://github.com/) 平台提交 [issues](https://github.com/yeximm/Access_wechat_article/issues)
+---
 
-## 1 适用场景与主要功能
+## 核心能力
 
-本工具主要服务于以下**科研场景**：
+| 能力 | 说明 |
+| --- | --- |
+| 研究材料整理 | 围绕微信公众号公开文章建立清晰的材料记录入口，减少零散手工整理成本 |
+| 字段结构化 | 将标题、账号、发布时间、研究类型、任务状态等字段整理为后续分析更容易使用的形式 |
+| 任务状态管理 | 帮助研究者区分已处理、待处理、异常或需要复核的研究材料 |
+| 研究过程辅助 | 为内容分析、传播研究、议题追踪和数据清洗提供前置材料支持 |
+| 桌面化交互 | 通过本地应用界面组织任务、配置、进度和记录，降低纯命令行使用门槛 |
 
-- 长期追踪特定议题/机构的微信传播表现 
-- 分析公众号内容生产与受众互动规律
-- 研究虚假信息传播、舆论极化、议程设置等传播现象
-- 构建微信生态数据集用于机器学习/自然语言处理任务
+---
 
-**主要功能**包括：
+## 适合的学术场景
 
-- 获取**公众号主页链接**，通过微信内置浏览器可直接打开
-- 获取公众号**已发布**的文章列表（**微信公众号**下的历史文章）
-- 批量下载公众号文章的**网页文本数据**
-- 获取微信公众号文章的**所有信息**，如阅读量、点赞数、转发数、评论、评论点赞等信息
+- 传播学研究中，对特定公众号、议题或时间段的公开文章进行材料整理。
+- 社会科学研究中，对公共议题、机构传播、媒体表达和受众互动线索进行初步记录。
+- 内容分析研究中，为编码表、主题标注、文本清洗和后续统计分析准备基础材料。
+- 舆情与公共传播研究中，对公开文章的发布时间、内容主题和传播表现进行阶段性观察。
+- 课程论文、毕业论文、课题项目中，需要建立可复核的公开材料整理流程。
 
-## 2 技术环境及工具
+---
 
-- 操作系统：**Windows 10/11 ×64** 或 **Linux**
-- Python 版本：>= 3.13
-- 涉及应用：微信**PC版**，当前项目已适配的微信版本：**`4.1.5.16`**
-- 使用工具：[Fiddler Classic](https://www.telerik.com/fiddler/fiddler-classic)，当前项目适配的Fiddler Classic版本：**`v5.0.20253.3311`**
+## 研究工作流
 
-**目录架构**
-
-```bash
-Access_wechat_article/
-├── .venv/             # 虚拟环境目录
-├── src/               # 源代码目录 
-│   ├── core/          # 核心代码
-│   │   ├── base_spider.py     # 基础爬虫模块
-│   │   └── wechat_funcs.py    # 微信token模块
-│   ├── storage        # 存储代码
-│   │   ├── save_to_html.py    # (核心模块)下载页面内容到本地 html
-│   │   └── save_to_excel.py   # 转 html 到 excel
-│   ├── utils          # 工具代码
-│   │   └── tools.py           # 常用工具
-│   └── all_process.py # 流程汇总
-├── main.py               # 项目主文件
-├── requirements.txt      # 项目依赖列表
-├── .python-version		  # 添加uv支持
-├── pyproject.toml		  # 添加uv支持
-├── uv.lock				  # 添加uv支持
-├── .gitignore			  # 添加gitignore
-├── LICENSE       # 许可凭证
-├── README/       # 项目说明文档资源（图片、文件）
-└── README.md     # 项目说明文档
+```mermaid
+flowchart LR
+    A["确定研究问题"] --> B["选择公开研究对象"]
+    B --> C["整理文章材料"]
+    C --> D["形成结构化记录"]
+    D --> E["开展内容分析"]
+    E --> F["支撑论文写作或课题研究"]
 ```
 
-## 3 程序使用
-
-### 3.1下载 / Download
-
-- 下载地址：[https://github.com/yeximm/Access_wechat_article/releases](https://github.com/yeximm/Access_wechat_article/releases)
-  - 👆👆👆以上为本项目发布页地址，选取所需版本下载即可。
-
-
-- 存储库快照：[Github_master](https://github.com/yeximm/Access_wechat_article/archive/refs/heads/master.zip)
-  - 存储库快照等同于 [Releases](https://github.com/yeximm/Access_wechat_article/releases) 中的 [Source Code (zip)](https://github.com/yeximm/Access_wechat_article/archive/refs/heads/master.zip) 等，包含 `README` 等内容
-
-### 3.2 Python环境配置
-
-此处提供原生python虚拟环境的创建流程，uv 安装依赖请使用 [`uv sync`](https://www.runoob.com/python3/uv-tutorial.html)，安装好依赖后请参考 **3.4 Playwright内核**。
-
-（1）创建虚拟环境
-
-```bash
-python -m venv .venv
-```
-
-`venv`指定存放环境的目录，一般使用 `venv`，这是一个不成文的规定。
-
-（2）**激活**环境
-
-- Windows
-
-  ```bash
-  .\.venv\Scripts\activate
-  ```
-
-- Unix/macOS
-
-  ```bash
-  source .venv/bin/activate
-  ```
-
-（3）退出环境
-
-```bash
-deactivate
-```
-
-### 3.3 安装项目依赖包
-
-`requirements.txt`中包含所需python包文件名称，用来批量安装python包文件
-
-安装命令：
-
-```bash
-pip install -r requirements.txt
-```
-
-> 注：使用 pip 命令在虚拟环境中安装 python 包时可能会出现 **false 目录**，该目录是 pip 的缓存文件，可直接删除。
->
-> 使用 `pip cache dir` 查看 pip 的缓存目录，即：
->
-> ```bash
-> pip cache dir
-> # your_project_dir\access_wechat_article\false
-> ```
-
-### 3.4 Playwright内核
-
-使用Playwright提供的浏览器内核进行网页访问。
-
-（1）**激活**环境, 以Windows为例
-
-激活成功后，命令行提示符前会显示 `(.venv)`
-
-```bash
-.\.venv\Scripts\activate
-```
-
-（2）创建浏览器安装目录，安装在`(.venv)`目录下
-
-```bash
-# 使用 Python 创建目录并安装
-python -c "import os; os.makedirs('.venv/.playwright-browsers', exist_ok=True)"
-```
-
-（3）手动设置环境变量
-
-- **Windows PowerShell**
-
-  - ```bash
-    $env:PLAYWRIGHT_BROWSERS_PATH="$PWD\.venv\.playwright-browsers"
-    ```
-
-- **Windows CMD**
-
-  - ```bash
-    set PLAYWRIGHT_BROWSERS_PATH=%CD%\.venv\.playwright-browsers
-    ```
-
-- **Linux/Mac**
-
-  - ```bash
-    export PLAYWRIGHT_BROWSERS_PATH="$(pwd)/.venv/.playwright-browsers"
-    ```
-
-（4）**安装 chromium 内核**
-
-```bash
-playwright install chromium
-```
-
-**注：** 项目已配置自动使用本地浏览器路径（在 `src/all_process.py` 中）
-
-（5）查看安装结果
-
-打开`.venv\.playwright-browsers`目录，查看目录名称中是否包含 `chromium`
-
-（6）**卸载步骤**（安装错误时使用）
-
-如果需要卸载Playwright浏览器内核，请先**手动设置环境变量**
-
-这里以 Windows PowerShell 为例，运行：
-
-```bash
-# 进入虚拟环境
-.\.venv\Scripts\activate
-
-# 手动设置环境变量
-$env:PLAYWRIGHT_BROWSERS_PATH="$PWD\.venv\.playwright-browsers"
-
-# 卸载所有浏览器
-playwright uninstall
-```
-
-### 3.5 运行参数
-
-1. 项目主文件为：`main.py`，其功能调用方式详见于此。
-   项目中**生成文件的存储路径**为：`./all_data`（该目录由程序**自动创建**）
-2. 运行命令：
-   
-   1. 首先进入**虚拟环境**（详见**激活**虚拟环境）
-   
-   2. 安装python包文件（如已安装则进行下一步）
-   
-   3. 在项目目录运行：
-   
-      - ```bash
-        python main.py
-        ```
-   
-   4. 根据控制台提示输入
-   
-   5. 如需**自定义功能**，参照`main.py`中的函数调用方式自行编写。
-
-## 4 功能示例
-
-### 4.1 功能1
-
-```bash
-欢迎使用, 请输入数字键！
-        数字键1: 获取公众号主页链接
-        数字键2: 获取公众号已发布的文章列表
-        数字键3: 下载公众号文章内容 (默认下载 "文章列表" 中的所有文章)
-        数字键4: 同功能3, 另外获取每篇文章的 "阅读量"、"点赞数"等信息
-                 (请注意请求间隔，若请求太多太快可能会触发封禁!!)
-        输入其他任意字符退出!
-请输入功能数字: 1
-```
-
-**程序执行结果**
-
-```bash
-########## 请输入公众号下任意一篇已发布的文章链接。##########
-请输入文章链接：https://mp.weixin.qq.com/s/ZNXDr2ErJno9-NdS4RYDCg
-为预防被封禁, 短延时：0.906秒
-正常获取到文章内容
-当前文章为>>>> 法国总统马克龙抵达北京开始访华
-公众号名称：新华网
-公众号主页: https://mp.weixin.qq.com/mp/profile_ext?action=home&__biz=MzA4MjQxNjQzMA==&scene=124#wechat_redirect
-将此链接 （￣︶￣）↗ ↗ ↗ ↗ 粘贴发送到 "微信PC端-文件传输助手"
-按回车键继续...
-```
-
-### 4.2 功能2
-
-```bash
-请输入数字键！
-        数字键1: 获取公众号主页链接
-        数字键2: 获取公众号已发布的文章列表
-        数字键3: 下载公众号文章内容 (默认下载 "文章列表" 中的所有文章)
-        数字键4: 同功能3, 另外获取每篇文章的 "阅读量"、"点赞数"等信息
-                 (请注意请求间隔，若请求太多太快可能会触发封禁!!)
-        输入其他任意字符退出!
-请输入功能数字: 2
-```
-
-**输入参数**
-
-```bash
-########## 以下内容需要用到fiddler工具 ##########
- (1) 在微信客户端打开步骤1获取到的链接,
- (2) 在fiddler中查看——主机地址为https://mp.weixin.qq.com, URL地址为: /mp/profile_ext?acti
- (3) 选中此项后按快捷键: Ctrl+U 复制该网址到剪贴板, 将内容粘贴到此处
-请输入复制的链接(づ￣ 3￣)づ：https://mp.weixin.qq.com/mp/profile_ext?xxxxxx...
-```
-
-```bash
-########## 获取指定页数的文章列表 ##########
-一页文章数量约 15 篇, 请根据实际情况估算 (即: input * 15 = 文章数量)
-例如: 获取前3页的文章列表, 请输入 3
-      公众号下全部文章列表, 请输入: 0  (注意: 若输入0, 全部列表可能需要较长时间, 视文章数量而定)
-      公众号下第2页到第5页的文章列表, 请输入 2-5
-请输入需要下载的页数(默认: 1): 2-5
-```
-
-**程序执行结果**
-
-```bash
-参数齐全，开始获取文章信息，默认状态获取全部文章
-获取 2 至 5 页的文章列表
-正在获取第 2 页文章列表
-该页包含 15 篇文章
-为预防被封禁,开始延时操作，延时时间：4.962秒
-正在获取第 3 页文章列表
-该页包含 13 篇文章
-为预防被封禁,开始延时操作，延时时间：3.599秒
-正在获取第 4 页文章列表
-该页包含 14 篇文章
-为预防被封禁,开始延时操作，延时时间：6.705秒
-正在获取第 5 页文章列表
-该页包含 12 篇文章
-为预防被封禁,开始延时操作，延时时间：3.075秒
-已检测到公众号名称: 新华网
-
-2025-12-03 17:37:16 存储路径>>>> all_data\公众号----新华网\文章列表 (article_list).xlsx
-文章列表保存成功
-按回车键继续...
-```
-
-### 4.3 功能3
-
-默认下载网页所有内容存储为 `html` 形式！
-
-```bash
-请输入数字键！
-        数字键1: 获取公众号主页链接
-        数字键2: 获取公众号已发布的文章列表
-        数字键3: 下载公众号文章内容 (默认下载 "文章列表" 中的所有文章)
-        数字键4: 同功能3, 另外获取每篇文章的 "阅读量"、"点赞数"等信息
-                 (请注意请求间隔，若请求太多太快可能会触发封禁!!)
-        输入其他任意字符退出!
-请输入功能数字: 3
-```
-
-**输入参数**
-
-```bash
-########## 保存公众号文章内容 ##########
-输入: 已下载文章列表的公众号名称 (例如: 研招网资讯) 或 公众号的一篇文章链接
-(若当前会话已执行过步骤2, 可按回车跳过)
-请输入: 新华网
-```
-
-**程序执行结果**
-
-```bash
-为预防被封禁, 短延时：1.043秒
-正常获取到文章内容
-当前文章为>>>> “时速能破150公里”？这种“爆改”太吓人！
-为预防被封禁, 短延时：0.988秒
-正常获取到文章内容
-当前文章为>>>> 流感季，发烧了怎么办？
-...
-正常获取到文章内容
-当前文章为>>>> 武装袭击事件，中国公民3死1伤！我使馆紧急提醒→
-2025-12-03 17:40:43 存储路径>>>> all_data\公众号----新华网\文章内容 (article_contents).xlsx
-2025-12-03 17:40:43 存储路径>>>> all_data\公众号----新华网\问题链接 (error_links).xlsx
-按回车键继续...
-```
-
-### 4.4 功能4
-
-```bash
-请输入数字键！
-        数字键1: 获取公众号主页链接
-        数字键2: 获取公众号已发布的文章列表
-        数字键3: 下载公众号文章内容 (默认下载 "文章列表" 中的所有文章)
-        数字键4: 同功能3, 另外获取每篇文章的 "阅读量"、"点赞数"等信息
-                 (请注意请求间隔，若请求太多太快可能会触发封禁!!)
-        输入其他任意字符退出!
-请输入功能数字: 4
-```
-
-**输入参数**
-
-```bash
-########## 保存公众号文章详情 ##########
-以下内容需要用到fiddler工具, 参考步骤2将 URL地址 粘贴到此处
-请输入复制的链接(づ￣ 3￣)づ: https://mp.weixin.qq.com/mp/profile_ext?xxxxxx...
-```
-
-**程序执行结果**
-
-```bash
-参数齐全，开始获取文章信息，默认状态获取全部文章
-获取 1 至 1 页的文章列表
-正在获取第 1 页文章列表
-该页包含 13 篇文章
-为预防被封禁,开始延时操作，延时时间：5.049秒
-为预防被封禁, 短延时：0.148秒
-正常获取到文章内容
-当前文章为>>>> 湖南省人大常委会原党组成员、副主任叶红专被查
-为预防被封禁, 短延时：0.702秒
-...
-正常获取到文章内容
-当前文章为>>>> 武装袭击事件，中国公民3死1伤！我使馆紧急提醒→
-为预防被封禁,开始延时操作，延时时间：5.352秒
-2025-12-03 17:48:43请求完成, 文章标题为: 武装袭击事件，中国公民3死1伤！我使馆紧急提醒→
-2025-12-03 17:48:44 存储路径>>>> all_data\公众号----新华网\文章详情 (article_detiles).xlsx
-2025-12-03 17:48:44 存储路径>>>> all_data\公众号----新华网\问题链接 (error_links).xlsx
-按回车键继续...
-```
-
-## 5 鼓励一下
-
-开源不易，若此项目有帮到你，望你能动用你的发财小手**Star**☆一下。
-
-如有遇到代码方面的问题，欢迎一起讨论，你的鼓励是这个项目继续更新的最大动力！
-
-<p align = "center">    
-<img  src="https://github.com/yeximm/Access_wechat_article/blob/master/README/qrcode_1749894334903.jpg" width="300" />
+<p align="center">
+  <img src="README/assets/research-workflow-overview.png" alt="Research workflow overview" width="86%">
 </p>
 
+> 图片占位提示词：生成一张 16:9 横向科研工作流示意图。主题是“公开文章研究流程”。从左到右依次展示：确定研究问题、选择研究对象、整理文章材料、形成结构化记录、开展内容分析、支撑论文写作。每个节点使用简洁学术风格图标，例如问号、资料夹、表格、标签、图表、论文页面。画面不要出现异常网络操作、攻击、服务器入侵等视觉暗示。整体风格清爽、学术、可信，适合 README 中展示项目用途。
 
+---
 
-另外，十分感谢大家对于本项目的关注。
+## 功能概览
 
-[![Stargazers repo roster for @yeximm/Access_wechat_article](https://reporoster.com/stars/yeximm/Access_wechat_article)](https://github.com/yeximm/Access_wechat_article/stargazers)
-[![Forkers repo roster for @yeximm/Access_wechat_article](https://reporoster.com/forks/yeximm/Access_wechat_article)](https://github.com/yeximm/Access_wechat_article/network/members)
+### 研究字段记录
 
-## 6 程序流程图
+项目围绕公开文章研究常用字段组织信息，例如账号名称、文章标题、发布时间、文章链接、研究类型、处理状态和时间记录等。字段设计服务于后续检索、筛选和统计，而不是追求复杂的数据展示。
 
-![wechat_article_drawio](./README/1769576432444.svg)
+### 任务与进度管理
 
-### 6.1 基础爬虫模块
+研究材料整理往往不是一次完成的工作。项目通过任务状态、运行记录和历史视图，帮助研究者持续跟踪研究材料处理进度，减少重复劳动和遗漏。
 
-![image-20251203185742977](README/image-20251203185742977.png)
+### 桌面端研究工作台
 
-### 6.2 获取文章列表模块（需token）
+项目采用本地桌面应用形态，尽量把研究任务配置、材料列表、运行状态和基础记录集中在一个界面中。对于不希望长期操作命令行的研究者，这种方式更直观。
 
-![image-20251203185757196](README/image-20251203185757196.png)
+### 后续分析准备
 
-### 6.3 文章内容获取
+项目重点服务于研究前期的数据准备和材料管理。整理后的结构化记录可继续用于内容分析、人工编码、统计汇总、文本处理或论文材料核对。
 
-![image-20251203185810439](README/image-20251203185810439.png)
+<p align="center">
+  <img src="README/assets/desktop-research-dashboard.png" alt="Desktop research dashboard preview" width="92%">
+</p>
 
-### 6.4 文章详细信息获取（需token）
+> 图片占位提示词：生成一张 16:9 桌面应用界面预览图，主题是“公开文章科研辅助工作台”。界面左侧导航包括“研究任务、材料记录、历史记录、系统设置”；主区域顶部显示研究任务配置，包括“指定记录总量”“获取指定内容”“文章详情”“评论信息”等字段，但整体表达要像研究材料管理界面；中间展示公开文章材料列表，列名包含“账号名称、文章标题、发布时间、研究类型、处理状态”；右侧展示“研究进度、字段完整度、待复核数量、分析准备状态”等卡片；底部展示简洁运行记录。风格现代、清爽、学术化，白底为主，墨绿和浅青为强调色，不要真实数据，不要真实公众号名称。
 
-![image-20251203185822659](README/image-20251203185822659.png)
+---
 
-## LICENSE
+## 技术形态
 
-本作品采用许可协议 <a rel="license" href="http://creativecommons.org/licenses/by-nc-sa/4.0/">Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International</a> ,简称 **[CC BY-NC-SA 4.0](http://creativecommons.org/licenses/by-nc-sa/4.0/)**。
+| 模块 | 角色 |
+| --- | --- |
+| Vue 3 | 提供本地桌面界面中的交互视图 |
+| FastAPI | 提供本地服务接口与任务入口 |
+| pywebview | 承载桌面应用窗口 |
+| SQLite | 管理研究材料索引与任务状态 |
+| Python worker | 执行后台任务与流程调度 |
 
-所有以任何方式查看本仓库内容的人、或直接或间接使用本仓库内容的使用者都应仔细阅读此声明。本仓库管理者保留随时更改或补充此免责声明的权利。一旦使用、复制、修改了本仓库内容，则视为您已接受此免责声明。
+技术实现服务于研究材料管理体验。README 不展开具体部署和使用步骤，详细说明会放在独立文档中维护。
 
-项目内容仅供学习研究，请勿用于商业用途。如对本仓库内容的功能有需求，应自行开发相关功能。所有基于本仓库内容的源代码，进行的任何修改，为其他个人或组织的自发行为，与本仓库内容没有任何直接或间接的关系，所造成的一切后果亦与本仓库内容和本仓库管理者无关。
+---
 
-本仓库内容中涉及的第三方硬件、软件等，与本仓库内容没有任何直接或间接的关系。本仓库内容仅对部署和使用过程进行客观描述，不代表支持使用任何第三方硬件、软件。使用任何第三方硬件、软件，所造成的一切后果由使用的个人或组织承担，与本仓库内容无关。
+## 适用边界
 
-## Star History
+本项目适合用于合法、合规、非商业的学术研究辅助；不适合也不应被用于任何违反法律法规、平台规则、研究伦理或他人合法权益的场景。
 
-[![Star History Chart](https://api.star-history.com/svg?repos=yeximm/Access_wechat_article&type=Date)](https://www.star-history.com/#yeximm/Access_wechat_article&Date)
+如果你的使用目的涉及商业化数据获取、平台规则规避、未经授权的信息处理、个人信息处理、内容再分发或其他高风险场景，请不要使用本项目。
 
+---
+
+## License
+
+本项目采用 Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International 许可协议，简称 `CC BY-NC-SA 4.0`，完整条款以仓库中的 `LICENSE` 文件为准。
+
+请在查看、使用、复制、修改或二次开发本仓库内容前，仔细阅读许可证与本声明。一旦使用本仓库内容，即视为已理解并接受相关约束。
+
+- 本项目内容仅供学习、研究和非商业用途使用，不得用于商业化场景或任何违法违规用途。
+- 基于本仓库内容进行的修改、扩展、部署、分发或二次开发，均属于使用者或第三方的自主行为，由此产生的后果由相关使用者自行承担。
+- 本仓库中涉及的第三方软件、硬件、平台或工具，仅用于说明项目运行环境或技术背景，不代表本项目作者对其进行推荐、背书或提供使用保证。
+- 使用任何第三方软件、硬件、平台或工具所产生的风险、责任和后果，均由实际使用者自行承担，与本项目作者无关。

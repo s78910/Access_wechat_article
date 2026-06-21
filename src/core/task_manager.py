@@ -14,6 +14,7 @@ from src.core.process_manager import ProcessManager
 from src.modules.proxy.mitm_controller import run_mitm_worker
 from src.modules.proxy.proxy_manager import ProxyManager
 from src.modules.proxy.system_proxy import ProxySnapshot
+from src.modules.window.home_display_cache import HomeDisplayCache
 from src.modules.window.wechat_detector import DEFAULT_WECHAT_HOME_SNAPSHOT
 from src.modules.window.wechat_detector import WeChatHomeSnapshot
 from src.modules.window.wechat_detector import detect_wechat_home_window
@@ -109,11 +110,14 @@ class TaskManager:
         self.file_logger = file_logger or SessionFileLogger(started_at=self._started_at)
         self.home_detector = home_detector or detect_wechat_home_window
         self._home_snapshot = DEFAULT_WECHAT_HOME_SNAPSHOT
+        self._home_display_snapshot = DEFAULT_WECHAT_HOME_SNAPSHOT
+        self._home_display_cache = HomeDisplayCache()
         self._run_options = normalize_task_run_options(None)
         self._status = "idle"
         self._logs: list[dict] = []
         self._traffic_events: list[dict] = []
         self._traffic_history: list[dict] = []
+        self._auth_status: dict[str, Any] = {}
         self._restore_mitm_after_collection = False
         self.refresh_home_snapshot()
         self._log("INFO", "应用后端已启动，等待用户开始采集任务")
@@ -393,7 +397,8 @@ class TaskManager:
                 "verificationUrl": self.config.proxy.verification_url,
             },
             "workers": workers,
-            "home": self._home_snapshot.to_dict(),
+            "home": self._home_display_snapshot.to_dict(),
+            "auth": self._build_auth_status(workers),
             "runOptions": self._run_options,
             "dbPath": str(self.config.storage.db_path),
             "logPath": str(self.file_logger.path),
@@ -540,6 +545,7 @@ class TaskManager:
     def refresh_home_snapshot(self, *, activate: bool = False) -> WeChatHomeSnapshot:
         next_snapshot = self._detect_home_snapshot(activate=activate)
         self._home_snapshot = self._merge_home_snapshot(self._home_snapshot, next_snapshot)
+        self._home_display_snapshot = self._home_display_cache.apply(self._home_snapshot)
         return self._home_snapshot
 
     def _merge_home_snapshot(self, previous: WeChatHomeSnapshot, current: WeChatHomeSnapshot) -> WeChatHomeSnapshot:
@@ -676,6 +682,8 @@ class TaskManager:
                 break
             if self._is_traffic_event(event):
                 self._record_traffic_event(event)
+            elif self._is_auth_status_event(event):
+                self._record_auth_status_event(event)
             elif self._is_collection_status_event(event):
                 self._record_collection_status_event(event)
             else:
@@ -687,11 +695,57 @@ class TaskManager:
     def _is_collection_status_event(self, event: Any) -> bool:
         return isinstance(event, dict) and event.get("type") == "collection_status"
 
+    def _is_auth_status_event(self, event: Any) -> bool:
+        return isinstance(event, dict) and event.get("type") == "auth_status"
+
+    def _record_auth_status_event(self, event: dict) -> None:
+        """记录 MITM 是否已看到带 key URL；这里只保存脱敏摘要，不保存敏感 key 原文。"""
+        self._auth_status = {
+            "hasKeyUrl": bool(event.get("hasKeyUrl")),
+            "status": str(event.get("status") or ""),
+            "statusLabel": str(event.get("statusLabel") or ""),
+            "lastKeyUrlAt": str(event.get("createdAt") or ""),
+            "lastKeyUrlSource": str(event.get("urlSource") or ""),
+            "lastKeyUrlRedacted": str(event.get("urlRedacted") or ""),
+        }
+        self._append_log(self._normalize_event(event))
+
     def _record_collection_status_event(self, event: dict) -> None:
         status = str(event.get("status") or "").strip()
         if status:
             self._status = status
         self._append_log(self._normalize_event(event))
+
+    def _build_auth_status(self, workers: list[str]) -> dict:
+        if self._auth_status.get("hasKeyUrl"):
+            return {
+                "hasKeyUrl": True,
+                "status": self._auth_status.get("status") or "captured",
+                "statusLabel": self._auth_status.get("statusLabel") or "已获取鉴权",
+                "lastKeyUrlAt": self._auth_status.get("lastKeyUrlAt") or "",
+                "lastKeyUrlSource": self._auth_status.get("lastKeyUrlSource") or "",
+                "lastKeyUrlRedacted": self._auth_status.get("lastKeyUrlRedacted") or "",
+            }
+
+        mitm_running = "mitm" in workers or "article_capture" in workers
+        if mitm_running:
+            return {
+                "hasKeyUrl": False,
+                "status": "waiting",
+                "statusLabel": "等待鉴权",
+                "lastKeyUrlAt": "",
+                "lastKeyUrlSource": "",
+                "lastKeyUrlRedacted": "",
+            }
+
+        return {
+            "hasKeyUrl": False,
+            "status": "not_started",
+            "statusLabel": "未启动代理",
+            "lastKeyUrlAt": "",
+            "lastKeyUrlSource": "",
+            "lastKeyUrlRedacted": "",
+        }
 
     def _record_traffic_event(self, event: dict) -> None:
         try:

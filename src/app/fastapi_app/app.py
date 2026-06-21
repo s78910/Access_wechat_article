@@ -79,6 +79,7 @@ def create_app(api: WebviewApi | None = None, runtime_config: AppRuntimeConfig |
             "status": "ok",
             "accountCount": store.count_public_accounts(),
             "articleCount": store.count_public_articles(),
+            "detailCount": store.count_saved_article_details(),
             "dataType": "JSON",
             "storageSizeBytes": storage_size_bytes,
             "storageSizeLabel": format_size_label(storage_size_bytes),
@@ -150,6 +151,18 @@ def create_app(api: WebviewApi | None = None, runtime_config: AppRuntimeConfig |
                 }
                 for item in summary["trend"]
             ],
+            "dbPath": str(app_config.storage.db_path),
+        }
+
+    @app.get("/api/history/suggestions")
+    def list_history_suggestions(keyword: str = "", limit: int = 20):
+        store = SQLiteStore(app_config.storage.db_path)
+        items = store.list_history_suggestions(keyword=keyword, limit=limit)
+        return {
+            "ok": True,
+            "status": "ok",
+            "items": items,
+            "total": len(items),
             "dbPath": str(app_config.storage.db_path),
         }
 

@@ -585,11 +585,27 @@ class WeChatCaptureAddon:
             carrier_url=carrier_url,
         )
         self.capture_event_queue.put(event)
+        self._emit_auth_status_event(event)
         put_event(
             self.event_queue,
             "SUCCESS",
             f"已捕获文章主请求 URL：{event.get('url_redacted')}",
             source="mitm",
+        )
+
+    def _emit_auth_status_event(self, request_event: dict[str, Any]) -> None:
+        """把“已看到带 key URL”的事实同步给状态页，不暴露原始 key。"""
+        put_event(
+            self.event_queue,
+            "SUCCESS",
+            "MITM 已获取文章鉴权参数",
+            source="mitm",
+            type="auth_status",
+            status="captured",
+            statusLabel="已获取鉴权",
+            hasKeyUrl=True,
+            urlRedacted=str(request_event.get("url_redacted") or ""),
+            urlSource=str(request_event.get("url_source") or ""),
         )
 
     def _emit_article_main_html_candidate_event(

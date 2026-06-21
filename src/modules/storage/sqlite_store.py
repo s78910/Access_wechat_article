@@ -99,6 +99,19 @@ class SQLiteStore:
         with self._connect() as conn:
             return int(conn.execute("SELECT COUNT(*) FROM awa_public_articles").fetchone()[0])
 
+    def count_saved_article_details(self) -> int:
+        """统计已成功保存文章详情的记录数，用于首页和数据档案统一展示。"""
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT COUNT(*)
+                FROM awa_public_articles
+                WHERE collect_status = 'saved'
+                  AND record_type LIKE '%文章详情%'
+                """
+            ).fetchone()
+            return int(row[0] or 0)
+
     def count_history_records(
         self,
         *,
@@ -213,6 +226,60 @@ class SQLiteStore:
                 for row in reversed(trend_rows)
             ],
         }
+
+    def list_history_suggestions(self, *, keyword: str = "", limit: int = 20) -> list[str]:
+        """读取采集历史关键词候选，候选来自全库标题和公众号名，不受当前分页影响。"""
+        normalized_keyword = str(keyword or "").strip()
+        safe_limit = max(1, min(50, int(limit or 20)))
+        like_keyword = f"%{normalized_keyword}%"
+
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT value
+                FROM (
+                    SELECT
+                        account.account_name AS value,
+                        MAX(article.collect_time) AS latest_collect_time,
+                        0 AS source_order
+                    FROM awa_public_articles AS article
+                    JOIN awa_public_accounts AS account
+                        ON account.id = article.account_id
+                    WHERE trim(account.account_name) <> ''
+                      AND (? = '' OR account.account_name LIKE ?)
+                    GROUP BY account.account_name
+
+                    UNION ALL
+
+                    SELECT
+                        article.article_title AS value,
+                        MAX(article.collect_time) AS latest_collect_time,
+                        1 AS source_order
+                    FROM awa_public_articles AS article
+                    WHERE trim(article.article_title) <> ''
+                      AND (? = '' OR article.article_title LIKE ?)
+                    GROUP BY article.article_title
+                )
+                ORDER BY source_order ASC, latest_collect_time DESC, value ASC
+                LIMIT ?
+                """,
+                (
+                    normalized_keyword,
+                    like_keyword,
+                    normalized_keyword,
+                    like_keyword,
+                    safe_limit,
+                ),
+            ).fetchall()
+
+        suggestions: list[str] = []
+        seen: set[str] = set()
+        for row in rows:
+            value = str(row[0] or "").strip()
+            if value and value not in seen:
+                seen.add(value)
+                suggestions.append(value)
+        return suggestions
 
     def list_public_accounts(self) -> list[dict[str, object]]:
         """按公众号汇总本地文章索引，供数据档案页展示真实数据库内容。"""
@@ -420,7 +487,11 @@ class SQLiteStore:
                 JOIN awa_public_accounts AS account
                     ON account.id = article.account_id
                 WHERE article.account_id = ?
-                ORDER BY article.collect_time DESC, article.id DESC
+                ORDER BY
+                    CASE WHEN trim(article.published_article_time) = '' THEN 1 ELSE 0 END ASC,
+                    article.published_article_time DESC,
+                    article.collect_time DESC,
+                    article.id DESC
                 {page_clause}
                 """,
                 tuple(params),

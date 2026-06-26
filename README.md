@@ -93,7 +93,7 @@
 
 ## 可视化工作流
 
-这一部分用于展示程序的总体运行链路。
+这一部分用于展示程序的总体运行链路。 Mermaid 图展示程序核心模块之间的调用关系。
 
 ```mermaid
 flowchart LR
@@ -108,16 +108,15 @@ flowchart LR
     F --> B
 ```
 
-上方 Mermaid 图用于快速理解核心模块之间的调用关系；下方架构图用于更直观地展示桌面端、后端服务、代理解析、后台任务和页面展示之间的协作方式。
-
-
+架构图用于更直观地展示桌面端、后端服务、代理解析、后台任务和页面展示之间的协作方式。
 
 <p align="center">
-  <img src="README/assets/visual-workflow-architecture.png" alt="Access WeChat Article visual workflow architecture" width="92%">
+  <img src="./README/64a99030-d5ec-4ddc-8802-1ae9a4a05626.png" alt="Access WeChat Article visual workflow architecture" width="92%">
 </p>
 <p align="center">
   <sub>Access WeChat Article 总体工作流架构图</sub>
 </p>
+
 
 ---
 

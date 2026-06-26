@@ -285,15 +285,10 @@ class TaskManager:
         return self.get_status(refresh_home=False)
 
     def enable_system_proxy(self) -> dict:
-        """开启系统代理接管流量，要求 MITM 已在监听。"""
+        """手动开启系统代理接管流量；是否启动 MITM 由单独开关控制。"""
         self._drain_worker_events()
         if not self.process_manager.is_running("mitm"):
-            self._log("WARN", "系统代理未开启：请先开启 MITM 代理")
-            return {
-                "ok": False,
-                "status": self._status,
-                "message": "请先开启 MITM 代理",
-            }
+            self._log("WARN", "系统代理将指向当前配置端口，但 MITM 代理尚未运行")
 
         try:
             self.proxy_manager.start()

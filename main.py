@@ -3,6 +3,7 @@ from src.app.pywebview_app.config import (
     APP_NAME,
     WINDOW_ASPECT_RATIO,
     WINDOW_HEIGHT,
+    WINDOW_ICON_PATH,
     WINDOW_MIN_SIZE,
     WINDOW_WIDTH,
 )
@@ -35,7 +36,7 @@ def main() -> None:
         )
         bind_aspect_ratio(window, WINDOW_ASPECT_RATIO, WINDOW_MIN_SIZE)
         api.set_window(window)
-        webview.start()
+        webview.start(icon=str(WINDOW_ICON_PATH))
     finally:
         if api_server is not None:
             api_server.stop()

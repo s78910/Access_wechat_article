@@ -249,9 +249,21 @@ def create_app(api: WebviewApi | None = None, runtime_config: AppRuntimeConfig |
     def open_current_runtime_log():
         return parse_api_payload(webview_api.open_current_runtime_log())
 
+    @app.get("/api/runtime/paths")
+    def get_runtime_paths():
+        return parse_api_payload(webview_api.get_runtime_paths())
+
+    @app.post("/api/runtime/paths/open")
+    def open_runtime_path(payload: dict[str, Any] | None = None):
+        return parse_api_payload(webview_api.open_runtime_path(json.dumps(payload or {}, ensure_ascii=False)))
+
     @app.get("/api/ca/status")
     def check_ca_certificate():
         return parse_api_payload(webview_api.check_ca_certificate())
+
+    @app.post("/api/ca/install")
+    def install_ca_certificate():
+        return parse_api_payload(webview_api.install_ca_certificate())
 
     @app.post("/api/ca/install/open")
     def open_ca_install_page():

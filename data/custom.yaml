@@ -18,7 +18,7 @@ enable_system_proxy: true
 proxy:
   host: 127.0.0.1
   port: 18000
-  startup_delay_seconds: 3
+  startup_delay_seconds: 0
   verification_url: 'http://mitm.it/'
   confdir: ../.mitmproxy
   ssl_insecure: true

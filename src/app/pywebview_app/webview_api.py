@@ -11,11 +11,14 @@ from src.core.config import AppRuntimeConfig, DEFAULT_CONFIG_PATH, LOG_DIR
 from src.core.task_manager import TaskManager
 from src.modules.proxy.certificate import check_mitm_ca_certificate
 from src.modules.proxy.certificate import delete_mitm_ca_certificates
+from src.modules.proxy.certificate import install_mitm_ca_certificate
 from src.modules.proxy.certificate import list_mitm_ca_certificates
 from src.modules.proxy.https_probe import DEFAULT_HTTPS_TEST_URL
 from src.modules.proxy.https_probe import test_https_proxy_connection
 from src.modules.system.cache_cleaner import clear_directory_contents_except
 from src.modules.system.env_checker import get_system_status
+from src.modules.system.runtime_paths import build_runtime_paths
+from src.modules.system.runtime_paths import resolve_runtime_path
 from src.services.proxy_service import ProxyService
 from src.services.task_service import TaskService
 
@@ -40,6 +43,12 @@ def open_file_in_explorer(path: Path) -> bool:
     return True
 
 
+def open_directory_in_explorer(path: Path) -> bool:
+    """在 Windows Explorer 中打开目录；目录不存在时由调用方先创建。"""
+    subprocess.Popen(["explorer.exe", str(path)])
+    return True
+
+
 class WebviewApi:
     """提供给 Vue 页面调用的 Python API。"""
 
@@ -50,10 +59,12 @@ class WebviewApi:
         config_path: str | Path | None = None,
         auto_start: bool = False,
         ca_certificate_checker: Callable[[], dict] | None = None,
+        ca_certificate_installer: Callable[[], dict] | None = None,
         ca_certificate_lister: Callable[[], dict] | None = None,
         ca_certificate_deleter: Callable[[list[str]], dict] | None = None,
         browser_opener: Callable[[str], bool] | None = None,
         file_selector: Callable[[Path], bool] | None = None,
+        directory_opener: Callable[[Path], bool] | None = None,
         cache_dir: str | Path | None = None,
         proxy_connection_tester: Callable[[str, int, str], dict] | None = None,
     ):
@@ -62,11 +73,18 @@ class WebviewApi:
         self._config_path = Path(config_path) if config_path else DEFAULT_CONFIG_PATH
         self._task_manager = task_manager or TaskManager(config=runtime_config)
         self._runtime_config = runtime_config or getattr(self._task_manager, "config", AppRuntimeConfig())
-        self._ca_certificate_checker = ca_certificate_checker or check_mitm_ca_certificate
+        ca_cert_path = Path(self._runtime_config.proxy.confdir) / "mitmproxy-ca-cert.cer"
+        self._ca_certificate_checker = ca_certificate_checker or (
+            lambda: check_mitm_ca_certificate(current_ca_cert_path=ca_cert_path)
+        )
+        self._ca_certificate_installer = ca_certificate_installer or (
+            lambda: install_mitm_ca_certificate(current_ca_cert_path=ca_cert_path)
+        )
         self._ca_certificate_lister = ca_certificate_lister or list_mitm_ca_certificates
         self._ca_certificate_deleter = ca_certificate_deleter or delete_mitm_ca_certificates
         self._browser_opener = browser_opener or webbrowser.open
         self._file_selector = file_selector or open_file_in_explorer
+        self._directory_opener = directory_opener or open_directory_in_explorer
         self._cache_dir = Path(cache_dir) if cache_dir else LOG_DIR
         self._proxy_connection_tester = proxy_connection_tester or test_https_proxy_connection
         self._task_service = TaskService(self._task_manager)
@@ -269,6 +287,61 @@ class WebviewApi:
             ensure_ascii=False,
         )
 
+    def get_runtime_paths(self) -> str:
+        """返回系统配置页基础设置使用的真实运行目录。"""
+        runtime_config = getattr(self._task_manager, "config", self._runtime_config)
+        payload = {
+            "ok": True,
+            "status": "ok",
+            "paths": build_runtime_paths(runtime_config),
+        }
+        return json.dumps(payload, ensure_ascii=False)
+
+    def open_runtime_path(self, path_payload=None) -> str:
+        """按目录 key 打开系统配置页中对应的本地文件夹。"""
+        payload_data = _coerce_json_payload(path_payload)
+        key = str(payload_data.get("key") or "").strip()
+        runtime_config = getattr(self._task_manager, "config", self._runtime_config)
+
+        try:
+            target = resolve_runtime_path(runtime_config, key)
+        except KeyError:
+            return json.dumps(
+                {
+                    "ok": False,
+                    "status": "invalid-key",
+                    "key": key,
+                    "message": f"未知目录类型：{key or '空'}",
+                },
+                ensure_ascii=False,
+            )
+
+        try:
+            target.mkdir(parents=True, exist_ok=True)
+            opened = bool(self._directory_opener(target))
+        except Exception as exc:
+            return json.dumps(
+                {
+                    "ok": False,
+                    "status": "open-failed",
+                    "key": key,
+                    "path": str(target),
+                    "message": f"打开目录失败：{exc}",
+                },
+                ensure_ascii=False,
+            )
+
+        return json.dumps(
+            {
+                "ok": opened,
+                "status": "opened" if opened else "open-failed",
+                "key": key,
+                "path": str(target),
+                "message": "已打开目录。" if opened else "未能打开目录。",
+            },
+            ensure_ascii=False,
+        )
+
     def check_ca_certificate(self) -> str:
         """检测本机是否已经安装 mitmproxy CA 证书。"""
         try:
@@ -280,6 +353,21 @@ class WebviewApi:
                 "installed": False,
                 "label": "无法检测",
                 "message": f"检测 CA 证书失败：{exc}",
+            }
+
+        return json.dumps(payload, ensure_ascii=False)
+
+    def install_ca_certificate(self) -> str:
+        """把当前项目 mitmproxy CA 证书安装到当前用户根证书库。"""
+        try:
+            payload = self._ca_certificate_installer()
+        except Exception as exc:
+            payload = {
+                "ok": False,
+                "status": "install-failed",
+                "installed": False,
+                "label": "安装失败",
+                "message": f"安装 CA 证书失败：{exc}",
             }
 
         return json.dumps(payload, ensure_ascii=False)

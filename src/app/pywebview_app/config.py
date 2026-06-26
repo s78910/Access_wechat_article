@@ -4,6 +4,7 @@ from pathlib import Path
 APP_NAME = "Access WeChat Article"
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 WEBVIEW_DIR = PROJECT_ROOT / "src" / "webview"
+WINDOW_ICON_PATH = WEBVIEW_DIR / "favicon.ico"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8765
 WINDOW_WIDTH = 1200

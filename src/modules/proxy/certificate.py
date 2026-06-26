@@ -19,6 +19,7 @@ MITM_CERTIFICATE_STORES = (
     "Cert:\\LocalMachine\\CA",
     "Cert:\\LocalMachine\\My",
 )
+CURRENT_USER_ROOT_STORE = "Cert:\\CurrentUser\\Root"
 THUMBPRINT_PATTERN = re.compile(r"^[A-Fa-f0-9]{40}$")
 
 
@@ -152,6 +153,82 @@ def list_mitm_ca_certificates(
             if certificates
             else "未检索到 mitmproxy 相关证书。"
         ),
+    }
+
+
+def install_mitm_ca_certificate(
+    platform_name: str | None = None,
+    runner: CertificateRunner | None = None,
+    timeout_seconds: int = 12,
+    current_ca_cert_path: str | Path | None = None,
+) -> dict:
+    """把当前项目 mitmproxy CA 安装到当前用户根证书库。"""
+    current_platform = platform_name or platform.system()
+    if current_platform != "Windows":
+        return {
+            "ok": False,
+            "status": "unsupported-platform",
+            "installed": False,
+            "label": "无法安装",
+            "message": "当前仅支持在 Windows 当前用户证书库中安装 mitmproxy CA 证书。",
+        }
+
+    current_ca_path = Path(current_ca_cert_path) if current_ca_cert_path else MITMPROXY_CONF_DIR / "mitmproxy-ca-cert.cer"
+    if not current_ca_path.exists():
+        return {
+            "ok": False,
+            "status": "missing-ca-file",
+            "installed": False,
+            "label": "未找到证书",
+            "message": f"未找到 mitmproxy CA 证书文件：{current_ca_path}。请先启动 MITM 代理生成证书。",
+            "currentCaPath": str(current_ca_path),
+        }
+
+    command = _build_windows_ca_install_command(current_ca_path)
+    run_command = runner or subprocess.run
+
+    try:
+        completed = run_command(
+            command,
+            capture_output=True,
+            text=True,
+            timeout=timeout_seconds,
+            check=False,
+        )
+    except Exception as exc:
+        return _install_failed_result(f"安装 CA 证书失败：{exc}", current_ca_path)
+
+    if completed.returncode != 0:
+        detail = (completed.stderr or completed.stdout or "").strip()
+        return _install_failed_result(
+            f"安装 CA 证书失败：{detail}" if detail else "安装 CA 证书失败。",
+            current_ca_path,
+        )
+
+    diagnostics = _parse_ca_check_output(completed.stdout)
+    if not diagnostics.get("ok"):
+        return _install_failed_result(
+            str(diagnostics.get("message") or "安装 CA 证书后未能确认信任状态。"),
+            current_ca_path,
+        )
+
+    thumbprint = str(diagnostics.get("thumbprint") or "").upper()
+    return {
+        "ok": True,
+        "status": "installed",
+        "installed": True,
+        "label": "已安装",
+        "message": "当前项目 mitmproxy CA 已安装到当前用户根证书库。",
+        "storePath": str(diagnostics.get("storePath") or CURRENT_USER_ROOT_STORE),
+        "currentCaPath": str(diagnostics.get("currentCaPath") or current_ca_path),
+        "thumbprint": thumbprint,
+        "currentCaThumbprint": thumbprint,
+        "currentCaTrusted": True,
+        "subject": str(diagnostics.get("subject") or ""),
+        "issuer": str(diagnostics.get("issuer") or ""),
+        "friendlyName": str(diagnostics.get("friendlyName") or ""),
+        "notBefore": str(diagnostics.get("notBefore") or ""),
+        "notAfter": str(diagnostics.get("notAfter") or ""),
     }
 
 
@@ -320,6 +397,37 @@ def _build_windows_ca_list_command() -> Sequence[str]:
     return ["powershell", "-NoProfile", "-Command", script]
 
 
+def _build_windows_ca_install_command(current_ca_cert_path: Path) -> Sequence[str]:
+    # 安装到当前用户根证书库，通常不需要管理员权限；安装后按当前 CA 指纹复查。
+    safe_cert_path = str(current_ca_cert_path).replace("'", "''")
+    script = (
+        f"$currentCaPath = '{safe_cert_path}'; "
+        f"$storePath = '{CURRENT_USER_ROOT_STORE}'; "
+        "if (-not (Test-Path -LiteralPath $currentCaPath)) { "
+        "throw \"未找到 mitmproxy CA 证书文件：$currentCaPath\" "
+        "} "
+        "$currentCert = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new($currentCaPath); "
+        "Import-Certificate -FilePath $currentCaPath -CertStoreLocation $storePath -ErrorAction Stop | Out-Null; "
+        "$trusted = Get-ChildItem -Path $storePath -ErrorAction Stop | "
+        "Where-Object { $_.Thumbprint -eq $currentCert.Thumbprint } | Select-Object -First 1; "
+        "if (-not $trusted) { "
+        "throw \"证书导入后未在当前用户根证书库中找到：$($currentCert.Thumbprint)\" "
+        "} "
+        "[PSCustomObject]@{ "
+        "ok = $true; "
+        "storePath = $storePath; "
+        "currentCaPath = $currentCaPath; "
+        "thumbprint = $trusted.Thumbprint; "
+        "subject = $trusted.Subject; "
+        "issuer = $trusted.Issuer; "
+        "friendlyName = $trusted.FriendlyName; "
+        "notBefore = $trusted.NotBefore.ToString('yyyy-MM-dd HH:mm:ss'); "
+        "notAfter = $trusted.NotAfter.ToString('yyyy-MM-dd HH:mm:ss') "
+        "} | ConvertTo-Json -Depth 4"
+    )
+    return ["powershell", "-NoProfile", "-Command", script]
+
+
 def _build_windows_ca_delete_command(store_path: str, thumbprint: str) -> Sequence[str]:
     safe_store_path = str(store_path).replace("'", "''")
     safe_thumbprint = str(thumbprint).upper()
@@ -379,6 +487,17 @@ def _certificate_operation_failed(message: str, *, status: str) -> dict:
         "count": 0,
         "certificates": [],
         "message": message,
+    }
+
+
+def _install_failed_result(message: str, current_ca_path: Path) -> dict:
+    return {
+        "ok": False,
+        "status": "install-failed",
+        "installed": False,
+        "label": "安装失败",
+        "message": message,
+        "currentCaPath": str(current_ca_path),
     }
 
 

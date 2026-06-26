@@ -175,7 +175,7 @@ def _format_runtime_config(config: AppRuntimeConfig, *, config_dir: Path | None 
             "# 内容自动保存：true 时，mitm 捕获到文章列表后写入 SQLite。",
             f"auto_save_content: {_format_bool(config.app.auto_save_content)}",
             "",
-            "# 自动清理临时文件：当前先保留配置项，后续接入临时文件清理逻辑。",
+            "# 自动清理临时文件：true 时，程序启动后清理 data/tmp/ 中上次遗留的临时文件。",
             f"auto_clean_temp_files: {_format_bool(config.app.auto_clean_temp_files)}",
             "",
             "# 开启代理：true 时，打开软件后自动启动 mitm 监听。",

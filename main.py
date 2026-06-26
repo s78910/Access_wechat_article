@@ -23,6 +23,7 @@ def main() -> None:
         api = WebviewApi(
             runtime_config=runtime_config,
             auto_start=runtime_config.app.auto_start_proxy,
+            auto_cleanup=True,
         )
         api_server = FastApiServer(api=api)
         api_server.start()

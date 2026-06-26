@@ -1,13 +1,12 @@
 import json
 import subprocess
-import webbrowser
 from datetime import datetime
 from pathlib import Path
 from typing import Callable
 
 from src.config.runtime_config import save_runtime_config as write_runtime_config
 from src.config.runtime_config import update_runtime_config_from_payload
-from src.core.config import AppRuntimeConfig, DEFAULT_CONFIG_PATH, LOG_DIR
+from src.core.config import AppRuntimeConfig, DEFAULT_CONFIG_PATH, TMP_DIR
 from src.core.task_manager import TaskManager
 from src.modules.proxy.certificate import check_mitm_ca_certificate
 from src.modules.proxy.certificate import delete_mitm_ca_certificates
@@ -17,13 +16,13 @@ from src.modules.proxy.https_probe import DEFAULT_HTTPS_TEST_URL
 from src.modules.proxy.https_probe import test_https_proxy_connection
 from src.modules.system.cache_cleaner import clear_directory_contents_except
 from src.modules.system.env_checker import get_system_status
+from src.modules.system.runtime_cleanup import run_startup_temp_cleanup
 from src.modules.system.runtime_paths import build_runtime_paths
 from src.modules.system.runtime_paths import resolve_runtime_path
 from src.services.proxy_service import ProxyService
 from src.services.task_service import TaskService
 
-from .config import WEBVIEW_DIR, WINDOW_MIN_SIZE
-from .window_content_size import calculate_outer_size_for_content, get_client_and_outer_size
+from .config import WEBVIEW_DIR
 
 
 def _coerce_json_payload(payload) -> dict:
@@ -62,10 +61,10 @@ class WebviewApi:
         ca_certificate_installer: Callable[[], dict] | None = None,
         ca_certificate_lister: Callable[[], dict] | None = None,
         ca_certificate_deleter: Callable[[list[str]], dict] | None = None,
-        browser_opener: Callable[[str], bool] | None = None,
         file_selector: Callable[[Path], bool] | None = None,
         directory_opener: Callable[[Path], bool] | None = None,
         cache_dir: str | Path | None = None,
+        auto_cleanup: bool = False,
         proxy_connection_tester: Callable[[str, int, str], dict] | None = None,
     ):
         self._window = None
@@ -82,15 +81,34 @@ class WebviewApi:
         )
         self._ca_certificate_lister = ca_certificate_lister or list_mitm_ca_certificates
         self._ca_certificate_deleter = ca_certificate_deleter or delete_mitm_ca_certificates
-        self._browser_opener = browser_opener or webbrowser.open
         self._file_selector = file_selector or open_file_in_explorer
         self._directory_opener = directory_opener or open_directory_in_explorer
-        self._cache_dir = Path(cache_dir) if cache_dir else LOG_DIR
+        self._cache_dir = Path(cache_dir) if cache_dir else TMP_DIR
         self._proxy_connection_tester = proxy_connection_tester or test_https_proxy_connection
         self._task_service = TaskService(self._task_manager)
         self._proxy_service = ProxyService(self._task_manager)
+        if auto_cleanup:
+            self._run_startup_cleanup()
         if auto_start:
             self._prepare_proxy_on_startup()
+
+    def _run_startup_cleanup(self) -> None:
+        try:
+            current_log_path = getattr(getattr(self._task_manager, "file_logger", None), "path", None)
+            keep_paths = [current_log_path] if current_log_path else []
+            result = run_startup_temp_cleanup(
+                self._runtime_config,
+                temp_dir=self._cache_dir,
+                keep_paths=keep_paths,
+            )
+        except Exception as exc:
+            self._log_runtime_error(f"自动清理临时文件失败：{exc}")
+            return
+
+        if result.get("status") == "disabled":
+            return
+        if not result.get("ok"):
+            self._log_runtime_error(f"自动清理临时文件部分失败：{result.get('message') or ''}")
 
     def _prepare_proxy_on_startup(self) -> None:
         """应用启动时只准备代理环境，不触发主服务页的文章采集任务。"""
@@ -372,32 +390,6 @@ class WebviewApi:
 
         return json.dumps(payload, ensure_ascii=False)
 
-    def open_ca_install_page(self) -> str:
-        """在系统默认浏览器中打开 mitmproxy CA 证书安装页面。"""
-        runtime_config = getattr(self._task_manager, "config", self._runtime_config)
-        url = str(getattr(runtime_config.proxy, "verification_url", "http://mitm.it/") or "http://mitm.it/")
-
-        try:
-            opened = bool(self._browser_opener(url))
-        except Exception as exc:
-            return json.dumps(
-                {
-                    "ok": False,
-                    "status": "open-failed",
-                    "url": url,
-                    "message": f"打开 CA 证书安装页面失败：{exc}",
-                },
-                ensure_ascii=False,
-            )
-
-        payload = {
-            "ok": opened,
-            "status": "opened" if opened else "open-failed",
-            "url": url,
-            "message": "已打开 CA 证书安装页面。" if opened else "未能打开 CA 证书安装页面。",
-        }
-        return json.dumps(payload, ensure_ascii=False)
-
     def list_mitm_ca_certificates(self) -> str:
         """检索当前系统中 mitmproxy 相关证书，供前端弹窗确认。"""
         try:
@@ -508,56 +500,3 @@ class WebviewApi:
             self._task_service.log_runtime_error(message, source="webview")
         except Exception:
             return
-
-    def resize_window_to_content(self, content_height: int | float) -> str:
-        """按网页实际内容高度调整原生窗口高度，让页面铺满宽度后完整显示。"""
-        if self._is_shutting_down:
-            return json.dumps({"ok": False, "status": "window-disposed"}, ensure_ascii=False)
-
-        if not self._window:
-            return json.dumps({"ok": False, "status": "window-not-bound"}, ensure_ascii=False)
-
-        try:
-            safe_content_height = max(0, int(round(float(content_height))))
-        except (TypeError, ValueError):
-            return json.dumps({"ok": False, "status": "invalid-content-height"}, ensure_ascii=False)
-
-        try:
-            client_size, outer_size = get_client_and_outer_size(self._window, WINDOW_MIN_SIZE)
-            next_width, next_height = calculate_outer_size_for_content(
-                outer_size=outer_size,
-                client_size=client_size,
-                content_height=safe_content_height,
-                min_size=WINDOW_MIN_SIZE,
-            )
-
-            if (next_width, next_height) == outer_size:
-                payload = {
-                    "ok": True,
-                    "status": "unchanged",
-                    "width": next_width,
-                    "height": next_height,
-                }
-                return json.dumps(payload, ensure_ascii=False)
-
-            self._window.resize(next_width, next_height)
-        except Exception as exc:
-            message = f"窗口尺寸调整失败：{exc}"
-            self._log_runtime_error(message)
-            return json.dumps(
-                {
-                    "ok": False,
-                    "status": "resize-failed",
-                    "message": message,
-                },
-                ensure_ascii=False,
-            )
-
-        payload = {
-            "ok": True,
-            "status": "resized",
-            "width": next_width,
-            "height": next_height,
-        }
-
-        return json.dumps(payload, ensure_ascii=False)

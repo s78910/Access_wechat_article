@@ -265,10 +265,6 @@ def create_app(api: WebviewApi | None = None, runtime_config: AppRuntimeConfig |
     def install_ca_certificate():
         return parse_api_payload(webview_api.install_ca_certificate())
 
-    @app.post("/api/ca/install/open")
-    def open_ca_install_page():
-        return parse_api_payload(webview_api.open_ca_install_page())
-
     @app.get("/api/ca/mitm/list")
     def list_mitm_ca_certificates():
         return parse_api_payload(webview_api.list_mitm_ca_certificates())

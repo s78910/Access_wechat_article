@@ -36,6 +36,9 @@ class AppFeatureConfig:
     auto_save_content: bool = True
     auto_clean_temp_files: bool = True
     auto_start_proxy: bool = True
+    log_level: str = "INFO"
+    request_interval_seconds: float = 2
+    retry_count: int = 3
     version: str = "2.0.0"
 
 

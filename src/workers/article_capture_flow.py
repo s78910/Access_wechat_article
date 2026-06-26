@@ -45,6 +45,7 @@ class ArticleCaptureDependencies:
     build_archive: Callable[..., dict[str, Any]]
     build_record: Callable[[dict[str, Any]], dict[str, Any]]
     build_failed_record: Callable[..., dict[str, Any]]
+    sleep: Callable[[float], None] = time.sleep
 
 
 def run_article_capture_flow(
@@ -189,7 +190,7 @@ def _run_cursor_article_capture(
                 cursor.invalidate()
             continue
 
-        ok = _capture_one_article(
+        ok = _capture_one_article_with_retries(
             event_queue,
             config,
             capture_event_queue,
@@ -211,6 +212,8 @@ def _run_cursor_article_capture(
         _cleanup_detail_windows_after_article(event_queue, config, deps)
         if hasattr(cursor, "invalidate"):
             cursor.invalidate()
+        if saved_count + failed_count < target_total:
+            _wait_before_next_article(event_queue, config, deps)
 
     return saved_count, failed_count, skipped_count
 
@@ -302,7 +305,7 @@ def _run_legacy_index_article_capture(
     saved_count = 0
     failed_count = 0
     for article_index in resolve_target_article_indices({"recordLimit": target_total}):
-        ok = _capture_one_article(
+        ok = _capture_one_article_with_retries(
             event_queue,
             config,
             capture_event_queue,
@@ -317,6 +320,8 @@ def _run_legacy_index_article_capture(
             saved_count += 1
         else:
             failed_count += 1
+        if saved_count + failed_count < target_total:
+            _wait_before_next_article(event_queue, config, deps)
     return saved_count, failed_count, 0
 
 
@@ -335,6 +340,7 @@ def _capture_one_article(
     known_account_name: str = "",
     on_account_confirmed: Callable[[str], Any] | None = None,
     on_failed_record_deferred: Callable[[dict[str, Any]], Any] | None = None,
+    save_failed_record: bool = True,
 ) -> bool:
     progress_logger = ProgressLogger(event_queue, run_id=run_id, article_index=article_index)
     display_title = str(getattr(candidate, "title", "") or "").strip()
@@ -401,19 +407,20 @@ def _capture_one_article(
             f"主页第 {article_index} 篇文章保存失败：{failed_title}；原因：{failure_reason}",
             source="article_capture",
         )
-        _save_or_defer_failed_article_record(
-            event_queue,
-            store,
-            deps,
-            failed_report,
-            article_index=article_index,
-            account_name=failure_account_name,
-            target_title=failed_title,
-            failure_reason=failure_reason,
-            duration_seconds=time.time() - click_started_at,
-            selections=selections_payload,
-            on_failed_record_deferred=on_failed_record_deferred,
-        )
+        if save_failed_record:
+            _save_or_defer_failed_article_record(
+                event_queue,
+                store,
+                deps,
+                failed_report,
+                article_index=article_index,
+                account_name=failure_account_name,
+                target_title=failed_title,
+                failure_reason=failure_reason,
+                duration_seconds=time.time() - click_started_at,
+                selections=selections_payload,
+                on_failed_record_deferred=on_failed_record_deferred,
+            )
         return False
 
     mitm_capture_timeout_seconds = deps.resolve_timeout(config)
@@ -448,19 +455,20 @@ def _capture_one_article(
             f"主页第 {article_index} 篇文章保存失败：{failed_title}；原因：{failure_reason}",
             source="article_capture",
         )
-        _save_or_defer_failed_article_record(
-            event_queue,
-            store,
-            deps,
-            report,
-            article_index=article_index,
-            account_name=failure_account_name,
-            target_title=failed_title,
-            failure_reason=failure_reason,
-            duration_seconds=time.time() - click_started_at,
-            selections=selections_payload,
-            on_failed_record_deferred=on_failed_record_deferred,
-        )
+        if save_failed_record:
+            _save_or_defer_failed_article_record(
+                event_queue,
+                store,
+                deps,
+                report,
+                article_index=article_index,
+                account_name=failure_account_name,
+                target_title=failed_title,
+                failure_reason=failure_reason,
+                duration_seconds=time.time() - click_started_at,
+                selections=selections_payload,
+                on_failed_record_deferred=on_failed_record_deferred,
+            )
         return False
 
     progress_logger.success(
@@ -518,20 +526,70 @@ def _capture_one_article(
             },
         )
         deps.put_event(event_queue, "ERROR", error_message, source="article_capture")
-        _save_or_defer_failed_article_record(
-            event_queue,
-            store,
-            deps,
-            report,
-            article_index=article_index,
-            account_name=failure_account_name,
-            target_title=failed_title,
-            failure_reason=str(exc),
-            duration_seconds=time.time() - click_started_at,
-            selections=selections_payload,
-            on_failed_record_deferred=on_failed_record_deferred,
-        )
+        if save_failed_record:
+            _save_or_defer_failed_article_record(
+                event_queue,
+                store,
+                deps,
+                report,
+                article_index=article_index,
+                account_name=failure_account_name,
+                target_title=failed_title,
+                failure_reason=str(exc),
+                duration_seconds=time.time() - click_started_at,
+                selections=selections_payload,
+                on_failed_record_deferred=on_failed_record_deferred,
+            )
         return False
+
+
+def _capture_one_article_with_retries(
+    event_queue,
+    config: dict,
+    capture_event_queue,
+    store,
+    selections: dict,
+    run_id: str,
+    article_index: int,
+    *,
+    planned_articles: int,
+    deps: ArticleCaptureDependencies,
+    candidate: Any | None = None,
+    known_account_name: str = "",
+    on_account_confirmed: Callable[[str], Any] | None = None,
+    on_failed_record_deferred: Callable[[dict[str, Any]], Any] | None = None,
+) -> bool:
+    retry_count = resolve_retry_count(config)
+    for attempt_index in range(retry_count + 1):
+        is_final_attempt = attempt_index >= retry_count
+        ok = _capture_one_article(
+            event_queue,
+            config,
+            capture_event_queue,
+            store,
+            selections,
+            run_id,
+            article_index,
+            planned_articles=planned_articles,
+            deps=deps,
+            candidate=candidate,
+            known_account_name=known_account_name,
+            on_account_confirmed=on_account_confirmed,
+            on_failed_record_deferred=on_failed_record_deferred if is_final_attempt else None,
+            save_failed_record=is_final_attempt,
+        )
+        if ok:
+            return True
+        if is_final_attempt:
+            return False
+        _cleanup_detail_windows_after_article(event_queue, config, deps)
+        deps.put_event(
+            event_queue,
+            "WARN",
+            f"主页第 {article_index} 篇文章采集失败，准备第 {attempt_index + 1} 次重试",
+            source="article_capture",
+        )
+    return False
 
 
 def _save_failed_article_record(
@@ -681,6 +739,37 @@ def resolve_record_limit(run_options: dict | None) -> int:
     except (TypeError, ValueError):
         record_limit = 1
     return max(1, record_limit)
+
+
+def resolve_request_interval_seconds(config: dict | None) -> float:
+    data = config if isinstance(config, dict) else {}
+    try:
+        seconds = float(data.get("request_interval_seconds", data.get("requestIntervalSeconds", 0)))
+    except (TypeError, ValueError):
+        seconds = 0.0
+    return max(0.0, seconds)
+
+
+def resolve_retry_count(config: dict | None) -> int:
+    data = config if isinstance(config, dict) else {}
+    try:
+        retry_count = int(data.get("retry_count", data.get("retryCount", 0)))
+    except (TypeError, ValueError):
+        retry_count = 0
+    return max(0, retry_count)
+
+
+def _wait_before_next_article(event_queue, config: dict, deps: ArticleCaptureDependencies) -> None:
+    seconds = resolve_request_interval_seconds(config)
+    if seconds <= 0:
+        return
+    deps.put_event(
+        event_queue,
+        "INFO",
+        f"等待 {seconds:g} 秒后继续处理下一篇文章",
+        source="article_capture",
+    )
+    deps.sleep(seconds)
 
 
 def resolve_home_candidate_wait_timeout_seconds(config: dict | None) -> float:

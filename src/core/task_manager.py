@@ -10,6 +10,7 @@ from typing import Any
 from src.core.config import AppRuntimeConfig, LOG_DIR, PROJECT_ROOT
 from src.core.events import RuntimeLog
 from src.core.file_logger import SessionFileLogger
+from src.core.log_levels import normalize_log_level, should_emit_log
 from src.core.process_manager import ProcessManager
 from src.modules.proxy.mitm_controller import run_mitm_worker
 from src.modules.proxy.proxy_manager import ProxyManager
@@ -197,6 +198,8 @@ class TaskManager:
                     "output_root": str(LOG_DIR / "article_capture"),
                     "storage_root": str(PROJECT_ROOT / "storages"),
                     "mitm_target_probe_path": str(CURRENT_MITM_TARGET_PROBE_PATH),
+                    "request_interval_seconds": self.config.app.request_interval_seconds,
+                    "retry_count": self.config.app.retry_count,
                 }
             )
             account_name = self._home_account_name_for_worker(self._home_snapshot)
@@ -387,6 +390,9 @@ class TaskManager:
                 "autoSaveContent": self.config.app.auto_save_content,
                 "autoCleanTempFiles": self.config.app.auto_clean_temp_files,
                 "autoStartProxy": self.config.app.auto_start_proxy,
+                "logLevel": normalize_log_level(self.config.app.log_level),
+                "requestIntervalSeconds": self.config.app.request_interval_seconds,
+                "retryCount": self.config.app.retry_count,
                 "enableSystemProxy": self.config.proxy.enable_system_proxy,
                 "startupDelaySeconds": self.config.proxy.startup_delay_seconds,
                 "verificationUrl": self.config.proxy.verification_url,
@@ -661,6 +667,8 @@ class TaskManager:
         self._append_log(RuntimeLog(level=level, message=message, source=source).to_dict())
 
     def _append_log(self, event: dict) -> None:
+        if not should_emit_log(event.get("level", "INFO"), self.config.app.log_level):
+            return
         self._logs.append(event)
         try:
             self.file_logger.write(event)

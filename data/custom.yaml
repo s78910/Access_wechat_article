@@ -10,6 +10,9 @@ auto_clean_temp_files: true
 auto_start_proxy: true
 
 # 当前开发版本号，供主服务页运行环境区域显示。
+# log_level: DEBUG 最详细；INFO 默认；WARN 仅警告和错误；ERROR 仅错误。
+log_level: INFO
+
 version: 2.0.0
 
 # 系统代理：true 时，开启代理后自动接管系统代理；软件关闭时恢复原代理。

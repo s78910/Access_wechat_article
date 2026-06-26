@@ -13,6 +13,7 @@ from src.core.config import (
     ProxyConfig,
     StorageConfig,
 )
+from src.core.log_levels import normalize_log_level
 
 
 def load_runtime_config(config_path: str | Path | None = None) -> AppRuntimeConfig:
@@ -28,6 +29,9 @@ def load_runtime_config(config_path: str | Path | None = None) -> AppRuntimeConf
         auto_save_content=_get_bool(app_data, "auto_save_content", True),
         auto_clean_temp_files=_get_bool(app_data, "auto_clean_temp_files", True),
         auto_start_proxy=_get_bool(app_data, "auto_start_proxy", True),
+        log_level=normalize_log_level(_get_alias(app_data, ("log_level", "logLevel"), data.get("log_level", "INFO"))),
+        request_interval_seconds=max(0.0, _get_float_alias(app_data, ("request_interval_seconds", "requestIntervalSeconds"), 2)),
+        retry_count=max(0, _get_int_alias(app_data, ("retry_count", "retryCount"), 3)),
         version=str(app_data.get("version", "2.0.0")),
     )
     proxy = ProxyConfig(
@@ -73,6 +77,15 @@ def update_runtime_config_from_payload(
             ("auto_start_proxy", "autoStartProxy"),
             base.app.auto_start_proxy,
         ),
+        log_level=normalize_log_level(
+            _get_alias(app_data, ("log_level", "logLevel"), base.app.log_level),
+            base.app.log_level,
+        ),
+        request_interval_seconds=max(
+            0.0,
+            _get_float_alias(app_data, ("request_interval_seconds", "requestIntervalSeconds"), base.app.request_interval_seconds),
+        ),
+        retry_count=max(0, _get_int_alias(app_data, ("retry_count", "retryCount"), base.app.retry_count)),
         version=str(_get_alias(app_data, ("version", "appVersion"), base.app.version)),
     )
     proxy = ProxyConfig(
@@ -169,6 +182,15 @@ def _format_runtime_config(config: AppRuntimeConfig, *, config_dir: Path | None 
             f"auto_start_proxy: {_format_bool(config.app.auto_start_proxy)}",
             "",
             "# 当前开发版本号，供主服务页运行环境区域显示。",
+            "# log_level: DEBUG 最详细；INFO 默认；WARN 仅警告和错误；ERROR 仅错误。",
+            f"log_level: {normalize_log_level(config.app.log_level)}",
+            "",
+            "# 请求间隔时间：每篇文章处理完成后，进入下一篇前等待的秒数。",
+            f"request_interval_seconds: {config.app.request_interval_seconds:g}",
+            "",
+            "# 重试次数：单篇文章失败后最多额外重试次数；0 表示不重试。",
+            f"retry_count: {config.app.retry_count}",
+            "",
             f"version: {_format_yaml_scalar(config.app.version)}",
             "",
             "# 系统代理：true 时，开启代理后自动接管系统代理；软件关闭时恢复原代理。",

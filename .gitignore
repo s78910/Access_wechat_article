@@ -239,6 +239,7 @@ tests/
 
 # 环境
 .mitmproxy
+.playwright-browsers/
 
 # sqlite数据库文件
 data/awa_public.sqlite3

@@ -7,6 +7,7 @@ from collections import deque
 from dataclasses import dataclass
 from typing import Any, Iterable
 
+from src.modules.window.wechat_home_window_finder import is_wechat_home_window_candidate
 from src.workers.wechat_window_activation import activate_wechat_window_for_uia
 
 
@@ -113,6 +114,19 @@ def parse_wechat_home_text(text: str) -> WeChatHomeSnapshot:
     description = _pick_description_from_header(profile_lines, account_name)
     if not description and not sections.menu_lines:
         description = _pick_description(profile_lines, account_name)
+    content_profile_lines = _profile_lines_from_menu_content(sections.content_lines)
+    if content_profile_lines:
+        content_account_name = _pick_account_name_from_header(content_profile_lines)
+        if not content_account_name:
+            content_account_name = _pick_video_channel_name(content_profile_lines)
+        if content_account_name and (not account_name or _is_generic_home_window_title(account_name)):
+            account_name = content_account_name
+
+        content_description = _pick_description_from_header(content_profile_lines, account_name)
+        if not content_description:
+            content_description = _pick_description(content_profile_lines, account_name)
+        if content_description and not description:
+            description = content_description
     original_count = _extract_first_match(
         profile_lines,
         (
@@ -121,6 +135,15 @@ def parse_wechat_home_text(text: str) -> WeChatHomeSnapshot:
             r"(\d+)\s*(?:篇)?\s*原创",
         ),
     )
+    if not original_count and content_profile_lines:
+        original_count = _extract_first_match(
+            content_profile_lines,
+            (
+                r"(\d+)\s*篇原创",
+                r"原创(?:文章)?[^\d]*(\d+)",
+                r"(\d+)\s*(?:篇)?\s*原创",
+            ),
+        )
     friend_follow_count = _extract_first_match(
         profile_lines,
         (
@@ -128,6 +151,14 @@ def parse_wechat_home_text(text: str) -> WeChatHomeSnapshot:
             r"朋友关注[^\d]*(\d+)",
         ),
     )
+    if not friend_follow_count and content_profile_lines:
+        friend_follow_count = _extract_first_match(
+            content_profile_lines,
+            (
+                r"(\d+)\s*(?:个)?朋友.*关注",
+                r"朋友关注[^\d]*(\d+)",
+            ),
+        )
 
     found = bool(account_name)
     has_content_list = bool(sections.content_lines) or _looks_like_scrolled_article_list(lines)
@@ -207,7 +238,11 @@ def _detect_with_uiautomation(
 
 def _detect_with_window_titles() -> WeChatHomeSnapshot:
     titles = _enumerate_window_titles()
-    wechat_titles = [title for title in titles if _looks_like_wechat_window(title, "")]
+    wechat_titles = [
+        title
+        for title in titles
+        if str(title or "").strip() in {"公众号", "服务号", "订阅号"} or "微信公众号" in str(title or "")
+    ]
     if not wechat_titles:
         return _not_found_snapshot("未检测到已打开的微信 PC 公众号主页窗口")
 
@@ -440,26 +475,7 @@ def _get_process_name(process_id: int) -> str:
 
 
 def _looks_like_wechat_window(name: str, class_name: str, process_name: str = "") -> bool:
-    title = str(name or "").strip()
-    class_text = str(class_name or "").lower()
-    process_text = str(process_name or "").lower()
-    lower_title = title.lower()
-
-    if title == "公众号" or "微信公众号" in title:
-        return True
-
-    if "access wechat article" in lower_title or "access_wechat_article" in lower_title:
-        return False
-
-    if "visual studio code" in lower_title:
-        return False
-
-    if process_text in WECHAT_PROCESS_NAMES:
-        if title == "微信" or "公众号" in title or "wechat" in lower_title or "weixin" in lower_title:
-            return True
-        return "chrome_widgetwin" in class_text
-
-    return "微信" in title and process_text in WECHAT_PROCESS_NAMES
+    return is_wechat_home_window_candidate(name, class_name, process_name)
 
 
 def _not_found_snapshot(message: str) -> WeChatHomeSnapshot:
@@ -564,6 +580,37 @@ def _find_primary_menu_start(lines: list[str]) -> int:
     return -1
 
 
+def _profile_lines_from_menu_content(lines: list[str]) -> list[str]:
+    """服务号 UIA 文本常把资料区排在菜单之后；只截取文章列表之前的资料片段。"""
+    profile_lines: list[str] = []
+    seen_profile_signal = False
+
+    for line in lines:
+        if line == "展开" or _is_profile_action_line(line) or _is_content_group_prefix_line(line):
+            break
+        if line == "正在加载..." and not seen_profile_signal:
+            continue
+        if _is_profile_stat_line(line) or re.search(r"^视频号\s*[:：]", line):
+            seen_profile_signal = True
+        elif seen_profile_signal and _is_profile_candidate_line(line):
+            seen_profile_signal = True
+        if seen_profile_signal:
+            profile_lines.append(line)
+
+    return profile_lines
+
+
+def _pick_video_channel_name(lines: list[str]) -> str:
+    for line in lines:
+        match = re.search(r"^视频号\s*[:：]\s*(?P<name>.+?)\s*$", line)
+        if not match:
+            continue
+        name = match.group("name").strip()
+        if name and _looks_like_account_name(name):
+            return name
+    return ""
+
+
 def _pick_account_name_from_header(lines: list[str]) -> str:
     candidates = [
         line
@@ -594,7 +641,21 @@ def _pick_description_from_header(lines: list[str], account_name: str) -> str:
 
 
 def _is_header_control_noise(line: str) -> bool:
-    return line in {"公众号", "搜索", "更多", "···", "...", "…", "最小化", "最大化", "关闭"}
+    return line in {
+        "公众号",
+        "服务号",
+        "微信",
+        "Weixin",
+        "WeChat",
+        "搜索",
+        "更多",
+        "···",
+        "...",
+        "…",
+        "最小化",
+        "最大化",
+        "关闭",
+    }
 
 
 def _pick_account_name(lines: list[str]) -> str:
@@ -668,6 +729,10 @@ def _looks_like_scrolled_article_list(lines: list[str]) -> bool:
 
 def _is_navigation_noise_line(line: str) -> bool:
     return line in {"全部", "贴图", "文章", "视频号", "置顶", "展开"}
+
+
+def _is_generic_home_window_title(line: str) -> bool:
+    return line in {"公众号", "服务号", "微信"}
 
 
 def _profile_group_around_stats(lines: list[str]) -> list[str]:
@@ -812,6 +877,11 @@ def _is_profile_noise(line: str) -> bool:
 
     noise_keywords = {
         "公众号",
+        "服务号",
+        "微信",
+        "Weixin",
+        "WeChat",
+        "MMUIRenderSubWindowHW",
         "系统",
         "最小化",
         "最大化",
@@ -833,6 +903,7 @@ def _is_profile_noise(line: str) -> bool:
         "今天",
         "昨天",
         "置顶",
+        "展开",
         "星期一",
         "星期二",
         "星期三",

@@ -8,6 +8,14 @@ from collections import deque
 from dataclasses import dataclass
 from typing import Any, Callable
 
+from src.modules.window.home_content_sections import filter_home_article_targets
+from src.modules.window.wechat_home_window_finder import (
+    EXPLICIT_HOME_WINDOW_TITLES,
+    GENERIC_WECHAT_WINDOW_TITLES,
+    find_wechat_home_window as find_unified_wechat_home_window,
+    is_wechat_home_window_candidate,
+    score_wechat_home_window,
+)
 from src.workers.wechat_window_activation import activate_wechat_window_for_uia
 
 
@@ -41,6 +49,7 @@ def trigger_home_article_open(
     article_index: int,
     *,
     home_window: Any | None = None,
+    candidate: Any | None = None,
     clicker: Clicker | None = None,
     before_click: BeforeClickHook | None = None,
 ) -> dict[str, Any]:
@@ -51,25 +60,32 @@ def trigger_home_article_open(
     except (TypeError, ValueError):
         safe_index = 1
 
-    window = home_window or find_wechat_home_window()
-    if window is None:
+    if home_window is None:
         return {"ok": False, "reason": "wechat_home_window_not_found", "article_index": safe_index}
 
     activate_wechat_window_for_uia(
-        window,
+        home_window,
         delay_seconds=float(config.get("wechat_home_activate_delay_seconds", 0.5) or 0.0),
     )
 
+    candidate_target = _article_click_target_from_candidate(candidate)
+    if candidate_target is not None:
+        return _click_resolved_article_target(
+            candidate_target,
+            safe_index,
+            visible_targets=[candidate_target],
+            clicker=clicker,
+            before_click=before_click,
+            config=config,
+        )
+
     targets = collect_article_click_targets(
-        window,
+        home_window,
         max_depth=int(config.get("homepage_max_depth", 12)),
         max_nodes=int(config.get("homepage_max_nodes", 5000)),
     )
     if not targets:
-        fallback_target = build_coordinate_fallback_target(window, safe_index)
-        if fallback_target is None or not bool(config.get("wechat_home_coordinate_fallback_enabled", True)):
-            return {"ok": False, "reason": "article_click_target_not_found", "article_index": safe_index}
-        targets = [fallback_target]
+        return {"ok": False, "reason": "article_click_target_not_found", "article_index": safe_index}
     if safe_index > len(targets):
         return {
             "ok": False,
@@ -80,6 +96,26 @@ def trigger_home_article_open(
         }
 
     target = targets[safe_index - 1]
+    return _click_resolved_article_target(
+        target,
+        safe_index,
+        visible_targets=targets,
+        clicker=clicker,
+        before_click=before_click,
+        config=config,
+    )
+
+
+def _click_resolved_article_target(
+    target: ArticleClickTarget,
+    article_index: int,
+    *,
+    visible_targets: list[ArticleClickTarget],
+    clicker: Clicker | None,
+    before_click: BeforeClickHook | None,
+    config: dict[str, Any],
+) -> dict[str, Any]:
+    """点击已经选定的候选，避免点击前再次扫描导致目标漂移。"""
     x, y = target.click_point
     try:
         if callable(before_click):
@@ -100,22 +136,34 @@ def trigger_home_article_open(
         return {
             "ok": False,
             "reason": "article_click_failed",
-            "article_index": safe_index,
+            "article_index": article_index,
             "target_title": target.title,
             "target_rect": list(target.rect),
             "click_point": [x, y],
-            "visible_targets": serialize_article_click_targets(targets),
+            "visible_targets": serialize_article_click_targets(visible_targets),
             "error": str(exc),
         }
     return {
         "ok": True,
-        "article_index": safe_index,
+        "article_index": article_index,
         "target_title": target.title,
         "target_rect": list(target.rect),
         "click_point": [x, y],
-        "visible_targets": serialize_article_click_targets(targets),
+        "visible_targets": serialize_article_click_targets(visible_targets),
         "click_result": click_result,
     }
+
+
+def _article_click_target_from_candidate(candidate: Any | None) -> ArticleClickTarget | None:
+    """把游标候选转换成点击目标；无有效坐标时继续走旧的按序号扫描路径。"""
+    if candidate is None:
+        return None
+    title = str(getattr(candidate, "title", "") or "").strip()
+    rect = rect_to_tuple(getattr(candidate, "rect", None))
+    hwnd = _safe_int(_safe_get(candidate, "hwnd", 0))
+    if not title or not _valid_rect(rect) or hwnd <= 0:
+        return None
+    return ArticleClickTarget(title=title, rect=rect, hwnd=hwnd, control=_safe_get(candidate, "control", None))
 
 
 def serialize_article_click_targets(targets: list[ArticleClickTarget], *, limit: int = 12) -> list[dict[str, Any]]:
@@ -218,7 +266,8 @@ def _collect_article_click_targets_from_tree(
         for child in children:
             queue.append((child, depth + 1))
 
-    return _prefer_regular_article_list_targets(targets, text_nodes)
+    targets = filter_home_article_targets(targets, text_nodes)
+    return _sort_targets_visually(_prefer_regular_article_list_targets(targets, text_nodes))
 
 
 def click_article_target(
@@ -255,84 +304,20 @@ def click_article_target(
         }
 
 
-def build_coordinate_fallback_target(home_window: Any, article_index: int) -> ArticleClickTarget | None:
-    """UIA 读不到文章标题时，用主页可见列表区域做一次受控点击兜底。
-
-    该兜底只用于打开当前可见的第 N 篇文章，不刷新页面、不重复点击；真实是否成功仍交给 MITM 捕获结果判断。
-    """
-    try:
-        safe_index = max(1, int(article_index))
-    except (TypeError, ValueError):
-        safe_index = 1
-    if safe_index != 1:
-        return None
-
-    hwnd = _safe_int(_safe_get(home_window, "NativeWindowHandle", 0))
-    rect = rect_to_tuple(_safe_get(home_window, "BoundingRectangle", None))
-    if hwnd <= 0 or not _valid_rect(rect):
-        return None
-
-    left, top, right, bottom = rect
-    width = right - left
-    height = bottom - top
-
-    # 微信公众号主页首篇文章通常位于资料头部下方的文章列表左侧区域。
-    x = left + int(width * 0.46)
-    y = top + int(height * 0.46)
-    target_rect = (max(left, x - 120), max(top, y - 24), min(right, x + 120), min(bottom, y + 24))
-    return ArticleClickTarget(title="", rect=target_rect, hwnd=hwnd, control=None)
-
-
 def find_wechat_home_window(auto_module: Any | None = None) -> Any | None:
-    """查找已打开的微信公众号主页窗口；找不到时返回 None，由上层决定是否继续等待 MITM。"""
-    if platform.system() != "Windows":
-        return None
-    if auto_module is None:
-        try:
-            import uiautomation as auto_module  # type: ignore
-        except Exception:
-            return None
-
-    root = _safe_call(auto_module.GetRootControl)
-    if root is None:
-        return None
-
-    candidates: list[tuple[int, Any]] = []
-    for window in _safe_call(root.GetChildren) or []:
-        name = str(_safe_get(window, "Name", "") or "")
-        class_name = str(_safe_get(window, "ClassName", "") or "")
-        process_name = _process_name(_safe_int(_safe_get(window, "ProcessId", 0)))
-        if _looks_like_wechat_window(name, class_name, process_name):
-            candidates.append((_home_window_score(window, name, class_name, process_name), window))
-    if not candidates:
-        return None
-    candidates.sort(key=lambda item: item[0], reverse=True)
-    return candidates[0][1]
-    return None
+    """兼容旧导入路径，实际使用统一主页窗口选择模块。"""
+    return find_unified_wechat_home_window(auto_module, target_collector=collect_article_click_targets)
 
 
 def _home_window_score(window: Any, name: str, class_name: str, process_name: str) -> int:
-    """优先选择能读到文章候选的窗口，避免把图片/详情页误当成公众号主页。"""
-    score = 0
-    try:
-        score += min(5, len(collect_article_click_targets(window, max_depth=8, max_nodes=1200))) * 1000
-    except Exception:
-        pass
-
-    title = str(name or "").strip()
-    process_text = str(process_name or "").lower()
-    class_text = str(class_name or "").lower()
-    if process_text in {"weixin.exe", "wechat.exe"}:
-        score += 100
-    if title == "微信":
-        score += 50
-    if title == "公众号":
-        score += 20
-    if process_text == "wechatappex.exe":
-        score -= 30
-    if "chrome_widgetwin" in class_text:
-        score += 5
-    return score
+    """兼容旧测试入口，实际使用统一主页窗口打分。"""
+    return score_wechat_home_window(
+        window,
+        name,
+        class_name,
+        process_name,
+        target_collector=collect_article_click_targets,
+    )
 
 
 def post_message_click(
@@ -417,6 +402,11 @@ def _looks_like_article_title(text: str) -> bool:
         return False
     if value in {
         "公众号",
+        "服务号",
+        "微信",
+        "Weixin",
+        "WeChat",
+        "MMUIRenderSubWindowHW",
         "系统",
         "最小化",
         "最大化",
@@ -464,13 +454,22 @@ def _prefer_regular_article_list_targets(
     targets: list[ArticleClickTarget],
     text_nodes: list[tuple[str, tuple[int, int, int, int]]],
 ) -> list[ArticleClickTarget]:
-    """优先选择“日期 + 标题 + 阅读赞”的普通文章列表，跳过置顶专题/封面文案。"""
+    """优先选择带阅读/赞指标的文章标题；服务号同一卡片里的多篇文章共用日期锚点。"""
+    metric_targets = [target for target in targets if _has_metric_anchor_below(target.rect, text_nodes)]
+    if metric_targets:
+        return metric_targets
+
     regular_targets = [
         target
         for target in targets
         if _has_date_anchor_above(target.rect, text_nodes) and _has_metric_anchor_below(target.rect, text_nodes)
     ]
     return regular_targets or targets
+
+
+def _sort_targets_visually(targets: list[ArticleClickTarget]) -> list[ArticleClickTarget]:
+    """按屏幕显示顺序输出候选，避免 UIA 树顺序和视觉顶部顺序不一致。"""
+    return sorted(targets, key=lambda target: (target.rect[1], target.rect[0], target.rect[3], target.rect[2]))
 
 
 def _has_date_anchor_above(
@@ -664,15 +663,5 @@ def _process_name(process_id: int) -> str:
 
 
 def _looks_like_wechat_window(name: str, class_name: str, process_name: str) -> bool:
-    title = str(name or "").strip()
-    lower_title = title.lower()
-    class_text = str(class_name or "").lower()
-    process_text = str(process_name or "").lower()
-
-    if "access wechat article" in lower_title or "visual studio code" in lower_title:
-        return False
-    if title == "公众号" or "微信公众号" in title:
-        return True
-    if process_text in {"wechat.exe", "wechatappex.exe", "weixin.exe"}:
-        return title == "微信" or "公众号" in title or "chrome_widgetwin" in class_text
-    return "微信" in title and "公众号" in title
+    """兼容旧测试入口，实际使用统一主页窗口候选判断。"""
+    return is_wechat_home_window_candidate(name, class_name, process_name)

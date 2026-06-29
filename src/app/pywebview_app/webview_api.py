@@ -6,7 +6,7 @@ from typing import Callable
 
 from src.config.runtime_config import save_runtime_config as write_runtime_config
 from src.config.runtime_config import update_runtime_config_from_payload
-from src.core.config import AppRuntimeConfig, DEFAULT_CONFIG_PATH, TMP_DIR
+from src.core.config import AppRuntimeConfig, DEFAULT_CONFIG_PATH, PROJECT_ROOT, TMP_DIR
 from src.core.task_manager import TaskManager
 from src.modules.proxy.certificate import check_mitm_ca_certificate
 from src.modules.proxy.certificate import delete_mitm_ca_certificates
@@ -48,6 +48,28 @@ def open_directory_in_explorer(path: Path) -> bool:
     return True
 
 
+def _select_directory_with_pywebview(window, initial_directory: str | Path = PROJECT_ROOT) -> Path | None:
+    """使用 pywebview 原生文件夹选择框返回保存目录。"""
+    if window is None or not hasattr(window, "create_file_dialog"):
+        return None
+    try:
+        import webview
+
+        dialog_type = getattr(getattr(webview, "FileDialog", object), "FOLDER", None)
+        if dialog_type is None:
+            dialog_type = webview.FOLDER_DIALOG
+        selected = window.create_file_dialog(
+            dialog_type,
+            directory=str(initial_directory),
+            allow_multiple=False,
+        )
+    except Exception:
+        return None
+    if not selected:
+        return None
+    return Path(str(selected[0]))
+
+
 class WebviewApi:
     """提供给 Vue 页面调用的 Python API。"""
 
@@ -66,6 +88,7 @@ class WebviewApi:
         cache_dir: str | Path | None = None,
         auto_cleanup: bool = False,
         proxy_connection_tester: Callable[[str, int, str], dict] | None = None,
+        export_directory_selector: Callable[[], Path | None] | None = None,
     ):
         self._window = None
         self._is_shutting_down = False
@@ -85,6 +108,7 @@ class WebviewApi:
         self._directory_opener = directory_opener or open_directory_in_explorer
         self._cache_dir = Path(cache_dir) if cache_dir else TMP_DIR
         self._proxy_connection_tester = proxy_connection_tester or test_https_proxy_connection
+        self._export_directory_selector = export_directory_selector
         self._task_service = TaskService(self._task_manager)
         self._proxy_service = ProxyService(self._task_manager)
         if auto_cleanup:
@@ -356,6 +380,45 @@ class WebviewApi:
                 "key": key,
                 "path": str(target),
                 "message": "已打开目录。" if opened else "未能打开目录。",
+            },
+            ensure_ascii=False,
+        )
+
+    def select_archive_export_directory(self) -> str:
+        """弹出本地目录选择框，供数据档案 Excel 导出选择保存位置。"""
+        try:
+            if self._export_directory_selector is not None:
+                selected_path = self._export_directory_selector()
+            else:
+                selected_path = _select_directory_with_pywebview(self._window)
+        except Exception as exc:
+            return json.dumps(
+                {
+                    "ok": False,
+                    "status": "select-failed",
+                    "path": "",
+                    "message": f"选择保存目录失败：{exc}",
+                },
+                ensure_ascii=False,
+            )
+
+        if selected_path is None:
+            return json.dumps(
+                {
+                    "ok": False,
+                    "status": "cancelled",
+                    "path": "",
+                    "message": "已取消选择保存目录。",
+                },
+                ensure_ascii=False,
+            )
+
+        return json.dumps(
+            {
+                "ok": True,
+                "status": "selected",
+                "path": str(Path(selected_path)),
+                "message": "已选择导出保存目录。",
             },
             ensure_ascii=False,
         )

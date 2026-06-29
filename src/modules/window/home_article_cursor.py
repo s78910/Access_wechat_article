@@ -7,6 +7,10 @@ from dataclasses import dataclass
 from typing import Any, Callable
 
 from src.modules.window.article_clicker import ArticleClickTarget, collect_article_click_targets
+from src.modules.window.home_window_focus_guard import (
+    ensure_home_window_readable as default_ensure_home_window_readable,
+    resolve_focus_recover_attempts,
+)
 
 
 WM_MOUSEWHEEL = 0x020A
@@ -14,6 +18,7 @@ WHEEL_DELTA = 120
 
 TargetCollector = Callable[..., list[ArticleClickTarget]]
 HomeScroller = Callable[..., dict[str, Any]]
+HomeFocusGuard = Callable[[Any, dict[str, Any]], dict[str, Any]]
 
 
 @dataclass(frozen=True)
@@ -36,11 +41,13 @@ class HomeArticleCursor:
         home_window: Any | None = None,
         collect_targets: TargetCollector = collect_article_click_targets,
         scroll_home: HomeScroller | None = None,
+        ensure_home_window_readable: HomeFocusGuard | None = default_ensure_home_window_readable,
     ) -> None:
         self.config = config or {}
         self.home_window = home_window
         self.collect_targets = collect_targets
         self.scroll_home = scroll_home or scroll_wechat_home_articles
+        self.ensure_home_window_readable = ensure_home_window_readable
         self._visible: list[HomeArticleCandidate] = []
         self._position = 0
         self._loaded = False
@@ -59,6 +66,11 @@ class HomeArticleCursor:
         """最近一次无法继续产出候选的原因，供主流程判断是否需要等待解锁恢复。"""
         return self._last_stop_reason
 
+    @property
+    def visible_candidates(self) -> list[HomeArticleCandidate]:
+        """返回最近一次读取到的当前屏候选副本，供点击前一致性校验使用。"""
+        return list(self._visible)
+
     def invalidate(self) -> None:
         """让下一次读取重新扫描主页窗口，避免锁屏/解锁或关闭详情页后继续使用旧坐标。"""
         self._loaded = False
@@ -71,6 +83,16 @@ class HomeArticleCursor:
         self.invalidate()
         self._load_visible_candidates()
         return bool(self._visible)
+
+    def skip_visible_candidates(self, titles: list[str] | None = None) -> None:
+        """当前可见屏无需点击时，把这些标题标记为已处理，让下一次读取进入滚动。"""
+        title_set = {_normalize_title(title) for title in (titles or []) if str(title or "").strip()}
+        for candidate in self._visible:
+            signature = self._candidate_signature(candidate)
+            if title_set and signature not in title_set:
+                continue
+            self._seen_signatures.add(signature)
+        self._position = len(self._visible)
 
     def next_candidate(self) -> HomeArticleCandidate | None:
         while True:
@@ -91,11 +113,7 @@ class HomeArticleCursor:
                 return None
 
     def _load_visible_candidates(self) -> None:
-        targets = self.collect_targets(
-            self.home_window,
-            max_depth=int(self.config.get("homepage_max_depth", 12)),
-            max_nodes=int(self.config.get("homepage_max_nodes", 5000)),
-        )
+        targets = self._collect_targets_with_focus_recovery()
         self._visible = [
             HomeArticleCandidate(
                 title=str(target.title or "").strip(),
@@ -108,6 +126,29 @@ class HomeArticleCursor:
         ]
         self._position = 0
         self._loaded = True
+
+    def _collect_targets_with_focus_recovery(self) -> list[ArticleClickTarget]:
+        targets = self._collect_targets_once()
+        if targets:
+            return targets
+
+        recover = self.ensure_home_window_readable
+        if not callable(recover):
+            return targets
+
+        for _attempt_index in range(resolve_focus_recover_attempts(self.config)):
+            recover(self.home_window, self.config)
+            targets = self._collect_targets_once()
+            if targets:
+                return targets
+        return targets
+
+    def _collect_targets_once(self) -> list[ArticleClickTarget]:
+        return self.collect_targets(
+            self.home_window,
+            max_depth=int(self.config.get("homepage_max_depth", 12)),
+            max_nodes=int(self.config.get("homepage_max_nodes", 5000)),
+        )
 
     def _scroll_and_reload(self) -> bool:
         # 当前屏候选的坐标能帮助把滚轮消息投递到真实文章列表区域，而不是只发给外层窗口。

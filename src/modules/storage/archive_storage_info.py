@@ -173,6 +173,33 @@ def resolve_article_archive_info(
     )
 
 
+def resolve_article_archive_candidate_dirs(
+    *,
+    storage_root: str | Path,
+    account_name: str,
+    published_article_time: str,
+    article_title: str,
+) -> list[Path]:
+    """按目录名定位文章归档候选目录，不依赖 article_detail.json 的短链内容。"""
+    base_dir = build_archive_lookup_base_dir(
+        storage_root=storage_root,
+        account_name=account_name,
+        published_article_time=published_article_time,
+        article_title=article_title,
+    )
+    account_dir = base_dir.parent
+    base_name = base_dir.name
+    candidates: list[Path] = []
+    if account_dir.exists():
+        for child in account_dir.iterdir():
+            if not child.is_dir():
+                continue
+            if child.name == base_name or _is_numbered_duplicate(child.name, base_name):
+                candidates.append(child)
+    candidates.sort(key=lambda path: _archive_dir_sort_key(path.name, base_name))
+    return candidates
+
+
 def build_archive_lookup_base_dir(
     *,
     storage_root: str | Path,
@@ -262,4 +289,5 @@ __all__ = [
     "directory_size_bytes",
     "format_size_label",
     "resolve_article_archive_info",
+    "resolve_article_archive_candidate_dirs",
 ]

@@ -499,6 +499,37 @@ class SQLiteStore:
 
         return [self._article_row_to_dict(row) for row in rows]
 
+    def list_public_articles_for_export(self, account_id: int) -> list[dict[str, object]]:
+        """按发布时间倒序读取公众号全部文章，供 Excel 导出使用。"""
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT
+                    article.id,
+                    article.account_id,
+                    account.account_name,
+                    article.article_title,
+                    article.published_article_time,
+                    article.article_link,
+                    article.record_type,
+                    article.collect_time,
+                    article.duration_seconds,
+                    article.collect_status
+                FROM awa_public_articles AS article
+                JOIN awa_public_accounts AS account
+                    ON account.id = article.account_id
+                WHERE article.account_id = ?
+                ORDER BY
+                    CASE WHEN trim(article.published_article_time) = '' THEN 1 ELSE 0 END ASC,
+                    article.published_article_time DESC,
+                    article.collect_time DESC,
+                    article.id DESC
+                """,
+                (int(account_id),),
+            ).fetchall()
+
+        return [self._article_row_to_dict(row) for row in rows]
+
     def _build_history_filter_clause(
         self,
         *,

@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import html
 import os
+import re
+import shutil
 import time
 from pathlib import Path
 from typing import Any
 
 from src.modules.html_archive.html_rewriter import (
+    bind_read_original_link_in_html,
     extract_resource_urls_from_css,
     extract_resource_urls_from_html,
     rewrite_css_urls,
@@ -94,6 +98,43 @@ SNAPSHOT_SCRIPT = """
 }
 """
 
+ARTICLE_HTML_SCRIPT = """
+() => {
+  const title = document.querySelector('#activity-name')?.innerHTML
+    || document.querySelector('h1')?.innerHTML
+    || document.title
+    || '';
+  const meta = document.querySelector('#meta_content')?.innerHTML || '';
+  const contentNode = document.querySelector('#js_content')
+    || document.querySelector('.rich_media_content');
+  const content = contentNode?.innerHTML || '';
+  const tool = document.querySelector('.rich_media_tool')?.innerHTML
+    || document.querySelector('#js_toobar3')?.innerHTML
+    || document.querySelector('#js_pc_qr_code')?.innerHTML
+    || '';
+  const sourceUrl = window.msg_source_url || window.msgSourceUrl || '';
+  const pageMid = window.PAGE_MID || '';
+  const bodyText = document.body?.innerText || '';
+  const pageHtml = document.documentElement?.innerHTML || '';
+  const isVerifyPage = pageMid.includes('secitptpage/verify')
+    || pageHtml.includes('captcha.gtimg.com')
+    || pageHtml.includes('TCaptcha')
+    || bodyText.includes('验证码')
+    || bodyText.includes('尝试太多');
+  return {
+    title,
+    meta,
+    content,
+    tool,
+    sourceUrl,
+    pageMid,
+    bodyText,
+    isVerifyPage,
+    hasArticleContent: Boolean(contentNode && content.trim())
+  };
+}
+"""
+
 
 def archive_article_html(task: ArticleHtmlArchiveTask, config: ArticleHtmlArchiveConfig | None = None) -> ArticleHtmlArchiveResult:
     """用 Playwright 把一篇微信短链接文章保存为 index.html 和 assets。"""
@@ -104,10 +145,9 @@ def archive_article_html(task: ArticleHtmlArchiveTask, config: ArticleHtmlArchiv
 
     archive_dir = resolve_article_html_archive_dir(task)
     assets_dir = archive_dir / config.resource_dir_name
-    archive_dir.mkdir(parents=True, exist_ok=True)
-    assets_dir.mkdir(parents=True, exist_ok=True)
+    prepare_archive_output_dirs(archive_dir, assets_dir)
 
-    os.environ.setdefault("PLAYWRIGHT_BROWSERS_PATH", str(Path(config.browser_cache_dir)))
+    ensure_playwright_browser_path(config)
     try:
         from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
         from playwright.sync_api import sync_playwright
@@ -123,6 +163,7 @@ def archive_article_html(task: ArticleHtmlArchiveTask, config: ArticleHtmlArchiv
     css_sources: dict[str, str] = {}
     failed_resources: list[str] = []
     warning = ""
+    unavailable_reason = ""
 
     try:
         with sync_playwright() as playwright:
@@ -135,31 +176,31 @@ def archive_article_html(task: ArticleHtmlArchiveTask, config: ArticleHtmlArchiv
             )
             context.set_default_timeout(config.resource_request_timeout_ms)
             page = context.new_page()
-
-            def handle_response(response: Any) -> None:
-                try:
-                    content_type = str(response.headers.get("content-type") or "")
-                    kind = infer_asset_kind(response.url, content_type)
-                    if kind not in {"img", "css", "js", "font"}:
-                        return
-                    body = response.body()
-                    if not body:
-                        return
-                    saved = save_asset(assets_dir, url=response.url, data=body, content_type=content_type)
-                    resource_map[response.url] = saved.relative_path
-                    if saved.kind == "css":
-                        css_sources[saved.relative_path] = response.url
-                except Exception:
-                    failed_resources.append(str(getattr(response, "url", "")))
-
-            page.on("response", handle_response)
             page.goto(short_link, wait_until=config.wait_until, timeout=config.navigation_timeout_ms)
             page.wait_for_timeout(config.initial_wait_ms)
             scroll_stop_reason = _scroll_until_loaded(page, config, resource_map)
             warning = build_scroll_warning(scroll_stop_reason)
-            _download_lazy_resources(page, assets_dir, resource_map, css_sources, failed_resources, config)
-            _rewrite_saved_css_files(assets_dir, resource_map, css_sources)
-            html_content = rewrite_html_resource_links(page.content(), resource_map, base_url=page.url)
+            article_snapshot = _extract_article_snapshot(page)
+            source_url = _extract_read_original_url(page, str(article_snapshot.get("sourceUrl") or ""))
+            unavailable_reason = is_unavailable_article_snapshot(article_snapshot)
+            if unavailable_reason:
+                html_content = build_unavailable_article_html(
+                    title=task.article_title or str(article_snapshot.get("title") or ""),
+                    reason=unavailable_reason,
+                    source_url=short_link,
+                )
+            else:
+                article_html = build_article_only_html(
+                    title=str(article_snapshot.get("title") or ""),
+                    meta=str(article_snapshot.get("meta") or ""),
+                    content=str(article_snapshot.get("content") or ""),
+                    tool=str(article_snapshot.get("tool") or ""),
+                )
+                if source_url:
+                    article_html = bind_read_original_link_in_html(article_html, source_url)
+                _download_lazy_resources(page, article_html, assets_dir, resource_map, css_sources, failed_resources, config)
+                _rewrite_saved_css_files(assets_dir, resource_map, css_sources)
+                html_content = rewrite_html_resource_links(article_html, resource_map, base_url=page.url)
             index_html_path = archive_dir / "index.html"
             index_html_path.write_text(html_content, encoding="utf-8")
             try:
@@ -167,6 +208,18 @@ def archive_article_html(task: ArticleHtmlArchiveTask, config: ArticleHtmlArchiv
             except PlaywrightTimeoutError:
                 warning = "页面网络请求未完全空闲，已保存当前可见内容"
             browser.close()
+
+        if unavailable_reason:
+            return ArticleHtmlArchiveResult(
+                ok=False,
+                archive_dir=archive_dir,
+                index_html_path=archive_dir / "index.html",
+                assets_dir=assets_dir,
+                resource_count=len(resource_map),
+                failed_resources=tuple(item for item in failed_resources if item),
+                message=f"HTML 离线归档未完成：{unavailable_reason}",
+                warning=unavailable_reason,
+            )
 
         return ArticleHtmlArchiveResult(
             ok=True,
@@ -214,6 +267,25 @@ def build_scroll_warning(stop_reason: str) -> str:
     return ""
 
 
+def ensure_playwright_browser_path(config: ArticleHtmlArchiveConfig) -> Path:
+    browser_dir = Path(config.browser_cache_dir)
+    os.environ["PLAYWRIGHT_BROWSERS_PATH"] = str(browser_dir)
+    return browser_dir
+
+
+def prepare_archive_output_dirs(archive_dir: Path, assets_dir: Path) -> None:
+    archive_path = Path(archive_dir)
+    assets_path = Path(assets_dir)
+    archive_path.mkdir(parents=True, exist_ok=True)
+    if assets_path.exists():
+        resolved_archive = archive_path.resolve()
+        resolved_assets = assets_path.resolve()
+        if resolved_assets == resolved_archive or resolved_archive not in resolved_assets.parents:
+            raise ValueError("assets_dir 必须位于当前文章归档目录下")
+        shutil.rmtree(resolved_assets)
+    assets_path.mkdir(parents=True, exist_ok=True)
+
+
 def select_missing_resource_urls(candidates: list[str], resource_map: dict[str, str], max_count: int) -> list[str]:
     selected: list[str] = []
     seen: set[str] = set()
@@ -225,6 +297,13 @@ def select_missing_resource_urls(candidates: list[str], resource_map: dict[str, 
         if len(selected) >= max(0, int(max_count)):
             break
     return selected
+
+
+def should_save_article_resource(url: str, content_type: str) -> bool:
+    content = str(content_type or "").lower().split(";", 1)[0].strip()
+    if content.startswith(("image/", "video/", "audio/")):
+        return True
+    return infer_asset_kind(url, content_type) == "img"
 
 
 def _scroll_until_loaded(page: Any, config: ArticleHtmlArchiveConfig, resource_map: dict[str, str]) -> str:
@@ -258,6 +337,7 @@ def _scroll_until_loaded(page: Any, config: ArticleHtmlArchiveConfig, resource_m
 
 def _download_lazy_resources(
     page: Any,
+    html_text: str,
     assets_dir: Path,
     resource_map: dict[str, str],
     css_sources: dict[str, str],
@@ -266,7 +346,7 @@ def _download_lazy_resources(
 ) -> None:
     extra_download_count = 0
     html_candidates = select_missing_resource_urls(
-        extract_resource_urls_from_html(page.content(), base_url=page.url),
+        extract_resource_urls_from_html(html_text, base_url=page.url),
         resource_map,
         config.max_extra_resource_downloads,
     )
@@ -319,6 +399,8 @@ def _download_resource(
             failed_resources.append(url)
             return
         content_type = str(response.headers.get("content-type") or "")
+        if not should_save_article_resource(url, content_type):
+            return
         saved = save_asset(assets_dir, url=url, data=response.body(), content_type=content_type)
         resource_map[url] = saved.relative_path
         if saved.kind == "css":
@@ -337,9 +419,252 @@ def _rewrite_saved_css_files(assets_dir: Path, resource_map: dict[str, str], css
             continue
 
 
+def _extract_article_snapshot(page: Any) -> dict[str, object]:
+    try:
+        return dict(page.evaluate(ARTICLE_HTML_SCRIPT) or {})
+    except Exception:
+        return {
+            "title": "",
+            "meta": "",
+            "content": "",
+            "tool": "",
+            "sourceUrl": "",
+            "pageMid": "",
+            "bodyText": "",
+            "isVerifyPage": False,
+            "hasArticleContent": False,
+        }
+
+
+def is_unavailable_article_snapshot(snapshot: dict[str, object]) -> str:
+    page_mid = str(snapshot.get("pageMid") or "")
+    body_text = str(snapshot.get("bodyText") or "")
+    content = str(snapshot.get("content") or "")
+    if bool(snapshot.get("isVerifyPage")) or "secitptpage/verify" in page_mid or "验证码" in body_text:
+        return "微信返回了验证页，需要人工验证后重试"
+    if not bool(snapshot.get("hasArticleContent")) or not content.strip():
+        return "未获取到文章正文"
+    return ""
+
+
+def build_unavailable_article_html(*, title: str, reason: str, source_url: str) -> str:
+    safe_title = html.escape(_strip_tags(title) or "文章正文暂不可用")
+    safe_reason = html.escape(reason or "未获取到文章正文")
+    safe_source = html.escape(str(source_url or ""), quote=True)
+    source_link = (
+        f'<p class="source-link"><a href="{safe_source}" target="_blank" rel="noopener noreferrer">打开原始短链接</a></p>'
+        if safe_source.startswith(("http://", "https://"))
+        else ""
+    )
+    return f"""<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{safe_title}</title>
+  <style>
+    body {{
+      margin: 0 auto;
+      max-width: 720px;
+      padding: 40px 18px;
+      color: #1f2329;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      line-height: 1.75;
+      background: #fff;
+    }}
+    h1 {{ font-size: 22px; line-height: 1.35; }}
+    .notice {{
+      margin-top: 20px;
+      padding: 16px;
+      border: 1px solid #d9e2f2;
+      background: #f7faff;
+      color: #40516b;
+    }}
+    a {{ color: #576b95; text-decoration: none; }}
+  </style>
+</head>
+<body>
+  <article>
+    <h1>{safe_title}</h1>
+    <div class="notice">未获取到文章正文：{safe_reason}</div>
+    {source_link}
+  </article>
+</body>
+</html>"""
+
+
+def clean_article_content_html(content: str) -> str:
+    """清理微信正文中会被本地模板放大的空标题块，保留正文真实换行和媒体节点。"""
+    cleaned = str(content or "")
+    previous = None
+    while previous != cleaned:
+        previous = cleaned
+        cleaned = re.sub(
+            r"<(?P<tag>h[1-6])\b(?P<attrs>[^>]*)>\s*(?:<span\b[^>]*>\s*)*<br\b[^>]*>\s*(?:</span>\s*)*</(?P=tag)>",
+            r'<p\g<attrs>><br></p>',
+            cleaned,
+            flags=re.IGNORECASE | re.DOTALL,
+        )
+        cleaned = re.sub(
+            r"<h[1-6]\b[^>]*>\s*(?:<span\b[^>]*>\s*)*(?:&nbsp;|\s)*(?:</span>\s*)*</h[1-6]>",
+            "",
+            cleaned,
+            flags=re.IGNORECASE | re.DOTALL,
+        )
+    return cleaned
+
+
+def build_article_only_html(*, title: str, meta: str, content: str, tool: str) -> str:
+    # 只保留文章标题、元信息、正文和底部工具区，避免把微信页面壳资源一起离线化。
+    cleaned_content = clean_article_content_html(content)
+    return f"""<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{_strip_tags(title) or "WeChat Article"}</title>
+  <style>
+    html {{
+      background: #fff;
+    }}
+    body {{
+      margin: 0;
+      padding: 0;
+      color: rgba(0, 0, 0, 0.9);
+      font-family: mp-quote, "PingFang SC", system-ui, -apple-system, BlinkMacSystemFont, "Helvetica Neue", "Hiragino Sans GB", "Microsoft YaHei UI", "Microsoft YaHei", Arial, sans-serif;
+      background: #fff;
+      overflow-x: hidden;
+    }}
+    .article-page {{
+      width: min(677px, calc(100vw - 32px));
+      margin: 0 auto;
+      padding: 20px 0 48px;
+      box-sizing: border-box;
+    }}
+    .article-title {{
+      margin: 0 0 14px;
+      font-size: 22px;
+      line-height: 1.4;
+      font-weight: 700;
+      color: rgba(0, 0, 0, 0.9);
+      overflow-wrap: break-word;
+    }}
+    .article-meta {{
+      margin: 0 0 22px;
+      color: rgba(0, 0, 0, 0.3);
+      font-size: 0;
+      line-height: 20px;
+    }}
+    .article-meta a {{
+      color: #576b95;
+      text-decoration: none;
+    }}
+    .article-meta em {{
+      color: rgba(0, 0, 0, 0.3);
+      font-style: normal;
+    }}
+    .article-meta .rich_media_meta {{
+      display: inline-block;
+      margin: 0 8px 10px 0;
+      font-size: 15px;
+      line-height: 20px;
+      vertical-align: middle;
+      font-style: normal;
+    }}
+    .article-meta .rich_media_meta_nickname {{
+      color: #576b95;
+    }}
+    .article-meta .rich_media_meta_text {{
+      color: rgba(0, 0, 0, 0.3);
+    }}
+    #js_profile_card,
+    #meta_content_hide_info {{
+      display: inline !important;
+    }}
+    #js_profile_card {{
+      display: none !important;
+    }}
+    .article-content {{
+      color: rgba(0, 0, 0, 0.9);
+      font-size: 17px;
+      line-height: 1.6;
+      letter-spacing: 0.034em;
+      overflow-wrap: break-word;
+      word-break: normal;
+    }}
+    .article-content p,
+    .article-content h1,
+    .article-content h2,
+    .article-content h3,
+    .article-content h4,
+    .article-content h5,
+    .article-content h6,
+    .article-content section {{
+      margin: 0;
+      max-width: 100%;
+      box-sizing: border-box;
+    }}
+    .article-content img,
+    .article-content video {{
+      max-width: 100% !important;
+      height: auto !important;
+      box-sizing: border-box;
+    }}
+    .article-tool {{
+      margin-top: 32px;
+      color: #576b95;
+      font-size: 15px;
+      line-height: 1.6;
+    }}
+    .article-tool a {{
+      color: #576b95;
+      text-decoration: none;
+    }}
+  </style>
+</head>
+<body>
+  <article class="article-page rich_media_area_primary_inner">
+    <h1 class="article-title rich_media_title">{title}</h1>
+    <div class="article-meta">{meta}</div>
+    <div id="js_content" class="article-content rich_media_content">{cleaned_content}</div>
+    <div class="article-tool">{tool}</div>
+  </article>
+</body>
+</html>"""
+
+
+def _extract_read_original_url(page: Any, html_text: str) -> str:
+    try:
+        value = page.evaluate("() => window.msg_source_url || window.msgSourceUrl || ''")
+        if value:
+            return str(value)
+    except Exception:
+        pass
+    patterns = (
+        r"msg_source_url\s*=\s*(['\"])(?P<url>.*?)\1",
+        r"msgSourceUrl\s*=\s*(['\"])(?P<url>.*?)\1",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, html_text)
+        if match:
+            return match.group("url")
+    return ""
+
+
+def _strip_tags(value: str) -> str:
+    return re.sub(r"<[^>]+>", "", str(value or "")).strip()
+
+
 __all__ = [
     "archive_article_html",
+    "build_article_only_html",
+    "build_unavailable_article_html",
     "build_scroll_warning",
+    "clean_article_content_html",
+    "ensure_playwright_browser_path",
+    "is_unavailable_article_snapshot",
+    "prepare_archive_output_dirs",
     "resolve_article_html_archive_dir",
     "select_missing_resource_urls",
+    "should_save_article_resource",
 ]

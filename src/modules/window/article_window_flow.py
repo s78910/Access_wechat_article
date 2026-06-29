@@ -24,38 +24,27 @@ def open_home_article_for_capture(
     progress_logger: ProgressLogger,
     target_probe_path: Path | None = None,
     inspect_duration_seconds: float = DEFAULT_MITM_RESPONSE_INSPECT_SECONDS,
+    home_window: Any | None = None,
     close_detail_windows: Callable[..., dict[str, Any]] = close_wechat_article_detail_windows,
     click_home_article: Callable[..., dict[str, Any]] = trigger_home_article_open,
+    candidate: Any | None = None,
     write_probe: Callable[..., Any] = write_current_mitm_target_probe,
     emit_event: Callable[..., Any] = put_event,
 ) -> dict[str, Any]:
-    """完成单篇文章点击前后的窗口操作，返回后续 MITM 等待需要的标题和点击时间。"""
-    target_title = ""
+    """完成单篇文章点击操作，返回后续 MITM 等待需要的标题和点击时间。"""
+    target_title = str(getattr(candidate, "title", "") or "").strip()
     click_started_at = time.time()
+    _ = close_detail_windows  # 兼容旧依赖注入签名，详情窗口清理由主流程统一调度。
     if not bool(config.get("enable_home_article_click", True)):
         return {"target_title": target_title, "click_started_at": click_started_at, "click_result": {"ok": False}}
 
-    progress_logger.info(
-        "window",
-        "准备关闭历史微信文章详情窗口，避免旧详情页干扰本次主页点击",
-        substep="close_old_detail_windows_start",
-        progress=2,
-    )
-    detail_window_result = close_detail_windows(
-        homepage_hwnd=int(config.get("wechat_home_hwnd") or 0),
-        pause_seconds=float(config.get("wechat_detail_window_close_pause_seconds", 0.12) or 0.0),
-    )
-    closed_count = len(detail_window_result.get("closed") or [])
-    close_level = "SUCCESS" if detail_window_result.get("ok") else "WARN"
-    progress_logger._emit(
-        close_level,
-        "window",
-        f"已处理微信文章详情窗口：关闭 {closed_count} 个",
-        substep="close_old_detail_windows_done",
-        status="done",
-        progress=3,
-        meta=detail_window_result,
-    )
+    homepage_hwnd = _resolve_homepage_hwnd(home_window)
+    if homepage_hwnd <= 0:
+        return {
+            "target_title": target_title,
+            "click_started_at": click_started_at,
+            "click_result": {"ok": False, "reason": "wechat_home_window_not_found"},
+        }
     progress_logger.info(
         "click",
         f"准备调用主页点击工具打开第 {article_index} 篇文章",
@@ -89,6 +78,8 @@ def open_home_article_for_capture(
     click_result = click_home_article(
         config,
         article_index,
+        home_window=home_window,
+        candidate=candidate,
         before_click=before_article_click,
     )
     if click_result.get("ok"):
@@ -145,6 +136,13 @@ def open_home_article_for_capture(
         )
 
     return {"target_title": target_title, "click_started_at": click_started_at, "click_result": click_result}
+
+
+def _resolve_homepage_hwnd(home_window: Any | None) -> int:
+    try:
+        return int(getattr(home_window, "NativeWindowHandle", 0) or 0)
+    except Exception:
+        return 0
 
 
 __all__ = [

@@ -35,7 +35,7 @@ from src.modules.storage.article_archive_store import (
 )
 from src.modules.storage.mitm_probe_store import write_current_mitm_target_probe
 from src.modules.storage.public_article_store import create_public_article_store
-from src.modules.window.article_clicker import find_wechat_home_window
+from src.modules.window.wechat_home_window_finder import find_wechat_home_window
 from src.modules.window.home_article_cursor import HomeArticleCandidate, HomeArticleCursor
 from src.modules.window.article_window_flow import (
     close_wechat_article_detail_windows,

@@ -16,7 +16,13 @@ from src.app.pywebview_app.webview_api import WebviewApi
 from src.app.pywebview_app.config import WEBVIEW_DIR
 from src.config.runtime_config import load_runtime_config
 from src.core.config import AppRuntimeConfig
+from src.modules.html_archive.archive_cache_service import (
+    ArchiveCacheJobRunner,
+    build_cache_tasks_for_account,
+    build_cache_tasks_for_articles,
+)
 from src.modules.storage.archive_delete_service import ArchiveDeleteService
+from src.modules.storage.archive_excel_export_service import ArchiveExcelExportService
 from src.modules.storage.archive_storage_info import (
     ArchiveStorageInfoResolver,
     default_storage_root_for_db,
@@ -26,10 +32,15 @@ from src.modules.storage.archive_storage_info import (
 from src.modules.storage.sqlite_store import SQLiteStore
 
 
-def create_app(api: WebviewApi | None = None, runtime_config: AppRuntimeConfig | None = None) -> FastAPI:
+def create_app(
+    api: WebviewApi | None = None,
+    runtime_config: AppRuntimeConfig | None = None,
+    archive_cache_runner: ArchiveCacheJobRunner | None = None,
+) -> FastAPI:
     """创建 FastAPI 应用，路由层复用现有 WebviewApi 业务能力。"""
     app_config = runtime_config or load_runtime_config()
     webview_api = api or WebviewApi(runtime_config=app_config, auto_start=False)
+    cache_runner = archive_cache_runner or ArchiveCacheJobRunner(concurrency=3)
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
@@ -40,6 +51,7 @@ def create_app(api: WebviewApi | None = None, runtime_config: AppRuntimeConfig |
 
     app = FastAPI(title="Access WeChat Article API", version="2.0.0", lifespan=lifespan)
     app.state.webview_api = webview_api
+    app.state.archive_cache_runner = cache_runner
 
     app.add_middleware(
         CORSMiddleware,
@@ -217,6 +229,61 @@ def create_app(api: WebviewApi | None = None, runtime_config: AppRuntimeConfig |
         response["status"] = "ok" if result.ok else "partial-failed"
         return response
 
+    @app.post("/api/archive/cache/articles")
+    def cache_archive_articles(payload: ArchiveCacheArticlesPayload):
+        store = SQLiteStore(app_config.storage.db_path)
+        tasks = build_cache_tasks_for_articles(
+            store,
+            payload.articleIds,
+            storage_root=default_storage_root_for_db(app_config.storage.db_path),
+        )
+        job = cache_runner.create_job(tasks)
+        response = _job_to_dict(job)
+        cache_runner.start_job(_job_id(job))
+        return parse_api_payload(response)
+
+    @app.post("/api/archive/accounts/{account_id}/cache")
+    def cache_archive_account(account_id: int):
+        store = SQLiteStore(app_config.storage.db_path)
+        tasks = build_cache_tasks_for_account(
+            store,
+            account_id,
+            storage_root=default_storage_root_for_db(app_config.storage.db_path),
+        )
+        job = cache_runner.create_job(tasks)
+        response = _job_to_dict(job)
+        cache_runner.start_job(_job_id(job))
+        return parse_api_payload(response)
+
+    @app.post("/api/archive/export/accounts")
+    def export_archive_accounts(payload: ArchiveExportPayload):
+        store = SQLiteStore(app_config.storage.db_path)
+        service = ArchiveExcelExportService(
+            store=store,
+            storage_root=default_storage_root_for_db(app_config.storage.db_path),
+        )
+        result = service.export_accounts(payload.accountIds, payload.targetDir)
+        return parse_api_payload(result.to_dict())
+
+    @app.get("/api/archive/cache/jobs/{job_id}")
+    def get_archive_cache_job(job_id: str):
+        job = cache_runner.get_job(job_id)
+        if job is None:
+            return parse_api_payload(
+                {
+                    "ok": False,
+                    "status": "not-found",
+                    "jobId": job_id,
+                    "total": 0,
+                    "finished": 0,
+                    "running": 0,
+                    "concurrency": 3,
+                    "results": [],
+                    "message": "缓存任务不存在。",
+                }
+            )
+        return parse_api_payload(_job_to_dict(job))
+
     @app.post("/api/task/start")
     def start_task(payload: dict[str, Any] | None = None):
         return parse_api_payload(webview_api.start_task(json.dumps(payload or {}, ensure_ascii=False)))
@@ -318,6 +385,15 @@ class ArchiveArticleDeletePayload(BaseModel):
     articleIds: list[int] = []
 
 
+class ArchiveCacheArticlesPayload(BaseModel):
+    articleIds: list[int] = []
+
+
+class ArchiveExportPayload(BaseModel):
+    accountIds: list[int] = []
+    targetDir: str = ""
+
+
 def _create_archive_delete_service(app_config: AppRuntimeConfig) -> ArchiveDeleteService:
     store = SQLiteStore(app_config.storage.db_path)
     return ArchiveDeleteService(
@@ -341,6 +417,30 @@ def parse_api_payload(raw_payload: str | dict[str, Any]) -> JSONResponse:
     if payload.get("status") in {"not-found"}:
         status_code = 404
     return JSONResponse(payload, status_code=status_code)
+
+
+def _job_id(job: Any) -> str:
+    if isinstance(job, dict):
+        return str(job.get("jobId") or job.get("job_id") or "")
+    return str(getattr(job, "job_id", ""))
+
+
+def _job_to_dict(job: Any) -> dict[str, Any]:
+    if hasattr(job, "to_dict"):
+        return dict(job.to_dict())
+    if isinstance(job, dict):
+        return dict(job)
+    return {
+        "ok": False,
+        "status": "failed",
+        "jobId": _job_id(job),
+        "total": 0,
+        "finished": 0,
+        "running": 0,
+        "concurrency": 3,
+        "results": [],
+        "message": "缓存任务状态格式异常。",
+    }
 
 
 def _format_archive_account_item(row: dict[str, Any]) -> dict[str, Any]:

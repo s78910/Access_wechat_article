@@ -112,11 +112,8 @@ flowchart LR
 
 <p align="center">
   <img src="./README/64a99030-d5ec-4ddc-8802-1ae9a4a05626.png" alt="Access WeChat Article visual workflow architecture" width="92%">
+    <sub>Access WeChat Article 总体工作流架构图</sub>
 </p>
-<p align="center">
-  <sub>Access WeChat Article 总体工作流架构图</sub>
-</p>
-
 
 ---
 
@@ -129,30 +126,32 @@ flowchart LR
 主服务页用于配置采集数量、选择采集内容、启动或停止任务，并查看公众号识别结果、任务进度、代理状态、网络速率和实时运行日志。
 
 <p align="center">
-  <img src="README/assets/screenshots/main-service.png" alt="主服务页面运行图" width="92%">
+  <img src="./README/image-20260628122809991.png" alt="主服务页面运行图" width="92%">
 </p>
+
 ### 数据档案：公众号列表与记录详情
 
 数据档案页用于查看公众号维度的材料列表、采集更新时间、文章数量、记录详情和快速操作，适合对已经整理的材料进行浏览、筛选和维护。
 
 <p align="center">
-  <img src="README/assets/screenshots/data-files.png" alt="数据档案页面运行图" width="92%">
+  <img src="./README/image-20260628153743002.png" alt="数据档案页面运行图" width="92%">
 </p>
+
 ### 采集历史：记录检索与统计概览
 
 采集历史页用于按关键词、采集类型、任务状态和日期筛选历史记录，并查看记录详情、成功率、最近采集日期和近日采集趋势。
 
 <p align="center">
-  <img src="README/assets/screenshots/history.png" alt="采集历史页面运行图" width="92%">
+  <img src="./README/image-20260628123525585.png" alt="采集历史页面运行图" width="92%">
 </p>
+
 ### 系统配置：运行环境与代理设置
 
 系统配置页用于管理基础配置、代理开关、系统代理、CA 证书、环境检查和缓存清理等运行参数，方便在 Windows 桌面端完成常见维护操作。
 
 <p align="center">
-  <img src="README/assets/screenshots/settings.png" alt="系统配置页面运行图" width="92%">
+  <img src="./README/image-20260628123624595.png" alt="系统配置页面运行图" width="92%">
 </p>
-
 
 ---
 

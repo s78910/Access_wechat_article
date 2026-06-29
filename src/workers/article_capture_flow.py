@@ -16,6 +16,7 @@ CURRENT_MITM_TARGET_PROBE_PATH = LOG_DIR / "article_capture" / "current_target.j
 DEFAULT_MITM_RESPONSE_INSPECT_SECONDS = 5.0
 DEFAULT_HOME_CANDIDATE_WAIT_TIMEOUT_SECONDS = 300.0
 DEFAULT_HOME_CANDIDATE_WAIT_INTERVAL_SECONDS = 2.0
+DEFAULT_DETAIL_WINDOW_CLOSE_EVERY_ARTICLES = 5
 CLICK_FAILURE_REASONS_WITHOUT_REQUEST = {
     "wechat_home_window_not_found",
     "article_click_target_not_found",
@@ -68,6 +69,18 @@ def run_article_capture_flow(
         f"文章抓取任务已启动，本次计划获取 {target_total} 篇新文章",
         source="article_capture",
     )
+    home_window = deps.find_wechat_home_window()
+    if bool(config.get("enable_home_article_click", True)) and home_window is None:
+        deps.put_event(
+            event_queue,
+            "ERROR",
+            "未找到可用的微信主页窗口，已停止本次文章采集；请先打开公众号/服务号主页后重新开始",
+            source="article_capture",
+        )
+        put_collection_status_event(event_queue, "error", "未找到可用的微信主页窗口")
+        return
+    if bool(config.get("enable_home_article_click", True)):
+        _cleanup_detail_windows(event_queue, config, deps, home_window=home_window, reason="start", processed_count=0)
 
     try:
         if bool(config.get("enable_home_article_click", True)):
@@ -80,6 +93,7 @@ def run_article_capture_flow(
                 run_id,
                 target_total,
                 deps,
+                home_window=home_window,
             )
         else:
             saved_count, failed_count, skipped_count = _run_legacy_index_article_capture(
@@ -91,6 +105,7 @@ def run_article_capture_flow(
                 run_id,
                 target_total,
                 deps,
+                home_window=home_window,
             )
 
         summary_level = "ERROR" if failed_count > 0 else "SUCCESS"
@@ -114,8 +129,9 @@ def _run_cursor_article_capture(
     run_id: str,
     target_total: int,
     deps: ArticleCaptureDependencies,
+    *,
+    home_window: Any | None = None,
 ) -> tuple[int, int, int]:
-    home_window = deps.find_wechat_home_window()
     cursor = deps.home_article_cursor_cls(config=config, home_window=home_window)
     account_name = str(config.get("account_name") or "").strip()
     saved_count = 0
@@ -123,6 +139,7 @@ def _run_cursor_article_capture(
     skipped_count = 0
     saw_candidate = False
     pending_failed_records: list[dict[str, Any]] = []
+    processed_since_detail_cleanup = 0
 
     def defer_failed_record(payload: dict[str, Any]) -> None:
         pending_failed_records.append(payload)
@@ -157,8 +174,9 @@ def _run_cursor_article_capture(
         candidate = cursor.next_candidate()
         if candidate is None:
             if _should_wait_for_home_candidates(cursor):
-                cursor = _wait_for_home_article_candidates(event_queue, config, deps)
+                cursor = _wait_for_home_article_candidates(event_queue, config, deps, home_window=home_window)
                 if cursor is not None:
+                    home_window = getattr(cursor, "home_window", home_window)
                     continue
                 message = (
                     "主页窗口当前不可读，已停止本次文章采集；请解锁屏幕并保持公众号主页可见后重新开始"
@@ -176,6 +194,18 @@ def _run_cursor_article_capture(
             break
 
         saw_candidate = True
+        candidate = _refresh_current_visible_candidate_before_click(
+            event_queue,
+            config,
+            store,
+            deps,
+            cursor=cursor,
+            account_name=account_name,
+            original_candidate=candidate,
+        )
+        if candidate is None:
+            skipped_count += 1
+            continue
         title = str(getattr(candidate, "title", "") or "").strip()
         article_index = int(getattr(candidate, "article_index", 1) or 1)
         if account_name and title and store.has_saved_public_article_title(account_name, title):
@@ -203,19 +233,132 @@ def _run_cursor_article_capture(
             known_account_name=account_name,
             on_account_confirmed=remember_confirmed_account_name,
             on_failed_record_deferred=defer_failed_record,
+            home_window=home_window,
             deps=deps,
         )
         if ok:
             saved_count += 1
         else:
             failed_count += 1
-        _cleanup_detail_windows_after_article(event_queue, config, deps)
+        processed_since_detail_cleanup += 1
+        if _should_cleanup_detail_windows_for_batch(config, processed_since_detail_cleanup):
+            _cleanup_detail_windows(
+                event_queue,
+                config,
+                deps,
+                home_window=home_window,
+                reason="batch",
+                processed_count=saved_count + failed_count,
+            )
+            processed_since_detail_cleanup = 0
         if hasattr(cursor, "invalidate"):
             cursor.invalidate()
         if saved_count + failed_count < target_total:
             _wait_before_next_article(event_queue, config, deps)
 
+    if saved_count + failed_count > 0:
+        _cleanup_detail_windows(
+            event_queue,
+            config,
+            deps,
+            home_window=home_window,
+            reason="finish",
+            processed_count=saved_count + failed_count,
+        )
     return saved_count, failed_count, skipped_count
+
+
+def _refresh_current_visible_candidate_before_click(
+    event_queue,
+    config: dict,
+    store,
+    deps: ArticleCaptureDependencies,
+    *,
+    cursor: Any,
+    account_name: str,
+    original_candidate: Any,
+) -> Any | None:
+    """点击前重新读取当前可见候选；主页自动刷新后，以最新可点击候选为准。"""
+    if not bool(config.get("homepage_reselect_current_visible_before_click", True)):
+        return original_candidate
+    refresh_visible = getattr(cursor, "refresh_visible_candidates", None)
+    if not callable(refresh_visible):
+        return original_candidate
+    refresh_visible()
+    fresh_candidates = _get_cursor_visible_candidates(cursor)
+    fresh_candidates = [item for item in fresh_candidates if _candidate_has_clickable_rect(item)]
+    if not fresh_candidates:
+        return original_candidate
+
+    original_title = str(getattr(original_candidate, "title", "") or "").strip()
+    selected = _select_first_unsaved_candidate(fresh_candidates, store, account_name)
+    if selected is None:
+        _skip_cursor_visible_candidates(cursor, fresh_candidates)
+        deps.put_event(
+            event_queue,
+            "INFO",
+            f"点击前当前可见 {len(fresh_candidates)} 篇文章均已保存，继续向下滚动查找未保存文章",
+            source="article_capture",
+        )
+        return None
+
+    selected_title = str(getattr(selected, "title", "") or "").strip()
+    original_index = int(getattr(original_candidate, "article_index", 0) or 0)
+    selected_index = int(getattr(selected, "article_index", 0) or 0)
+    if selected_title != original_title or selected_index != original_index:
+        deps.put_event(
+            event_queue,
+            "INFO",
+            f"点击前主页候选已变化：原计划《{original_title or '未识别'}》，当前改为《{selected_title or '未识别'}》",
+            source="article_capture",
+        )
+    return selected
+
+
+def _get_cursor_visible_candidates(cursor: Any) -> list[Any]:
+    value = getattr(cursor, "visible_candidates", None)
+    if callable(value):
+        value = value()
+    if isinstance(value, list):
+        return list(value)
+    visible = getattr(cursor, "_visible", None)
+    if isinstance(visible, list):
+        return list(visible)
+    return []
+
+
+def _select_first_unsaved_candidate(candidates: list[Any], store, account_name: str) -> Any | None:
+    for candidate in candidates:
+        title = str(getattr(candidate, "title", "") or "").strip()
+        if not title:
+            continue
+        if account_name and store.has_saved_public_article_title(account_name, title):
+            continue
+        return candidate
+    return None
+
+
+def _skip_cursor_visible_candidates(cursor: Any, candidates: list[Any]) -> None:
+    skip_visible = getattr(cursor, "skip_visible_candidates", None)
+    titles = [str(getattr(candidate, "title", "") or "").strip() for candidate in candidates]
+    titles = [title for title in titles if title]
+    if callable(skip_visible):
+        skip_visible(titles=titles)
+        return
+    visible = getattr(cursor, "_visible", None)
+    if isinstance(visible, list):
+        try:
+            cursor._position = len(visible)
+        except Exception:
+            pass
+
+
+def _candidate_has_clickable_rect(candidate: Any) -> bool:
+    try:
+        left, top, right, bottom = tuple(getattr(candidate, "rect", ()) or ())
+        return int(right) > int(left) and int(bottom) > int(top)
+    except Exception:
+        return False
 
 
 def _should_wait_for_home_candidates(cursor: Any) -> bool:
@@ -229,6 +372,8 @@ def _wait_for_home_article_candidates(
     event_queue,
     config: dict,
     deps: ArticleCaptureDependencies,
+    *,
+    home_window: Any | None = None,
 ):
     """锁屏或窗口遮挡时等待主页恢复可读；恢复后返回新的游标，超时返回 None。"""
     timeout_seconds = resolve_home_candidate_wait_timeout_seconds(config)
@@ -244,7 +389,6 @@ def _wait_for_home_article_candidates(
     while True:
         if interval_seconds > 0:
             time.sleep(interval_seconds)
-        home_window = deps.find_wechat_home_window()
         cursor = deps.home_article_cursor_cls(config=config, home_window=home_window)
         if _cursor_has_visible_candidates(cursor):
             deps.put_event(event_queue, "INFO", "主页窗口已恢复可读，继续按文章标题候选采集", source="article_capture")
@@ -275,21 +419,57 @@ def _cursor_has_visible_candidates(cursor: Any) -> bool:
     return True
 
 
-def _cleanup_detail_windows_after_article(event_queue, config: dict, deps: ArticleCaptureDependencies) -> None:
-    """单篇结束后先关详情窗口，避免下一次主页游标滚动被详情页遮挡。"""
+def _resolve_homepage_hwnd(home_window: Any | None) -> int:
+    try:
+        return int(getattr(home_window, "NativeWindowHandle", 0) or 0)
+    except Exception:
+        return 0
+
+
+def _cleanup_detail_windows(
+    event_queue,
+    config: dict,
+    deps: ArticleCaptureDependencies,
+    *,
+    home_window: Any | None = None,
+    reason: str = "manual",
+    processed_count: int = 0,
+) -> None:
+    """按采集策略关闭微信文章详情窗口，保留公众号/服务号主页窗口。"""
     if not bool(config.get("enable_home_article_click", True)):
+        return
+    homepage_hwnd = _resolve_homepage_hwnd(home_window)
+    if homepage_hwnd <= 0:
+        deps.put_event(event_queue, "WARN", "未清理详情窗口：当前主页窗口句柄为空", source="article_capture")
         return
     try:
         result = deps.close_detail_windows(
-            homepage_hwnd=int(config.get("wechat_home_hwnd") or 0),
+            homepage_hwnd=homepage_hwnd,
             pause_seconds=float(config.get("wechat_detail_window_close_pause_seconds", 0.12) or 0.0),
+            reason=reason,
         )
     except Exception as exc:
-        deps.put_event(event_queue, "WARN", f"单篇结束后清理详情窗口失败：{exc}", source="article_capture")
+        deps.put_event(event_queue, "WARN", f"清理详情窗口失败：{exc}", source="article_capture")
         return
     closed_count = len(result.get("closed") or [])
     if closed_count:
-        deps.put_event(event_queue, "INFO", f"单篇结束后已关闭 {closed_count} 个文章详情窗口，准备继续读取主页", source="article_capture")
+        message = _build_detail_window_cleanup_message(reason, closed_count, processed_count)
+        deps.put_event(event_queue, "INFO", message, source="article_capture")
+
+
+def _should_cleanup_detail_windows_for_batch(config: dict, processed_since_cleanup: int) -> bool:
+    interval = resolve_detail_window_close_every_articles(config)
+    return interval > 0 and processed_since_cleanup >= interval
+
+
+def _build_detail_window_cleanup_message(reason: str, closed_count: int, processed_count: int) -> str:
+    if reason == "start":
+        return f"任务开始前已关闭 {closed_count} 个历史微信文章详情窗口"
+    if reason == "batch":
+        return f"已处理 {processed_count} 篇文章，自动关闭 {closed_count} 个微信文章详情窗口"
+    if reason == "finish":
+        return f"任务结束前已关闭 {closed_count} 个微信文章详情窗口"
+    return f"已关闭 {closed_count} 个微信文章详情窗口"
 
 
 def _run_legacy_index_article_capture(
@@ -301,9 +481,12 @@ def _run_legacy_index_article_capture(
     run_id: str,
     target_total: int,
     deps: ArticleCaptureDependencies,
+    *,
+    home_window: Any | None = None,
 ) -> tuple[int, int, int]:
     saved_count = 0
     failed_count = 0
+    processed_since_detail_cleanup = 0
     for article_index in resolve_target_article_indices({"recordLimit": target_total}):
         ok = _capture_one_article_with_retries(
             event_queue,
@@ -314,14 +497,35 @@ def _run_legacy_index_article_capture(
             run_id,
             article_index,
             planned_articles=target_total,
+            home_window=home_window,
             deps=deps,
         )
         if ok:
             saved_count += 1
         else:
             failed_count += 1
+        processed_since_detail_cleanup += 1
+        if _should_cleanup_detail_windows_for_batch(config, processed_since_detail_cleanup):
+            _cleanup_detail_windows(
+                event_queue,
+                config,
+                deps,
+                home_window=home_window,
+                reason="batch",
+                processed_count=saved_count + failed_count,
+            )
+            processed_since_detail_cleanup = 0
         if saved_count + failed_count < target_total:
             _wait_before_next_article(event_queue, config, deps)
+    if saved_count + failed_count > 0:
+        _cleanup_detail_windows(
+            event_queue,
+            config,
+            deps,
+            home_window=home_window,
+            reason="finish",
+            processed_count=saved_count + failed_count,
+        )
     return saved_count, failed_count, 0
 
 
@@ -335,6 +539,7 @@ def _capture_one_article(
     article_index: int,
     *,
     planned_articles: int,
+    home_window: Any | None = None,
     deps: ArticleCaptureDependencies,
     candidate: Any | None = None,
     known_account_name: str = "",
@@ -368,8 +573,10 @@ def _capture_one_article(
         progress_logger=progress_logger,
         target_probe_path=Path(config.get("mitm_target_probe_path") or CURRENT_MITM_TARGET_PROBE_PATH),
         inspect_duration_seconds=DEFAULT_MITM_RESPONSE_INSPECT_SECONDS,
+        home_window=home_window,
         close_detail_windows=deps.close_detail_windows,
         click_home_article=deps.click_home_article,
+        candidate=candidate,
         write_probe=deps.write_probe,
         emit_event=deps.put_event,
     )
@@ -558,6 +765,7 @@ def _capture_one_article_with_retries(
     known_account_name: str = "",
     on_account_confirmed: Callable[[str], Any] | None = None,
     on_failed_record_deferred: Callable[[dict[str, Any]], Any] | None = None,
+    home_window: Any | None = None,
 ) -> bool:
     retry_count = resolve_retry_count(config)
     for attempt_index in range(retry_count + 1):
@@ -577,12 +785,20 @@ def _capture_one_article_with_retries(
             on_account_confirmed=on_account_confirmed,
             on_failed_record_deferred=on_failed_record_deferred if is_final_attempt else None,
             save_failed_record=is_final_attempt,
+            home_window=home_window,
         )
         if ok:
             return True
         if is_final_attempt:
             return False
-        _cleanup_detail_windows_after_article(event_queue, config, deps)
+        _cleanup_detail_windows(
+            event_queue,
+            config,
+            deps,
+            home_window=home_window,
+            reason="retry",
+            processed_count=0,
+        )
         deps.put_event(
             event_queue,
             "WARN",
@@ -757,6 +973,19 @@ def resolve_retry_count(config: dict | None) -> int:
     except (TypeError, ValueError):
         retry_count = 0
     return max(0, retry_count)
+
+
+def resolve_detail_window_close_every_articles(config: dict | None) -> int:
+    data = config if isinstance(config, dict) else {}
+    raw_value = data.get(
+        "wechat_detail_window_close_every_articles",
+        data.get("wechatDetailWindowCloseEveryArticles", DEFAULT_DETAIL_WINDOW_CLOSE_EVERY_ARTICLES),
+    )
+    try:
+        interval = int(raw_value)
+    except (TypeError, ValueError):
+        interval = DEFAULT_DETAIL_WINDOW_CLOSE_EVERY_ARTICLES
+    return max(0, interval)
 
 
 def _wait_before_next_article(event_queue, config: dict, deps: ArticleCaptureDependencies) -> None:

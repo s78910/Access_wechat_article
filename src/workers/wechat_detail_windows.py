@@ -10,6 +10,9 @@ from typing import Any
 
 WM_CLOSE = 0x0010
 PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+EXPLICIT_HOME_WINDOW_TITLES = {"公众号", "服务号", "订阅号"}
+WECHAT_BROWSER_CLASS_PREFIX = "Chrome_WidgetWin_"
+WECHAT_BROWSER_PROCESS_NAMES = {"wechatappex.exe", "weixin.exe", "wechat.exe"}
 
 
 class RECT(ctypes.Structure):
@@ -27,6 +30,7 @@ def close_wechat_article_detail_windows(
     pause_seconds: float = 0.15,
     min_width: int = 300,
     min_height: int = 300,
+    reason: str = "",
 ) -> dict[str, Any]:
     """关闭微信内置浏览器详情窗口，保留当前公众号主页窗口。"""
     result: dict[str, Any] = {
@@ -34,6 +38,7 @@ def close_wechat_article_detail_windows(
         "closed": [],
         "skipped": [],
         "errors": [],
+        "reason": str(reason or ""),
     }
     if platform.system() != "Windows":
         result["ok"] = False
@@ -87,9 +92,9 @@ def _is_target_detail_window(
         return False
     if not bool(user32.IsWindowVisible(hwnd)):
         return False
-    if _get_window_class(hwnd) != "Chrome_WidgetWin_0":
+    if not _is_wechat_browser_class(_get_window_class(hwnd)):
         return False
-    if _get_window_text(hwnd).strip() == "公众号":
+    if _get_window_text(hwnd).strip() in EXPLICIT_HOME_WINDOW_TITLES:
         return False
 
     rect = _get_window_rect(hwnd)
@@ -98,8 +103,16 @@ def _is_target_detail_window(
     if width < min_width or height < min_height:
         return False
 
-    process_name = _get_window_process_name(hwnd).lower()
-    return process_name == "wechatappex.exe"
+    return _is_wechat_browser_process(_get_window_process_name(hwnd))
+
+
+def _is_wechat_browser_class(class_name: str) -> bool:
+    """微信内置浏览器由 Chromium 窗口承载，不同版本后缀可能不同。"""
+    return str(class_name or "").startswith(WECHAT_BROWSER_CLASS_PREFIX)
+
+
+def _is_wechat_browser_process(process_name: str) -> bool:
+    return Path(str(process_name or "")).name.lower() in WECHAT_BROWSER_PROCESS_NAMES
 
 
 def _build_window_info(hwnd: int) -> dict[str, Any]:

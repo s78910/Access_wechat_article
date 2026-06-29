@@ -3,14 +3,14 @@
 <p align="center">
   <strong>面向学术研究与公开文章材料整理的科研辅助工具</strong>
 </p>
-
 <p align="center">
   <img src="https://img.shields.io/badge/Python-3.13-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python 3.13">
   <img src="https://img.shields.io/badge/requests-http-009688?style=flat-square&logo=python&logoColor=white" alt="requests http">
-  <img src="https://img.shields.io/badge/Vue_3-webview-42B883?style=flat-square&logo=vuedotjs&logoColor=white" alt="Vue 3 webview">
   <img src="https://img.shields.io/badge/SQLite-storage-003B57?style=flat-square&logo=sqlite&logoColor=white" alt="SQLite storage">
   <img src="https://img.shields.io/badge/License-CC_BY--NC--SA_4.0-6C5CE7?style=flat-square" alt="License CC BY-NC-SA 4.0">
+  <a href="https://zread.ai/yeximm/Access_wechat_article"><img src="https://img.shields.io/badge/Ask_Zread-_.svg?style=flat&color=00b0aa&labelColor=000000&logo=data%3Aimage%2Fsvg%2Bxml%3Bbase64%2CPHN2ZyB3aWR0aD0iMTYiIGhlaWdodD0iMTYiIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHBhdGggZD0iTTQuOTYxNTYgMS42MDAxSDIuMjQxNTZDMS44ODgxIDEuNjAwMSAxLjYwMTU2IDEuODg2NjQgMS42MDE1NiAyLjI0MDFWNC45NjAxQzEuNjAxNTYgNS4zMTM1NiAxLjg4ODEgNS42MDAxIDIuMjQxNTYgNS42MDAxSDQuOTYxNTZDNS4zMTUwMiA1LjYwMDEgNS42MDE1NiA1LjMxMzU2IDUuNjAxNTYgNC45NjAxVjIuMjQwMUM1LjYwMTU2IDEuODg2NjQgNS4zMTUwMiAxLjYwMDEgNC45NjE1NiAxLjYwMDFaIiBmaWxsPSIjZmZmIi8%2BCjxwYXRoIGQ9Ik00Ljk2MTU2IDEwLjM5OTlIMi4yNDE1NkMxLjg4ODEgMTAuMzk5OSAxLjYwMTU2IDEwLjY4NjQgMS42MDE1NiAxMS4wMzk5VjEzLjc1OTlDMS42MDE1NiAxNC4xMTM0IDEuODg4MSAxNC4zOTk5IDIuMjQxNTYgMTQuMzk5OUg0Ljk2MTU2QzUuMzE1MDIgMTQuMzk5OSA1LjYwMTU2IDE0LjExMzQgNS42MDE1NiAxMy43NTk5VjExLjAzOTlDNS42MDE1NiAxMC42ODY0IDUuMzE1MDIgMTAuMzk5OSA0Ljk2MTU2IDEwLjM5OTlaIiBmaWxsPSIjZmZmIi8%2BCjxwYXRoIGQ9Ik0xMy43NTg0IDEuNjAwMUgxMS4wMzg0QzEwLjY4NSAxLjYwMDEgMTAuMzk4NCAxLjg4NjY0IDEwLjM5ODQgMi4yNDAxVjQuOTYwMUMxMC4zOTg0IDUuMzEzNTYgMTAuNjg1IDUuNjAwMSAxMS4wMzg0IDUuNjAwMUgxMy43NTg0QzE0LjExMTkgNS42MDAxIDE0LjM5ODQgNS4zMTM1NiAxNC4zOTg0IDQuOTYwMVYyLjI0MDFDMTQuMzk4NCAxLjg4NjY0IDE0LjExMTkgMS42MDAxIDEzLjc1ODQgMS42MDAxWiIgZmlsbD0iI2ZmZiIvPgo8cGF0aCBkPSJNNCAxMkwxMiA0TDQgMTJaIiBmaWxsPSIjZmZmIi8%2BCjxwYXRoIGQ9Ik00IDEyTDEyIDQiIHN0cm9rZT0iI2ZmZiIgc3Ryb2tlLXdpZHRoPSIxLjUiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIvPgo8L3N2Zz4K&logoColor=ffffff" alt="zread"></a>
 </p>
+
 
 <p align="center">
   <img src="./README/6b365eb7-fdc7-4031-bbda-ffc26196033e.png" alt="Access WeChat Article research workbench hero" width="92%">
@@ -88,6 +88,39 @@
     </td>
   </tr>
 </table>
+
+---
+
+## 🚀 快速开始
+
+本项目 v2 版本仅支持 **Windows 10/11**，Python 环境使用 `uv` 管理。
+
+```bash
+git clone https://github.com/yeximm/Access_wechat_article.git
+cd Access_wechat_article
+uv sync
+```
+
+安装 Playwright Chromium 浏览器到项目目录：
+
+```powershell
+$env:PLAYWRIGHT_BROWSERS_PATH=".playwright-browsers"
+uv run playwright install chromium
+```
+
+启动桌面程序：
+
+```bash
+uv run python main.py
+```
+
+程序启动后，也可以在浏览器访问本地网页端：
+
+```text
+http://127.0.0.1:8766/
+```
+
+完整安装步骤请看 [`安装说明`](./doc/install_zh.md)，功能说明请看 [`功能说明`](./doc/features_zh.md)。
 
 ---
 

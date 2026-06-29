@@ -1,9 +1,33 @@
 [project]
-name = "github-240809-access-wechat-article"
+name = "access-wechat-article"
 version = "0.1.0"
-description = "Add your description here"
+description = "A Windows desktop research assistant for organizing public WeChat article metadata and local archives."
 readme = "README.md"
 requires-python = ">=3.13"
+authors = [
+    { name = "yeximm" },
+]
+license = "CC-BY-NC-SA-4.0"
+keywords = [
+    "wechat",
+    "research",
+    "fastapi",
+    "pywebview",
+    "mitmproxy",
+    "sqlite",
+    "playwright",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Win32 (MS Windows)",
+    "Framework :: FastAPI",
+    "Intended Audience :: Science/Research",
+    "Natural Language :: Chinese (Simplified)",
+    "Operating System :: Microsoft :: Windows",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Information Analysis",
+]
 dependencies = [
     "fastapi>=0.138.1",
     "httpx2>=2.5.0",
@@ -15,3 +39,12 @@ dependencies = [
     "uiautomation>=2.0.29",
     "uvicorn>=0.49.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/yeximm/Access_wechat_article"
+Repository = "https://github.com/yeximm/Access_wechat_article"
+Issues = "https://github.com/yeximm/Access_wechat_article/issues"
+Documentation = "https://github.com/yeximm/Access_wechat_article/tree/main/doc"
+
+[tool.uv]
+package = false

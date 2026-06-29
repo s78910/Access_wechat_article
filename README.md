@@ -3,6 +3,11 @@
 <p align="center">
   <strong>面向学术研究与公开文章材料整理的科研辅助工具</strong>
 </p>
+
+<p align="center">
+  <a href="./README.md">简体中文</a> | <a href="./doc/README_en.md">English</a>
+</p>
+
 <p align="center">
   <img src="https://img.shields.io/badge/Python-3.13-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python 3.13">
   <img src="https://img.shields.io/badge/requests-http-009688?style=flat-square&logo=python&logoColor=white" alt="requests http">
@@ -200,14 +205,14 @@ flowchart LR
 
 另外，十分感谢大家对于本项目的关注。
 
-[![Stargazers repo roster for @yeximm/Access_wechat_article](https://reporoster.com/stars/yeximm/Access_wechat_article)](https://github.com/yeximm/Access_wechat_article/stargazers)
-[![Forkers repo roster for @yeximm/Access_wechat_article](https://reporoster.com/forks/yeximm/Access_wechat_article)](https://github.com/yeximm/Access_wechat_article/network/members)
+[![Stargazers repo roster for @yeximm/Access_wechat_article](http://reporoster.com/stars/yeximm/Access_wechat_article)](https://github.com/yeximm/Access_wechat_article/stargazers)
+[![Forkers repo roster for @yeximm/Access_wechat_article](http://reporoster.com/forks/yeximm/Access_wechat_article)](https://github.com/yeximm/Access_wechat_article/network/members)
 
 ---
 
 ## License
 
-本项目采用 Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International 许可协议，简称 `CC BY-NC-SA 4.0`，完整条款以仓库中的 `LICENSE` 文件为准。
+本项目采用许可协议 [`CC BY-NC-SA 4.0`](https://creativecommons.org/licenses/by-nc-sa/4.0/)，完整条款请参考：[Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International](https://creativecommons.org/licenses/by-nc-sa/4.0/) 。
 
 请在查看、使用、复制、修改或二次开发本仓库内容前，仔细阅读许可证与本声明。一旦使用本仓库内容，即视为已理解并接受相关约束。
 

@@ -75,7 +75,6 @@ uv run playwright install chromium
 
 - 安装和启动变化：更新 `doc/install_zh.md`。
 - 页面功能、按钮能力和业务流程变化：更新 `doc/features_zh.md`。
-- 模块边界、运行链路、目录结构变化：更新 `doc/architecture_zh.md`。
 - 贡献流程、安全边界或敏感数据规则变化：更新本文件或 `doc/security_zh.md`。
 
 README 保留原项目展示内容，不作为详细维护手册。新增详细说明优先放入 `doc/`。

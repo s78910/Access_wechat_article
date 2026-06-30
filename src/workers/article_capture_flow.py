@@ -450,6 +450,8 @@ def _select_first_unsaved_candidate(
         title = str(getattr(candidate, "title", "") or "").strip()
         if not title:
             continue
+        if _candidate_is_current_account_name(title, account_name):
+            continue
         if _candidate_skip_reason(
             store,
             account_name,
@@ -460,6 +462,10 @@ def _select_first_unsaved_candidate(
             continue
         return candidate
     return None
+
+
+def _candidate_is_current_account_name(title: str, account_name: str) -> bool:
+    return bool(account_name) and _normalize_skip_title(title) == _normalize_skip_title(account_name)
 
 
 def _candidate_skip_reason(
@@ -580,7 +586,11 @@ def _should_wait_for_home_candidates(cursor: Any) -> bool:
     reason = str(getattr(cursor, "last_stop_reason", "") or "").strip()
     if reason:
         return reason in RECOVERABLE_HOME_CANDIDATE_STOP_REASONS
-    return not bool(getattr(cursor, "has_visible_candidates", False))
+    has_visible = getattr(cursor, "has_visible_candidates", None)
+    if isinstance(has_visible, bool):
+        return not has_visible
+    # 没有明确不可读原因时，认为游标已正常耗尽，避免重复创建新游标从头处理。
+    return False
 
 
 def _wait_for_home_article_candidates(

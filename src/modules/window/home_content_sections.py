@@ -27,16 +27,19 @@ def filter_home_article_targets(
     targets: Sequence[Any],
     text_nodes: Sequence[tuple[str, tuple[int, int, int, int]]],
 ) -> list[Any]:
-    """过滤掉位于贴图 / 视频号内容段中的文章候选。"""
-    markers = _build_home_content_section_markers(text_nodes)
-    if not markers:
+    """过滤掉主页头部以及贴图 / 视频号内容段中的非文章候选。"""
+    nav_bottom = _detect_nav_row_bottom(text_nodes)
+    if nav_bottom is None:
         return list(targets)
+    markers = _build_home_content_section_markers(text_nodes, nav_bottom=nav_bottom)
 
     filtered: list[Any] = []
     for target in targets:
         rect = _target_rect(target)
         if not _valid_rect(rect):
             filtered.append(target)
+            continue
+        if _is_above_home_content_area(rect, nav_bottom):
             continue
         if _is_in_excluded_section(rect, markers):
             continue
@@ -46,11 +49,9 @@ def filter_home_article_targets(
 
 def _build_home_content_section_markers(
     text_nodes: Sequence[tuple[str, tuple[int, int, int, int]]],
+    *,
+    nav_bottom: int,
 ) -> list[HomeContentSectionMarker]:
-    nav_bottom = _detect_nav_row_bottom(text_nodes)
-    if nav_bottom is None:
-        return []
-
     markers: list[HomeContentSectionMarker] = []
     for text, rect in text_nodes:
         label = _normalize_text(text)
@@ -93,6 +94,11 @@ def _is_in_excluded_section(
             break
         current_marker = marker
     return current_marker is not None and current_marker.label in HOME_EXCLUDED_SECTION_LABELS
+
+
+def _is_above_home_content_area(rect: tuple[int, int, int, int], nav_bottom: int) -> bool:
+    """导航栏上方是账号资料区，不把其中的公众号名当作文章标题。"""
+    return int(rect[1]) < int(nav_bottom)
 
 
 def _target_rect(target: Any) -> tuple[int, int, int, int]:

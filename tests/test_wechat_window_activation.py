@@ -365,6 +365,29 @@ class WechatWindowActivationTest(unittest.TestCase):
 
         self.assertEqual([target.title for target in targets], ["归来方知山河重"])
 
+    def test_article_clicker_ignores_header_account_name_above_nav_row(self) -> None:
+        home_window = FakeControl(
+            "服务号",
+            hwnd=200,
+            rect=(100, 100, 900, 900),
+            control_type="DocumentControl",
+            children=[
+                FakeControl("金领冠爱儿俱乐部", hwnd=200, rect=(326, 169, 487, 195), control_type="TextControl"),
+                FakeControl("全部", hwnd=200, rect=(310, 250, 350, 278), control_type="TextControl"),
+                FakeControl("贴图", hwnd=200, rect=(370, 250, 410, 278), control_type="TextControl"),
+                FakeControl("文章", hwnd=200, rect=(430, 250, 470, 278), control_type="TextControl"),
+                FakeControl("视频号", hwnd=200, rect=(490, 250, 550, 278), control_type="TextControl"),
+            ],
+        )
+
+        targets = home_article_clicker.collect_article_click_targets(
+            home_window,
+            max_depth=4,
+            max_nodes=100,
+        )
+
+        self.assertEqual([target.title for target in targets], [])
+
     def test_article_clicker_ignores_wechat_shell_render_window_text(self) -> None:
         shell_window = FakeControl(
             "微信",

@@ -19,7 +19,7 @@ request_interval_seconds: 0
 # 重试次数：单篇文章失败后最多额外重试次数；0 表示不重试。
 retry_count: 3
 
-version: 2.0.0
+version: 2.0.1
 
 # 系统代理：true 时，开启代理后自动接管系统代理；软件关闭时恢复原代理。
 enable_system_proxy: true

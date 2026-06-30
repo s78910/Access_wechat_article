@@ -2,7 +2,7 @@
 
 import sqlite3
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from src.core.config import DEFAULT_DB_PATH
@@ -88,6 +88,41 @@ class SQLiteStore:
                   AND article.collect_status = 'saved'
                 """,
                 (normalized_account,),
+            ).fetchall()
+            return any(self._normalize_article_title(row[0]).lower() == normalized_title.lower() for row in rows)
+
+    def has_recent_failed_public_article_title(
+        self,
+        account_name: str,
+        article_title: str,
+        *,
+        cooldown_minutes: float,
+        now: str | datetime | None = None,
+    ) -> bool:
+        """判断同一公众号下同标题文章是否仍处于失败冷却期。"""
+        normalized_account = str(account_name or "").strip()
+        normalized_title = self._normalize_article_title(article_title)
+        try:
+            minutes = float(cooldown_minutes)
+        except (TypeError, ValueError):
+            minutes = 0.0
+        if not normalized_account or not normalized_title or minutes <= 0:
+            return False
+
+        now_dt = self._parse_datetime(now) or datetime.now()
+        cutoff = (now_dt - timedelta(minutes=minutes)).strftime("%Y-%m-%d %H:%M:%S")
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT article.article_title
+                FROM awa_public_articles AS article
+                JOIN awa_public_accounts AS account
+                    ON account.id = article.account_id
+                WHERE account.account_name = ?
+                  AND article.collect_status = 'failed'
+                  AND article.collect_time >= ?
+                """,
+                (normalized_account, cutoff),
             ).fetchall()
             return any(self._normalize_article_title(row[0]).lower() == normalized_title.lower() for row in rows)
 
@@ -784,6 +819,23 @@ class SQLiteStore:
         if text in {"saved", "已保存", "保存成功"}:
             return "saved"
         return "failed"
+
+    @staticmethod
+    def _parse_datetime(value: str | datetime | None) -> datetime | None:
+        if isinstance(value, datetime):
+            return value
+        text = str(value or "").strip()
+        if not text:
+            return None
+        for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M"):
+            try:
+                return datetime.strptime(text, fmt)
+            except ValueError:
+                continue
+        try:
+            return datetime.fromisoformat(text)
+        except ValueError:
+            return None
 
     @contextmanager
     def _connect(self):

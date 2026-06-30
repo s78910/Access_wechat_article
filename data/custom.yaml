@@ -14,7 +14,7 @@ auto_start_proxy: true
 log_level: INFO
 
 # 请求间隔时间：每篇文章处理完成后，进入下一篇前等待的秒数。
-request_interval_seconds: 2
+request_interval_seconds: 0
 
 # 重试次数：单篇文章失败后最多额外重试次数；0 表示不重试。
 retry_count: 3

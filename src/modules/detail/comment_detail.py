@@ -21,6 +21,7 @@ from src.modules.detail.article_detail import (
 
 
 DEFAULT_TIMEOUT_SECONDS = 10.0
+DEFAULT_RESOURCE_TIMEOUT_SECONDS = 5.0
 DEFAULT_COMMENT_LIMIT = 100
 DEFAULT_REPLY_LIMIT = 20
 DEFAULT_MAX_BODY_CHARS = 8_000_000
@@ -61,6 +62,10 @@ def fetch_comments_to_archive(
     page_pause_seconds: float = 0.2,
     reply_page_pause_seconds: float = 0.2,
     download_resources: bool = True,
+    download_avatars: bool = True,
+    download_emojis: bool = True,
+    download_pictures: bool = True,
+    resource_timeout_seconds: float = DEFAULT_RESOURCE_TIMEOUT_SECONDS,
     http_get: HttpGetCallable | None = None,
     resource_get: HttpGetCallable | None = None,
 ) -> dict[str, Any]:
@@ -162,7 +167,15 @@ def fetch_comments_to_archive(
     )
     comments = extract_structured_comments(merged)
     resource_result = (
-        download_comment_resources(comments, target_dir, resource_get=resource_get)
+        download_comment_resources(
+            comments,
+            target_dir,
+            resource_get=resource_get,
+            download_avatars=download_avatars,
+            download_emojis=download_emojis,
+            download_pictures=download_pictures,
+            timeout_seconds=resource_timeout_seconds,
+        )
         if download_resources
         else {"attempted": False, "reason": "download_resources_disabled", "resources": {}, "counts": empty_resource_counts()}
     )
@@ -660,17 +673,57 @@ def download_comment_resources(
     article_dir: Path,
     *,
     resource_get: HttpGetCallable | None = None,
+    download_avatars: bool = True,
+    download_emojis: bool = True,
+    download_pictures: bool = True,
+    timeout_seconds: float = DEFAULT_RESOURCE_TIMEOUT_SECONDS,
 ) -> dict[str, Any]:
     resources: dict[str, Any] = {}
     getter = resource_get or requests_get
     for comment in comments:
-        register_comment_resource(resources, article_dir, comment, level=1, resource_type="avatar", getter=getter)
-        register_multi_info_resources(resources, article_dir, comment, level=1, getter=getter)
+        if download_avatars:
+            register_comment_resource(
+                resources,
+                article_dir,
+                comment,
+                level=1,
+                resource_type="avatar",
+                getter=getter,
+                timeout_seconds=timeout_seconds,
+            )
+        register_multi_info_resources(
+            resources,
+            article_dir,
+            comment,
+            level=1,
+            getter=getter,
+            download_emojis=download_emojis,
+            download_pictures=download_pictures,
+            timeout_seconds=timeout_seconds,
+        )
         for reply in comment.get("replies") or []:
             if not isinstance(reply, dict):
                 continue
-            register_comment_resource(resources, article_dir, reply, level=2, resource_type="avatar", getter=getter)
-            register_multi_info_resources(resources, article_dir, reply, level=2, getter=getter)
+            if download_avatars:
+                register_comment_resource(
+                    resources,
+                    article_dir,
+                    reply,
+                    level=2,
+                    resource_type="avatar",
+                    getter=getter,
+                    timeout_seconds=timeout_seconds,
+                )
+            register_multi_info_resources(
+                resources,
+                article_dir,
+                reply,
+                level=2,
+                getter=getter,
+                download_emojis=download_emojis,
+                download_pictures=download_pictures,
+                timeout_seconds=timeout_seconds,
+            )
     return {"attempted": True, "resources": resources, "counts": count_comment_resources(resources)}
 
 
@@ -681,14 +734,39 @@ def register_multi_info_resources(
     *,
     level: int,
     getter: HttpGetCallable,
+    download_emojis: bool = True,
+    download_pictures: bool = True,
+    timeout_seconds: float = DEFAULT_RESOURCE_TIMEOUT_SECONDS,
 ) -> None:
     multi_info = item.get("multi_info") if isinstance(item.get("multi_info"), dict) else {}
-    for emoji in multi_info.get("emojis") or []:
-        if isinstance(emoji, dict):
-            register_comment_resource(resources, article_dir, item, level=level, resource_type="emoji", getter=getter, url=first_non_empty(emoji, ("url", "cdn_url", "thumb_url", "emoji_url")))
-    for picture in multi_info.get("pictures") or []:
-        if isinstance(picture, dict):
-            register_comment_resource(resources, article_dir, item, level=level, resource_type="other", getter=getter, url=first_non_empty(picture, ("url", "cdn_url", "thumb_url", "pic_url")))
+    if download_emojis:
+        for emoji in multi_info.get("emojis") or []:
+            if isinstance(emoji, dict):
+                register_comment_resource(
+                    resources,
+                    article_dir,
+                    item,
+                    level=level,
+                    resource_type="emoji",
+                    getter=getter,
+                    url=first_non_empty(emoji, ("url", "cdn_url", "thumb_url", "emoji_url")),
+                    target_item=emoji,
+                    timeout_seconds=timeout_seconds,
+                )
+    if download_pictures:
+        for picture in multi_info.get("pictures") or []:
+            if isinstance(picture, dict):
+                register_comment_resource(
+                    resources,
+                    article_dir,
+                    item,
+                    level=level,
+                    resource_type="picture",
+                    getter=getter,
+                    url=first_non_empty(picture, ("url", "cdn_url", "thumb_url", "pic_url")),
+                    target_item=picture,
+                    timeout_seconds=timeout_seconds,
+                )
 
 
 def register_comment_resource(
@@ -700,6 +778,8 @@ def register_comment_resource(
     resource_type: str,
     getter: HttpGetCallable,
     url: str = "",
+    target_item: dict[str, Any] | None = None,
+    timeout_seconds: float = DEFAULT_RESOURCE_TIMEOUT_SECONDS,
 ) -> None:
     raw_url = url or str(item.get("avatar_url") or "")
     if not raw_url:
@@ -713,22 +793,49 @@ def register_comment_resource(
     }
     if raw_url in resources:
         resources[raw_url].setdefault("used_by", []).append(used_by)
-        if resource_type == "avatar" and resources[raw_url].get("local_path"):
-            item["avatar_local_path"] = resources[raw_url]["local_path"]
+        apply_comment_resource_result(item, resource_type, resources[raw_url], target_item=target_item)
         return
-    downloaded = download_comment_resource(raw_url, article_dir, resource_type, getter=getter)
+    downloaded = download_comment_resource(raw_url, article_dir, resource_type, getter=getter, timeout_seconds=timeout_seconds)
     downloaded["used_by"] = [used_by]
     resources[raw_url] = downloaded
-    if resource_type == "avatar" and downloaded.get("local_path"):
-        item["avatar_local_path"] = downloaded["local_path"]
+    apply_comment_resource_result(item, resource_type, downloaded, target_item=target_item)
 
 
-def download_comment_resource(url: str, article_dir: Path, resource_type: str, *, getter: HttpGetCallable) -> dict[str, Any]:
-    subdir = {"avatar": "avatar", "emoji": "emoji"}.get(resource_type, "other")
+def apply_comment_resource_result(
+    item: dict[str, Any],
+    resource_type: str,
+    resource: dict[str, Any],
+    *,
+    target_item: dict[str, Any] | None = None,
+) -> None:
+    if resource_type == "avatar" and resource.get("local_path"):
+        item["avatar_local_path"] = resource["local_path"]
+    if target_item is None:
+        return
+    target_item["download_ok"] = bool(resource.get("ok"))
+    if resource.get("local_path"):
+        target_item["local_path"] = resource["local_path"]
+    if resource.get("error"):
+        target_item["download_error"] = resource["error"]
+    if resource.get("content_type"):
+        target_item["content_type"] = resource["content_type"]
+    if resource.get("byte_length") is not None:
+        target_item["byte_length"] = resource["byte_length"]
+
+
+def download_comment_resource(
+    url: str,
+    article_dir: Path,
+    resource_type: str,
+    *,
+    getter: HttpGetCallable,
+    timeout_seconds: float = DEFAULT_RESOURCE_TIMEOUT_SECONDS,
+) -> dict[str, Any]:
+    subdir = {"avatar": "avatar", "emoji": "emoji", "picture": "picture"}.get(resource_type, "other")
     target_dir = article_dir / "comments_img" / subdir
     target_dir.mkdir(parents=True, exist_ok=True)
     try:
-        response = getter(url, dict(RESOURCE_HEADERS), DEFAULT_TIMEOUT_SECONDS)
+        response = getter(url, dict(RESOURCE_HEADERS), normalize_timeout(timeout_seconds))
         status_code = int(getattr(response, "status_code", 0) or 0)
         content = bytes(getattr(response, "content", b"") or b"")
         headers = getattr(response, "headers", {}) or {}
@@ -1053,7 +1160,7 @@ def count_comment_resources(resources: dict[str, Any]) -> dict[str, int]:
 
 
 def empty_resource_counts() -> dict[str, int]:
-    return {"avatar": 0, "emoji": 0, "other": 0, "failed": 0}
+    return {"avatar": 0, "emoji": 0, "picture": 0, "other": 0, "failed": 0}
 
 
 def current_time_text() -> str:

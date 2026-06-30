@@ -370,6 +370,48 @@ class SQLiteStoreTest(unittest.TestCase):
             self.assertFalse(store.has_saved_public_article_title("account-a", "article-detail"))
             self.assertFalse(store.has_saved_public_article_title("account-a", "Other Account Only"))
 
+    def test_has_recent_failed_public_article_title_respects_cooldown_minutes(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            db_path = Path(temp_dir) / "awa_public.sqlite3"
+            store = SQLiteStore(db_path)
+            store.save_public_article(
+                {
+                    "account_name": "account-a",
+                    "article_title": "超时文章",
+                    "published_article_time": "",
+                    "article_link": "",
+                    "record_type": "文章详情",
+                    "collect_time": "2026-06-30 12:15:11",
+                    "duration_seconds": 10.0,
+                    "collect_status": "failed",
+                }
+            )
+
+            self.assertTrue(
+                store.has_recent_failed_public_article_title(
+                    "account-a",
+                    "  超时文章  ",
+                    cooldown_minutes=30,
+                    now="2026-06-30 12:20:00",
+                )
+            )
+            self.assertFalse(
+                store.has_recent_failed_public_article_title(
+                    "account-a",
+                    "超时文章",
+                    cooldown_minutes=30,
+                    now="2026-06-30 13:00:00",
+                )
+            )
+            self.assertFalse(
+                store.has_recent_failed_public_article_title(
+                    "account-b",
+                    "超时文章",
+                    cooldown_minutes=30,
+                    now="2026-06-30 12:20:00",
+                )
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

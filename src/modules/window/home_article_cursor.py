@@ -15,6 +15,16 @@ from src.modules.window.home_window_focus_guard import (
 
 WM_MOUSEWHEEL = 0x020A
 WHEEL_DELTA = 120
+DEFAULT_SCROLL_LOAD_TIMEOUT_SECONDS = 1.0
+DEFAULT_SCROLL_POLL_INTERVAL_SECONDS = 0.15
+DEFAULT_SCROLL_PAUSE_SECONDS = 0.35
+DEFAULT_SCROLL_BOUNCE_ATTEMPTS = 1
+DEFAULT_SCROLL_BOUNCE_RATIO = 0.5
+DEFAULT_SCROLL_BOUNCE_PAUSE_SECONDS = 0.18
+DEFAULT_SCROLL_EMPTY_LIMIT = 5
+DEFAULT_FAST_SKIP_SCROLL_DELTA_RATIO = 1.35
+DEFAULT_FAST_SKIP_LOAD_TIMEOUT_SECONDS = 0.45
+DEFAULT_FAST_SKIP_PAUSE_SECONDS = 0.05
 
 TargetCollector = Callable[..., list[ArticleClickTarget]]
 HomeScroller = Callable[..., dict[str, Any]]
@@ -54,7 +64,9 @@ class HomeArticleCursor:
         self._seen_signatures: set[str] = set()
         self._last_screen_signature: tuple[str, ...] = ()
         self._unchanged_scrolls = 0
+        self._empty_scrolls = 0
         self._last_stop_reason = ""
+        self._fast_skip_next_scroll = False
 
     @property
     def has_visible_candidates(self) -> bool:
@@ -93,6 +105,9 @@ class HomeArticleCursor:
                 continue
             self._seen_signatures.add(signature)
         self._position = len(self._visible)
+        if _resolve_bool_config(self.config, "homepage_fast_skip_saved_enabled", True):
+            # 当前屏都是已保存文章时，下次滚动使用快进参数，减少在旧内容上停留的时间。
+            self._fast_skip_next_scroll = True
 
     def next_candidate(self) -> HomeArticleCandidate | None:
         while True:
@@ -114,15 +129,20 @@ class HomeArticleCursor:
 
     def _load_visible_candidates(self) -> None:
         targets = self._collect_targets_with_focus_recovery()
+        visible: list[HomeArticleCandidate] = []
+        for target in targets:
+            candidate = _candidate_from_click_target(target)
+            if candidate is not None:
+                visible.append(candidate)
+        visible.sort(key=lambda candidate: (candidate.rect[1], candidate.rect[0], candidate.rect[3], candidate.rect[2]))
         self._visible = [
             HomeArticleCandidate(
-                title=str(target.title or "").strip(),
+                title=candidate.title,
                 article_index=index,
-                rect=tuple(target.rect),
-                hwnd=int(target.hwnd or 0),
+                rect=candidate.rect,
+                hwnd=candidate.hwnd,
             )
-            for index, target in enumerate(targets, 1)
-            if str(target.title or "").strip()
+            for index, candidate in enumerate(visible, 1)
         ]
         self._position = 0
         self._loaded = True
@@ -153,15 +173,23 @@ class HomeArticleCursor:
     def _scroll_and_reload(self) -> bool:
         # 当前屏候选的坐标能帮助把滚轮消息投递到真实文章列表区域，而不是只发给外层窗口。
         current_visible = list(self._visible)
-        result = self.scroll_home(self.home_window, self.config, visible_candidates=current_visible)
+        before = self._last_screen_signature or self._screen_signature(self._visible)
+        fast_skip = bool(self._fast_skip_next_scroll)
+        self._fast_skip_next_scroll = False
+        down_delta_ratio = self._resolve_scroll_delta_ratio(fast_skip=fast_skip)
+        result = self._send_scroll(current_visible, direction="down", delta_ratio=down_delta_ratio)
         if result.get("ok") is False:
             self._last_stop_reason = "scroll_failed"
             return False
-        time.sleep(float(self.config.get("homepage_scroll_pause_seconds", 0.35) or 0.0))
-        before = self._last_screen_signature or self._screen_signature(self._visible)
-        self._loaded = False
-        self._load_visible_candidates()
-        after = self._screen_signature(self._visible)
+
+        after = self._load_visible_candidates_until_changed(before, fast_skip=fast_skip)
+        if not self._has_new_visible_screen(before, after):
+            bounced_after = self._try_bounce_scroll_for_loading(before, fast_skip=fast_skip)
+            if bounced_after is not None:
+                after = bounced_after
+            if self._last_stop_reason == "scroll_failed":
+                return False
+
         self._last_screen_signature = after
         if after == before:
             self._unchanged_scrolls += 1
@@ -170,13 +198,132 @@ class HomeArticleCursor:
         # 微信主页滚动和 UIA 树刷新不是严格同步的；同一屏短暂不变时继续尝试，避免过早结束 10 篇任务。
         unchanged_limit = max(1, int(self.config.get("homepage_scroll_unchanged_limit", 5)))
         if not self._visible:
-            self._last_stop_reason = "no_visible_candidates"
-            return False
+            self._empty_scrolls += 1
+            empty_limit = max(
+                1,
+                _safe_int(
+                    self.config.get("homepage_scroll_empty_limit", DEFAULT_SCROLL_EMPTY_LIMIT),
+                    DEFAULT_SCROLL_EMPTY_LIMIT,
+                ),
+            )
+            if self._empty_scrolls >= empty_limit:
+                self._last_stop_reason = "no_visible_candidates"
+                return False
+            self._last_stop_reason = ""
+            return True
+        self._empty_scrolls = 0
         if self._unchanged_scrolls >= unchanged_limit:
             self._last_stop_reason = "unchanged_after_scroll"
             return False
         self._last_stop_reason = ""
         return True
+
+    def _resolve_scroll_delta_ratio(self, *, fast_skip: bool) -> float:
+        if not fast_skip:
+            return 1.0
+        return _resolve_float_config(
+            self.config,
+            "homepage_fast_skip_scroll_delta_ratio",
+            DEFAULT_FAST_SKIP_SCROLL_DELTA_RATIO,
+        )
+
+    def _send_scroll(
+        self,
+        visible_candidates: list[HomeArticleCandidate],
+        *,
+        direction: str,
+        delta_ratio: float,
+    ) -> dict[str, Any]:
+        scroll_config = dict(self.config)
+        scroll_config["homepage_scroll_direction"] = direction
+        scroll_config["homepage_scroll_delta_ratio"] = max(0.01, float(delta_ratio))
+        return self.scroll_home(self.home_window, scroll_config, visible_candidates=visible_candidates)
+
+    def _load_visible_candidates_until_changed(self, before: tuple[str, ...], *, fast_skip: bool = False) -> tuple[str, ...]:
+        if fast_skip:
+            pause_seconds = _resolve_float_config(
+                self.config,
+                "homepage_fast_skip_scroll_pause_seconds",
+                DEFAULT_FAST_SKIP_PAUSE_SECONDS,
+            )
+        else:
+            pause_seconds = _resolve_float_config(self.config, "homepage_scroll_pause_seconds", DEFAULT_SCROLL_PAUSE_SECONDS)
+        if pause_seconds > 0:
+            time.sleep(pause_seconds)
+
+        if fast_skip:
+            timeout_seconds = _resolve_float_config(
+                self.config,
+                "homepage_fast_skip_load_timeout_seconds",
+                DEFAULT_FAST_SKIP_LOAD_TIMEOUT_SECONDS,
+            )
+        else:
+            timeout_seconds = _resolve_float_config(
+                self.config,
+                "homepage_scroll_load_timeout_seconds",
+                DEFAULT_SCROLL_LOAD_TIMEOUT_SECONDS,
+            )
+        poll_interval = _resolve_float_config(
+            self.config,
+            "homepage_scroll_poll_interval_seconds",
+            DEFAULT_SCROLL_POLL_INTERVAL_SECONDS,
+        )
+        deadline = time.monotonic() + timeout_seconds
+
+        while True:
+            self._loaded = False
+            self._load_visible_candidates()
+            after = self._screen_signature(self._visible)
+            if self._has_new_visible_screen(before, after):
+                return after
+            if timeout_seconds <= 0 or time.monotonic() >= deadline:
+                return after
+            sleep_seconds = min(max(poll_interval, 0.01), max(0.0, deadline - time.monotonic()))
+            if sleep_seconds > 0:
+                time.sleep(sleep_seconds)
+
+    def _try_bounce_scroll_for_loading(self, before: tuple[str, ...], *, fast_skip: bool = False) -> tuple[str, ...] | None:
+        if not _resolve_bool_config(self.config, "homepage_scroll_bounce_enabled", True):
+            return None
+
+        attempts = max(
+            0,
+            _safe_int(
+                self.config.get("homepage_scroll_bounce_attempts", DEFAULT_SCROLL_BOUNCE_ATTEMPTS),
+                DEFAULT_SCROLL_BOUNCE_ATTEMPTS,
+            ),
+        )
+        if attempts <= 0:
+            return None
+
+        bounce_ratio = _resolve_float_config(self.config, "homepage_scroll_bounce_ratio", DEFAULT_SCROLL_BOUNCE_RATIO)
+        bounce_pause = _resolve_float_config(
+            self.config,
+            "homepage_scroll_bounce_pause_seconds",
+            DEFAULT_SCROLL_BOUNCE_PAUSE_SECONDS,
+        )
+        after = self._screen_signature(self._visible)
+        down_delta_ratio = self._resolve_scroll_delta_ratio(fast_skip=fast_skip)
+        for _attempt_index in range(attempts):
+            current_visible = list(self._visible)
+            up_result = self._send_scroll(current_visible, direction="up", delta_ratio=bounce_ratio)
+            if up_result.get("ok") is False:
+                self._last_stop_reason = "scroll_failed"
+                return after
+            if bounce_pause > 0:
+                time.sleep(bounce_pause)
+
+            down_result = self._send_scroll(current_visible, direction="down", delta_ratio=down_delta_ratio)
+            if down_result.get("ok") is False:
+                self._last_stop_reason = "scroll_failed"
+                return after
+            after = self._load_visible_candidates_until_changed(before, fast_skip=fast_skip)
+            if self._has_new_visible_screen(before, after):
+                return after
+        return after
+
+    def _has_new_visible_screen(self, before: tuple[str, ...], after: tuple[str, ...]) -> bool:
+        return bool(self._visible) and after != before
 
     @staticmethod
     def _screen_signature(candidates: list[HomeArticleCandidate]) -> tuple[str, ...]:
@@ -205,8 +352,13 @@ def scroll_wechat_home_articles(
         return {"ok": False, "reason": "wechat_home_hwnd_empty"}
 
     user32 = ctypes.windll.user32
-    wheel_delta = -abs(int(config.get("homepage_scroll_delta", WHEEL_DELTA * 5) or WHEEL_DELTA * 5))
-    repeat = max(1, int(config.get("homepage_scroll_repeat", 1) or 1))
+    direction = str(config.get("homepage_scroll_direction", "down")).lower()
+    base_delta = abs(_safe_int(config.get("homepage_scroll_delta", WHEEL_DELTA * 5), WHEEL_DELTA * 5) or WHEEL_DELTA * 5)
+    delta_ratio = max(0.01, _safe_float(config.get("homepage_scroll_delta_ratio", 1.0), 1.0))
+    wheel_delta = max(1, int(round(base_delta * delta_ratio)))
+    if direction != "up":
+        wheel_delta = -wheel_delta
+    repeat = max(1, _safe_int(config.get("homepage_scroll_repeat", 1), 1))
     target_hwnd, screen_point, client_point = _resolve_scroll_message_target(
         user32,
         hwnd,
@@ -227,11 +379,22 @@ def scroll_wechat_home_articles(
         "screen_point": list(screen_point) if screen_point else [],
         "client_point": list(client_point) if client_point else [],
         "wheel_delta": wheel_delta,
+        "direction": direction,
+        "delta_ratio": delta_ratio,
     }
 
 
 def _normalize_title(value: str) -> str:
     return " ".join(str(value or "").split()).lower()
+
+
+def _candidate_from_click_target(target: ArticleClickTarget) -> HomeArticleCandidate | None:
+    title = str(_safe_get(target, "title", "") or "").strip()
+    rect = rect_to_tuple(_safe_get(target, "rect", None))
+    hwnd = _safe_int(_safe_get(target, "hwnd", 0))
+    if not title or not _valid_rect(rect) or hwnd <= 0:
+        return None
+    return HomeArticleCandidate(title=title, article_index=0, rect=rect, hwnd=hwnd)
 
 
 def _make_wparam(delta: int) -> int:
@@ -344,11 +507,33 @@ def _valid_rect(rect: tuple[int, int, int, int]) -> bool:
     return right > left and bottom > top
 
 
-def _safe_int(value: Any) -> int:
+def _safe_int(value: Any, default: int = 0) -> int:
     try:
-        return int(value or 0)
+        if value is None or value == "":
+            return int(default)
+        return int(value)
     except (TypeError, ValueError):
-        return 0
+        return int(default)
+
+
+def _safe_float(value: Any, default: float = 0.0) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return float(default)
+
+
+def _resolve_float_config(config: dict[str, Any], key: str, default: float) -> float:
+    return max(0.0, _safe_float(config.get(key, default), default))
+
+
+def _resolve_bool_config(config: dict[str, Any], key: str, default: bool) -> bool:
+    value = config.get(key, default)
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() not in {"0", "false", "no", "off"}
+    return bool(value)
 
 
 def _safe_get(obj: Any, attr_name: str, default: Any = "") -> Any:

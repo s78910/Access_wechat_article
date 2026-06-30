@@ -2,15 +2,17 @@ from __future__ import annotations
 
 import tempfile
 import unittest
+import queue as thread_queue
 from multiprocessing import Queue
 from pathlib import Path
 from unittest.mock import patch
 
 from src.config.runtime_config import load_runtime_config, save_runtime_config, update_runtime_config_from_payload
 from src.core.config import AppFeatureConfig, AppRuntimeConfig, MITMPROXY_CONF_DIR, ProxyConfig
+from src.core import task_manager as task_manager_module
 from src.core.task_manager import TaskManager, resolve_wait_timeout_seconds, wait_for_tcp_listener
 from src.modules.proxy.system_proxy import ProxySnapshot
-from src.workers.wechat_home import DEFAULT_WECHAT_HOME_SNAPSHOT
+from src.workers.wechat_home import DEFAULT_WECHAT_HOME_SNAPSHOT, WeChatHomeSnapshot
 
 
 class FakeProcessManager:
@@ -104,6 +106,26 @@ class OrderedProxyManager:
 
     def current_snapshot(self):
         return FailingProxyManager().current_snapshot()
+
+
+class NoopProxyManager:
+    is_enabled = False
+
+    def current_snapshot(self):
+        return ProxySnapshot(enabled=False, server="")
+
+    def stop(self) -> None:
+        return None
+
+
+class MemoryFileLogger:
+    path = "memory.log"
+
+    def __init__(self) -> None:
+        self.written: list[dict] = []
+
+    def write(self, event):
+        self.written.append(dict(event))
 
 
 class TaskManagerMitmReadyTest(unittest.TestCase):
@@ -273,6 +295,115 @@ class TaskManagerMitmReadyTest(unittest.TestCase):
         self.assertTrue(result["proxy"]["systemProxyActive"])
         self.assertEqual(result["proxy"]["systemProxyServer"], "127.0.0.1:18000")
 
+    def test_stop_during_start_prevents_article_worker_from_starting_after_home_detection(self) -> None:
+        class RunningMitmProcessManager(FakeProcessManager):
+            def __init__(self) -> None:
+                super().__init__()
+                self.running = {"mitm"}
+                self.stopped_workers: list[str] = []
+
+            def is_running(self, name: str) -> bool:
+                return name in self.running
+
+            def start_worker(self, name: str, *_args, **_kwargs):
+                self.started_workers.append(name)
+                self.running.add(name)
+
+            def stop_worker(self, name: str, timeout: float = 3) -> bool:
+                self.stopped_workers.append(name)
+                self.running.discard(name)
+                return True
+
+            def running_workers(self) -> list[str]:
+                return sorted(self.running)
+
+        process_manager = RunningMitmProcessManager()
+        manager: TaskManager | None = None
+
+        def detector(**_kwargs):
+            assert manager is not None
+            manager.stop_task()
+            return WeChatHomeSnapshot(
+                status="ready",
+                status_label="主页信息已获取",
+                account_name="测试公众号",
+                description="测试简介",
+                original_count="1",
+                friend_follow_count="0",
+                found=True,
+                account_confidence="high",
+                account_source="profile_header",
+            )
+
+        manager = TaskManager(
+            config=AppRuntimeConfig(app=AppFeatureConfig(auto_start_proxy=False)),
+            proxy_manager=NoopProxyManager(),
+            process_manager=process_manager,
+            home_detector=detector,
+        )
+
+        with patch.object(manager, "_wait_for_mitm_listener", return_value=True):
+            result = manager.start_task({"recordLimit": 1})
+
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["status"], "stopped")
+        self.assertNotIn("article_capture", process_manager.started_workers)
+
+    def test_start_task_returns_to_stopped_when_mitm_port_is_not_ready(self) -> None:
+        class RunningMitmProcessManager(FakeProcessManager):
+            def is_running(self, name: str) -> bool:
+                return name == "mitm"
+
+            def running_workers(self) -> list[str]:
+                return ["mitm"]
+
+        manager = TaskManager(
+            config=AppRuntimeConfig(app=AppFeatureConfig(auto_start_proxy=False)),
+            proxy_manager=NoopProxyManager(),
+            process_manager=RunningMitmProcessManager(),
+            home_detector=lambda **_kwargs: WeChatHomeSnapshot(
+                status="ready",
+                status_label="主页信息已获取",
+                account_name="测试公众号",
+                description="测试简介",
+                original_count="1",
+                friend_follow_count="0",
+                found=True,
+                account_confidence="high",
+                account_source="profile_header",
+            ),
+        )
+
+        with patch.object(manager, "_wait_for_mitm_listener", return_value=False):
+            result = manager.start_task({"recordLimit": 1})
+
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["status"], "stopped")
+        self.assertEqual(manager.get_status(refresh_home=False)["status"], "stopped")
+
+    def test_start_task_returns_to_stopped_when_home_window_is_missing(self) -> None:
+        manager = TaskManager(
+            config=AppRuntimeConfig(app=AppFeatureConfig(auto_start_proxy=False)),
+            proxy_manager=NoopProxyManager(),
+            process_manager=FakeProcessManager(),
+            home_detector=lambda **_kwargs: WeChatHomeSnapshot(
+                status="not_found",
+                status_label="未检测到主页窗口",
+                account_name="未检测到微信 PC 公众号主页",
+                description="请先打开公众号或服务号主页",
+                original_count="未识别到",
+                friend_follow_count="未识别到",
+                found=False,
+                message="请先打开公众号或服务号主页",
+            ),
+        )
+
+        result = manager.start_task({"recordLimit": 1})
+
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["status"], "stopped")
+        self.assertEqual(result["message"], "请先打开公众号或服务号主页")
+
     def test_shutdown_stops_collection_restores_system_proxy_then_stops_mitm(self) -> None:
         process_manager = OrderedProcessManager()
         proxy_manager = OrderedProxyManager(process_manager)
@@ -361,16 +492,7 @@ class TaskManagerMitmReadyTest(unittest.TestCase):
         self.assertEqual(result["auth"]["statusLabel"], "等待鉴权")
 
     def test_task_manager_filters_runtime_and_file_logs_by_log_level(self) -> None:
-        class TrackingFileLogger:
-            path = "test.log"
-
-            def __init__(self) -> None:
-                self.written: list[dict] = []
-
-            def write(self, event):
-                self.written.append(dict(event))
-
-        file_logger = TrackingFileLogger()
+        file_logger = MemoryFileLogger()
         manager = TaskManager(
             config=AppRuntimeConfig(app=AppFeatureConfig(log_level="WARN")),
             process_manager=FakeProcessManager(),
@@ -384,6 +506,74 @@ class TaskManagerMitmReadyTest(unittest.TestCase):
         self.assertEqual([item["level"] for item in manager.get_logs(20)], ["WARN", "ERROR"])
         self.assertEqual([item["level"] for item in file_logger.written], ["WARN", "ERROR"])
         self.assertEqual(manager.get_status(refresh_home=False)["config"]["logLevel"], "WARN")
+
+    def test_runtime_logs_are_bounded_to_recent_events(self) -> None:
+        limit = getattr(task_manager_module, "MAX_RUNTIME_LOGS", 5000)
+        manager = TaskManager(
+            process_manager=FakeProcessManager(),
+            file_logger=MemoryFileLogger(),
+            home_detector=lambda **_kwargs: DEFAULT_WECHAT_HOME_SNAPSHOT,
+        )
+
+        for index in range(limit + 25):
+            manager._append_log({"level": "INFO", "message": f"log-{index}", "source": "test"})
+
+        self.assertLessEqual(len(manager._logs), limit)
+        self.assertEqual(manager.get_logs(1)[0]["message"], f"log-{limit + 24}")
+        self.assertEqual(manager._logs[0]["message"], "log-25")
+
+    def test_collection_finish_prunes_logs_and_drops_stale_capture_events(self) -> None:
+        completed_limit = getattr(task_manager_module, "COMPLETED_RUNTIME_LOGS", 1000)
+        event_queue = thread_queue.Queue()
+        capture_event_queue = thread_queue.Queue()
+        manager = TaskManager(
+            process_manager=FakeProcessManager(),
+            event_queue=event_queue,
+            capture_event_queue=capture_event_queue,
+            file_logger=MemoryFileLogger(),
+            home_detector=lambda **_kwargs: DEFAULT_WECHAT_HOME_SNAPSHOT,
+        )
+        for index in range(completed_limit + 50):
+            manager._append_log({"level": "INFO", "message": f"before-finish-{index}", "source": "test"})
+        for index in range(3):
+            capture_event_queue.put(
+                {
+                    "type": "article_main_html_captured",
+                    "url": f"https://example.test/{index}",
+                    "html_text": "x" * 1024,
+                }
+            )
+
+        event_queue.put(
+            {
+                "type": "collection_status",
+                "status": "stopped",
+                "level": "INFO",
+                "message": "collection stopped",
+                "source": "article_capture",
+            }
+        )
+        manager.get_status(refresh_home=False)
+
+        self.assertLessEqual(len(manager._logs), completed_limit)
+        self.assertEqual(manager.get_logs(1)[0]["message"], "collection stopped")
+        with self.assertRaises(thread_queue.Empty):
+            capture_event_queue.get_nowait()
+
+    def test_manual_stop_clears_stale_capture_events(self) -> None:
+        capture_event_queue = thread_queue.Queue()
+        manager = TaskManager(
+            process_manager=FakeProcessManager(),
+            capture_event_queue=capture_event_queue,
+            file_logger=MemoryFileLogger(),
+            home_detector=lambda **_kwargs: DEFAULT_WECHAT_HOME_SNAPSHOT,
+        )
+        capture_event_queue.put({"type": "article_main_html_captured", "html_text": "x" * 1024})
+
+        manager.stop_collection_task()
+
+        with self.assertRaises(thread_queue.Empty):
+            capture_event_queue.get_nowait()
 
 
 if __name__ == "__main__":

@@ -258,7 +258,7 @@ class WebviewApi:
     def get_task_status(self) -> str:
         """读取任务状态，供页面轮询展示。"""
         try:
-            payload = self._task_service.get_status()
+            payload = self._task_service.get_status(refresh_home=False)
         except Exception as exc:
             message = f"get_task_status 调用失败：{exc}"
             self._log_runtime_error(message)

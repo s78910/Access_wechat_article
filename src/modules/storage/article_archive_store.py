@@ -26,6 +26,18 @@ from src.modules.utils.time_utils import format_datetime_for_dir, normalize_date
 from src.modules.utils.url_utils import redact_url as _redact_url
 
 
+DEFAULT_COMMENT_FETCH_OPTIONS = {
+    # 评论正文和图片/表情属于归档证据；头像只保留 URL，避免大量低价值图片拖慢主流程。
+    "download_resources": True,
+    "download_avatars": False,
+    "download_emojis": True,
+    "download_pictures": True,
+    "resource_timeout_seconds": 5,
+    "page_pause_seconds": 0,
+    "reply_page_pause_seconds": 0,
+}
+
+
 class ArticleArchiveError(RuntimeError):
     """单篇文章本地归档失败，向上抛出可展示给用户的业务原因。"""
 
@@ -214,6 +226,7 @@ def build_local_article_archive(
                 archive_dir,
                 request_headers=dict(main_capture.get("request_headers") or {}),
                 collect_time=collect_time,
+                **DEFAULT_COMMENT_FETCH_OPTIONS,
             )
         except TypeError:
             comment_fetch = comment_runner(keyed_url, source_html, archive_dir)

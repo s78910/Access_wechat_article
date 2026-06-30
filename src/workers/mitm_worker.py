@@ -541,6 +541,18 @@ class WeChatCaptureAddon:
         payload = self._read_current_target_probe()
         return str(payload.get("target_title") or "").strip()
 
+    def _has_active_capture_probe(self) -> bool:
+        # 真实主流程会传入 current_target.json；没有有效探针时不把 MITM 事件压入采集队列。
+        if self.target_probe_path is None:
+            return True
+        return bool(self._read_current_target_probe())
+
+    def _put_capture_event(self, event: dict[str, Any]) -> bool:
+        if not self._has_active_capture_probe():
+            return False
+        self.capture_event_queue.put(event)
+        return True
+
     def _emit_article_main_html_event(self, flow: Any, url: str, html_text: str | None = None) -> None:
         if html_text is None:
             html_text = read_flow_response_text(flow)
@@ -561,7 +573,8 @@ class WeChatCaptureAddon:
             html_text=html_text,
             status_code=int(getattr(flow.response, "status_code", 0) or 0),
         )
-        self.capture_event_queue.put(event)
+        if not self._put_capture_event(event):
+            return
         put_event(
             self.event_queue,
             "SUCCESS",
@@ -584,7 +597,8 @@ class WeChatCaptureAddon:
             url_source=url_source,
             carrier_url=carrier_url,
         )
-        self.capture_event_queue.put(event)
+        if not self._put_capture_event(event):
+            return
         self._emit_auth_status_event(event)
         put_event(
             self.event_queue,
@@ -646,7 +660,8 @@ class WeChatCaptureAddon:
             runtime_params=runtime_params,
             probe_window_seconds=probe_window_seconds,
         )
-        self.capture_event_queue.put(event)
+        if not self._put_capture_event(event):
+            return
         put_event(
             self.event_queue,
             level,
@@ -680,7 +695,8 @@ class WeChatCaptureAddon:
             method="CONNECT",
             error=error,
         )
-        self.capture_event_queue.put(event)
+        if not self._put_capture_event(event):
+            return
         put_event(
             self.event_queue,
             diagnostic_level,

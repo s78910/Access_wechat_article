@@ -143,7 +143,7 @@ class CommentFetcherTest(unittest.TestCase):
             data = json.loads(final_path.read_text(encoding="utf-8"))
             avatar_dir_exists = (final_path.parent / "comments_img" / "avatar").is_dir()
             emoji_dir_exists = (final_path.parent / "comments_img" / "emoji").is_dir()
-            other_dir_exists = (final_path.parent / "comments_img" / "other").is_dir()
+            picture_dir_exists = (final_path.parent / "comments_img" / "picture").is_dir()
             resource_file_count = len(list((final_path.parent / "comments_img").glob("*/*")))
 
         self.assertTrue(result["ok"])
@@ -160,12 +160,118 @@ class CommentFetcherTest(unittest.TestCase):
         self.assertIn("raw_payload", data["comments"][0])
         self.assertTrue(avatar_dir_exists)
         self.assertTrue(emoji_dir_exists)
-        self.assertTrue(other_dir_exists)
+        self.assertTrue(picture_dir_exists)
         self.assertGreaterEqual(resource_file_count, 3)
         self.assertIn("action=getcomment", requested_urls[0])
         self.assertIn("action=getcommentreply", requested_urls[2])
         self.assertEqual(requested_headers[0]["referer"], keyed_url)
         self.assertEqual(requested_headers[0]["x-requested-with"], "com.tencent.mm")
+
+    def test_fetch_comments_downloads_comment_media_without_downloading_avatars(self) -> None:
+        keyed_url = (
+            "https://mp.weixin.qq.com/s?__biz=biz-value&mid=123&idx=1&sn=sn-value"
+            "&key=key-secret&pass_ticket=ticket-secret&appmsg_token=token-secret&uin=777"
+        )
+        html_text = """
+        <html><body>
+          <script>
+            var nickname = 'Test Account';
+            var msg_title = 'Media Comment Article';
+            var publish_time = '2026-06-19 21:39';
+            var comment_id = 'comment-abc';
+            var appmsg_token = 'token-from-html';
+          </script>
+        </body></html>
+        """
+        comment_page = {
+            "base_resp": {"ret": 0, "errmsg": "ok"},
+            "continue_flag": 0,
+            "elected_comment_total_cnt": 1,
+            "elected_comment": [
+                {
+                    "id": "c1",
+                    "content_id": "content-1",
+                    "nick_name": "Alice",
+                    "logo_url": "https://mmbiz.qpic.cn/avatar/alice.jpg",
+                    "content": "comment with media",
+                    "multi_info": {
+                        "emojis": [{"url": "https://mmbiz.qpic.cn/emoji/smile.gif"}],
+                        "pictures": [{"url": "https://mmbiz.qpic.cn/pic/comment.png"}],
+                    },
+                    "reply_new": {
+                        "reply_total_cnt": 1,
+                        "reply_list": [
+                            {
+                                "reply_id": "r1",
+                                "nick_name": "Bob",
+                                "logo_url": "https://mmbiz.qpic.cn/avatar/bob.jpg",
+                                "content": "reply with picture",
+                                "multi_info": {
+                                    "pictures": [{"url": "https://mmbiz.qpic.cn/pic/reply.png"}],
+                                },
+                            }
+                        ],
+                    },
+                }
+            ],
+        }
+        downloaded_urls: list[str] = []
+
+        def fake_get(url: str, headers: dict[str, str], timeout_seconds: float):
+            return FakeResponse(200, comment_page)
+
+        def fake_resource_get(url: str, headers: dict[str, str], timeout_seconds: float):
+            downloaded_urls.append(url)
+            content_type = "image/gif" if url.endswith(".gif") else "image/png"
+            return FakeBinaryResponse(200, b"image-bytes", {"content-type": content_type})
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            article_dir = Path(temp_dir) / "storages" / "Test Account" / "2026-06-19 21-39 Media Comment Article"
+            result = fetch_comments_to_archive(
+                keyed_url,
+                html_text,
+                article_dir,
+                request_headers={"User-Agent": "MicroMessenger/8.0", "Cookie": "wxuin=777"},
+                collect_time="2026-06-19 22:00:00",
+                http_get=fake_get,
+                resource_get=fake_resource_get,
+                page_pause_seconds=0,
+                reply_page_pause_seconds=0,
+                download_resources=True,
+                download_avatars=False,
+                download_emojis=True,
+                download_pictures=True,
+            )
+
+            final_path = article_dir / "comments_final.json"
+            data = json.loads(final_path.read_text(encoding="utf-8"))
+            avatar_dir_exists = (final_path.parent / "comments_img" / "avatar").exists()
+            emoji_dir_exists = (final_path.parent / "comments_img" / "emoji").is_dir()
+            picture_dir_exists = (final_path.parent / "comments_img" / "picture").is_dir()
+
+        comment = data["comments"][0]
+        reply = comment["replies"][0]
+        self.assertTrue(result["ok"])
+        self.assertFalse(avatar_dir_exists)
+        self.assertTrue(emoji_dir_exists)
+        self.assertTrue(picture_dir_exists)
+        self.assertEqual(comment["avatar_url"], "https://mmbiz.qpic.cn/avatar/alice.jpg")
+        self.assertEqual(reply["avatar_url"], "https://mmbiz.qpic.cn/avatar/bob.jpg")
+        self.assertEqual(comment["avatar_local_path"], "")
+        self.assertEqual(reply["avatar_local_path"], "")
+        self.assertTrue(comment["multi_info"]["emojis"][0]["local_path"].startswith("comments_img/emoji/"))
+        self.assertTrue(comment["multi_info"]["emojis"][0]["download_ok"])
+        self.assertTrue(comment["multi_info"]["pictures"][0]["local_path"].startswith("comments_img/picture/"))
+        self.assertTrue(comment["multi_info"]["pictures"][0]["download_ok"])
+        self.assertTrue(reply["multi_info"]["pictures"][0]["local_path"].startswith("comments_img/picture/"))
+        self.assertEqual(result["comment_resource_counts"]["avatar"], 0)
+        self.assertEqual(result["comment_resource_counts"]["emoji"], 1)
+        self.assertEqual(result["comment_resource_counts"]["picture"], 2)
+        self.assertNotIn("https://mmbiz.qpic.cn/avatar/alice.jpg", downloaded_urls)
+        self.assertNotIn("https://mmbiz.qpic.cn/avatar/bob.jpg", downloaded_urls)
+        self.assertIn("https://mmbiz.qpic.cn/emoji/smile.gif", downloaded_urls)
+        self.assertIn("https://mmbiz.qpic.cn/pic/comment.png", downloaded_urls)
+        self.assertIn("https://mmbiz.qpic.cn/pic/reply.png", downloaded_urls)
 
     def test_build_comment_page_url_uses_article_runtime_parameters(self) -> None:
         url = build_comment_page_url(

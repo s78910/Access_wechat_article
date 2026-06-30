@@ -16,12 +16,23 @@ CURRENT_MITM_TARGET_PROBE_PATH = LOG_DIR / "article_capture" / "current_target.j
 DEFAULT_MITM_RESPONSE_INSPECT_SECONDS = 5.0
 DEFAULT_HOME_CANDIDATE_WAIT_TIMEOUT_SECONDS = 300.0
 DEFAULT_HOME_CANDIDATE_WAIT_INTERVAL_SECONDS = 2.0
-DEFAULT_DETAIL_WINDOW_CLOSE_EVERY_ARTICLES = 5
+MIN_HOME_CANDIDATE_WAIT_INTERVAL_SECONDS = 0.05
+DEFAULT_FAILED_ARTICLE_SKIP_COOLDOWN_MINUTES = 30.0
+DEFAULT_CURSOR_LOOP_LIMIT_EXTRA = 50
+DEFAULT_CURSOR_LOOP_LIMIT_MULTIPLIER = 8
+DEFAULT_CAPTURE_ATTEMPT_LIMIT_MULTIPLIER = 3
+DEFAULT_NO_PROGRESS_LIMIT_EXTRA = 30
+DEFAULT_NO_PROGRESS_LIMIT_MULTIPLIER = 5
 CLICK_FAILURE_REASONS_WITHOUT_REQUEST = {
     "wechat_home_window_not_found",
     "article_click_target_not_found",
     "article_index_out_of_range",
     "article_click_failed",
+}
+RECOVERABLE_HOME_CANDIDATE_STOP_REASONS = {
+    "no_visible_candidates",
+    "scroll_failed",
+    "unchanged_after_scroll",
 }
 
 
@@ -108,7 +119,7 @@ def run_article_capture_flow(
                 home_window=home_window,
             )
 
-        summary_level = "ERROR" if failed_count > 0 else "SUCCESS"
+        summary_level = "SUCCESS" if saved_count >= target_total else ("ERROR" if failed_count > 0 else "WARN")
         put_collection_status_event(
             event_queue,
             "stopped",
@@ -139,7 +150,14 @@ def _run_cursor_article_capture(
     skipped_count = 0
     saw_candidate = False
     pending_failed_records: list[dict[str, Any]] = []
-    processed_since_detail_cleanup = 0
+    run_failed_titles: set[str] = set()
+    failed_cooldown_minutes = resolve_failed_article_skip_cooldown_minutes(config)
+    max_cursor_iterations = resolve_homepage_max_cursor_iterations(config, target_total)
+    max_capture_attempts = resolve_homepage_max_capture_attempts(config, target_total)
+    max_no_progress_iterations = resolve_homepage_max_no_progress_iterations(config, target_total)
+    cursor_iterations = 0
+    capture_attempts = 0
+    no_progress_iterations = 0
 
     def defer_failed_record(payload: dict[str, Any]) -> None:
         pending_failed_records.append(payload)
@@ -170,7 +188,19 @@ def _run_cursor_article_capture(
             account_name = text
             flush_pending_failed_records()
 
-    while saved_count + failed_count < target_total:
+    while saved_count < target_total:
+        cursor_iterations += 1
+        if cursor_iterations > max_cursor_iterations:
+            deps.put_event(
+                event_queue,
+                "WARN",
+                (
+                    f"主页候选循环达到安全上限 {max_cursor_iterations} 次，已停止本次采集；"
+                    f"本次保存 {saved_count}/{target_total} 篇，跳过 {skipped_count} 篇，失败 {failed_count} 篇"
+                ),
+                source="article_capture",
+            )
+            break
         candidate = cursor.next_candidate()
         if candidate is None:
             if _should_wait_for_home_candidates(cursor):
@@ -202,24 +232,76 @@ def _run_cursor_article_capture(
             cursor=cursor,
             account_name=account_name,
             original_candidate=candidate,
+            run_failed_titles=run_failed_titles,
+            failed_cooldown_minutes=failed_cooldown_minutes,
         )
         if candidate is None:
             skipped_count += 1
+            no_progress_iterations += 1
+            if _should_stop_for_no_progress(
+                event_queue,
+                deps,
+                no_progress_iterations=no_progress_iterations,
+                max_no_progress_iterations=max_no_progress_iterations,
+                saved_count=saved_count,
+                target_total=target_total,
+                skipped_count=skipped_count,
+                failed_count=failed_count,
+            ):
+                break
             continue
         title = str(getattr(candidate, "title", "") or "").strip()
         article_index = int(getattr(candidate, "article_index", 1) or 1)
-        if account_name and title and store.has_saved_public_article_title(account_name, title):
+        skip_reason = _candidate_skip_reason(
+            store,
+            account_name,
+            title,
+            run_failed_titles=run_failed_titles,
+            failed_cooldown_minutes=failed_cooldown_minutes,
+        )
+        if skip_reason:
             skipped_count += 1
+            no_progress_iterations += 1
+            _skip_cursor_visible_candidates(cursor, [candidate])
             deps.put_event(
                 event_queue,
                 "INFO",
-                f"主页第 {article_index} 篇文章已存在，跳过：{title}",
+                _format_candidate_skip_message(article_index, title, skip_reason),
                 source="article_capture",
             )
             if hasattr(cursor, "invalidate"):
                 cursor.invalidate()
+            if _should_stop_for_no_progress(
+                event_queue,
+                deps,
+                no_progress_iterations=no_progress_iterations,
+                max_no_progress_iterations=max_no_progress_iterations,
+                saved_count=saved_count,
+                target_total=target_total,
+                skipped_count=skipped_count,
+                failed_count=failed_count,
+            ):
+                break
             continue
 
+        final_failure: dict[str, Any] = {}
+
+        def remember_final_failure(payload: dict[str, Any]) -> None:
+            final_failure.clear()
+            final_failure.update(payload)
+
+        capture_attempts += 1
+        if capture_attempts > max_capture_attempts:
+            deps.put_event(
+                event_queue,
+                "WARN",
+                (
+                    f"实际点击采集达到安全上限 {max_capture_attempts} 次，已停止本次采集；"
+                    f"本次保存 {saved_count}/{target_total} 篇，跳过 {skipped_count} 篇，失败 {failed_count} 篇"
+                ),
+                source="article_capture",
+            )
+            break
         ok = _capture_one_article_with_retries(
             event_queue,
             config,
@@ -233,27 +315,48 @@ def _run_cursor_article_capture(
             known_account_name=account_name,
             on_account_confirmed=remember_confirmed_account_name,
             on_failed_record_deferred=defer_failed_record,
+            on_final_failed=remember_final_failure,
             home_window=home_window,
             deps=deps,
         )
         if ok:
             saved_count += 1
+            no_progress_iterations = 0
         else:
             failed_count += 1
-        processed_since_detail_cleanup += 1
-        if _should_cleanup_detail_windows_for_batch(config, processed_since_detail_cleanup):
-            _cleanup_detail_windows(
+            no_progress_iterations += 1
+            failure_reason = str(final_failure.get("failure_reason") or "")
+            failed_title = str(final_failure.get("target_title") or title).strip()
+            if failed_title and not should_retry_article_capture(config, failure_reason):
+                _remember_failed_title(run_failed_titles, failed_title)
+                deps.put_event(
+                    event_queue,
+                    "WARN",
+                    f"文章《{failed_title}》已加入本轮跳过列表，继续查找下一篇可采集文章",
+                    source="article_capture",
+                )
+            if _should_stop_for_no_progress(
                 event_queue,
-                config,
                 deps,
-                home_window=home_window,
-                reason="batch",
-                processed_count=saved_count + failed_count,
-            )
-            processed_since_detail_cleanup = 0
+                no_progress_iterations=no_progress_iterations,
+                max_no_progress_iterations=max_no_progress_iterations,
+                saved_count=saved_count,
+                target_total=target_total,
+                skipped_count=skipped_count,
+                failed_count=failed_count,
+            ):
+                break
+        _cleanup_detail_windows(
+            event_queue,
+            config,
+            deps,
+            home_window=home_window,
+            reason="article_done",
+            processed_count=saved_count + failed_count,
+        )
         if hasattr(cursor, "invalidate"):
             cursor.invalidate()
-        if saved_count + failed_count < target_total:
+        if saved_count < target_total:
             _wait_before_next_article(event_queue, config, deps)
 
     if saved_count + failed_count > 0:
@@ -277,6 +380,8 @@ def _refresh_current_visible_candidate_before_click(
     cursor: Any,
     account_name: str,
     original_candidate: Any,
+    run_failed_titles: set[str] | None = None,
+    failed_cooldown_minutes: float = 0.0,
 ) -> Any | None:
     """点击前重新读取当前可见候选；主页自动刷新后，以最新可点击候选为准。"""
     if not bool(config.get("homepage_reselect_current_visible_before_click", True)):
@@ -291,13 +396,19 @@ def _refresh_current_visible_candidate_before_click(
         return original_candidate
 
     original_title = str(getattr(original_candidate, "title", "") or "").strip()
-    selected = _select_first_unsaved_candidate(fresh_candidates, store, account_name)
+    selected = _select_first_unsaved_candidate(
+        fresh_candidates,
+        store,
+        account_name,
+        run_failed_titles=run_failed_titles,
+        failed_cooldown_minutes=failed_cooldown_minutes,
+    )
     if selected is None:
         _skip_cursor_visible_candidates(cursor, fresh_candidates)
         deps.put_event(
             event_queue,
             "INFO",
-            f"点击前当前可见 {len(fresh_candidates)} 篇文章均已保存，继续向下滚动查找未保存文章",
+            f"点击前当前可见 {len(fresh_candidates)} 篇文章均已保存或处于失败冷却，继续向下滚动查找未保存文章",
             source="article_capture",
         )
         return None
@@ -327,15 +438,119 @@ def _get_cursor_visible_candidates(cursor: Any) -> list[Any]:
     return []
 
 
-def _select_first_unsaved_candidate(candidates: list[Any], store, account_name: str) -> Any | None:
+def _select_first_unsaved_candidate(
+    candidates: list[Any],
+    store,
+    account_name: str,
+    *,
+    run_failed_titles: set[str] | None = None,
+    failed_cooldown_minutes: float = 0.0,
+) -> Any | None:
     for candidate in candidates:
         title = str(getattr(candidate, "title", "") or "").strip()
         if not title:
             continue
-        if account_name and store.has_saved_public_article_title(account_name, title):
+        if _candidate_skip_reason(
+            store,
+            account_name,
+            title,
+            run_failed_titles=run_failed_titles,
+            failed_cooldown_minutes=failed_cooldown_minutes,
+        ):
             continue
         return candidate
     return None
+
+
+def _candidate_skip_reason(
+    store,
+    account_name: str,
+    title: str,
+    *,
+    run_failed_titles: set[str] | None = None,
+    failed_cooldown_minutes: float = 0.0,
+) -> str:
+    normalized_title = _normalize_skip_title(title)
+    if not normalized_title:
+        return ""
+    if normalized_title in (run_failed_titles or set()):
+        return "run_failed"
+    if account_name and _store_has_saved_title(store, account_name, title):
+        return "saved"
+    if account_name and _store_has_recent_failed_title(store, account_name, title, failed_cooldown_minutes):
+        return "recent_failed"
+    return ""
+
+
+def _format_candidate_skip_message(article_index: int, title: str, reason: str) -> str:
+    if reason == "saved":
+        return f"主页第 {article_index} 篇文章已存在，跳过：{title}"
+    if reason == "run_failed":
+        return f"主页第 {article_index} 篇文章本轮刚失败，跳过：{title}"
+    if reason == "recent_failed":
+        return f"主页第 {article_index} 篇文章最近失败仍在冷却期，跳过：{title}"
+    return f"主页第 {article_index} 篇文章已跳过：{title}"
+
+
+def _remember_failed_title(run_failed_titles: set[str], title: str) -> None:
+    normalized_title = _normalize_skip_title(title)
+    if normalized_title:
+        run_failed_titles.add(normalized_title)
+
+
+def _store_has_saved_title(store, account_name: str, title: str) -> bool:
+    checker = getattr(store, "has_saved_public_article_title", None)
+    if not callable(checker):
+        return False
+    try:
+        return bool(checker(account_name, title))
+    except Exception:
+        return False
+
+
+def _store_has_recent_failed_title(store, account_name: str, title: str, cooldown_minutes: float) -> bool:
+    try:
+        minutes = float(cooldown_minutes)
+    except (TypeError, ValueError):
+        minutes = 0.0
+    if minutes <= 0:
+        return False
+    checker = getattr(store, "has_recent_failed_public_article_title", None)
+    if not callable(checker):
+        return False
+    try:
+        return bool(checker(account_name, title, cooldown_minutes=minutes))
+    except Exception:
+        return False
+
+
+def _normalize_skip_title(value: object) -> str:
+    return " ".join(str(value or "").split()).lower()
+
+
+def _should_stop_for_no_progress(
+    event_queue,
+    deps: ArticleCaptureDependencies,
+    *,
+    no_progress_iterations: int,
+    max_no_progress_iterations: int,
+    saved_count: int,
+    target_total: int,
+    skipped_count: int,
+    failed_count: int,
+) -> bool:
+    if no_progress_iterations < max_no_progress_iterations:
+        return False
+    deps.put_event(
+        event_queue,
+        "WARN",
+        (
+            f"主页采集连续 {no_progress_iterations} 次未产生新的保存结果，已停止本次采集；"
+            f"本次保存 {saved_count}/{target_total} 篇，跳过 {skipped_count} 篇，失败 {failed_count} 篇"
+        ),
+        source="article_capture",
+    )
+    return True
 
 
 def _skip_cursor_visible_candidates(cursor: Any, candidates: list[Any]) -> None:
@@ -364,7 +579,7 @@ def _candidate_has_clickable_rect(candidate: Any) -> bool:
 def _should_wait_for_home_candidates(cursor: Any) -> bool:
     reason = str(getattr(cursor, "last_stop_reason", "") or "").strip()
     if reason:
-        return reason == "no_visible_candidates"
+        return reason in RECOVERABLE_HOME_CANDIDATE_STOP_REASONS
     return not bool(getattr(cursor, "has_visible_candidates", False))
 
 
@@ -379,22 +594,33 @@ def _wait_for_home_article_candidates(
     timeout_seconds = resolve_home_candidate_wait_timeout_seconds(config)
     interval_seconds = resolve_home_candidate_wait_interval_seconds(config)
     deadline = time.time() + timeout_seconds
+    latest_home_window = home_window
     deps.put_event(
         event_queue,
         "WARN",
-        f"未读取到主页文章候选，等待主页窗口恢复可读，最长等待 {timeout_seconds:g} 秒",
+        f"未读取到主页文章候选，正在重新定位并激活微信主页，最长等待 {timeout_seconds:g} 秒",
         source="article_capture",
     )
 
     while True:
-        if interval_seconds > 0:
-            time.sleep(interval_seconds)
-        cursor = deps.home_article_cursor_cls(config=config, home_window=home_window)
+        found_home_window = _find_home_window_safely(deps)
+        if found_home_window is not None:
+            latest_home_window = found_home_window
+        cursor = deps.home_article_cursor_cls(config=config, home_window=latest_home_window)
         if _cursor_has_visible_candidates(cursor):
             deps.put_event(event_queue, "INFO", "主页窗口已恢复可读，继续按文章标题候选采集", source="article_capture")
             return cursor
         if time.time() >= deadline:
             return None
+        if interval_seconds > 0:
+            time.sleep(interval_seconds)
+
+
+def _find_home_window_safely(deps: ArticleCaptureDependencies) -> Any | None:
+    try:
+        return deps.find_wechat_home_window()
+    except Exception:
+        return None
 
 
 def _cursor_has_visible_candidates(cursor: Any) -> bool:
@@ -457,16 +683,11 @@ def _cleanup_detail_windows(
         deps.put_event(event_queue, "INFO", message, source="article_capture")
 
 
-def _should_cleanup_detail_windows_for_batch(config: dict, processed_since_cleanup: int) -> bool:
-    interval = resolve_detail_window_close_every_articles(config)
-    return interval > 0 and processed_since_cleanup >= interval
-
-
 def _build_detail_window_cleanup_message(reason: str, closed_count: int, processed_count: int) -> str:
     if reason == "start":
         return f"任务开始前已关闭 {closed_count} 个历史微信文章详情窗口"
-    if reason == "batch":
-        return f"已处理 {processed_count} 篇文章，自动关闭 {closed_count} 个微信文章详情窗口"
+    if reason == "article_done":
+        return f"已处理 {processed_count} 篇文章，已关闭 {closed_count} 个微信文章详情窗口"
     if reason == "finish":
         return f"任务结束前已关闭 {closed_count} 个微信文章详情窗口"
     return f"已关闭 {closed_count} 个微信文章详情窗口"
@@ -486,7 +707,6 @@ def _run_legacy_index_article_capture(
 ) -> tuple[int, int, int]:
     saved_count = 0
     failed_count = 0
-    processed_since_detail_cleanup = 0
     for article_index in resolve_target_article_indices({"recordLimit": target_total}):
         ok = _capture_one_article_with_retries(
             event_queue,
@@ -504,17 +724,14 @@ def _run_legacy_index_article_capture(
             saved_count += 1
         else:
             failed_count += 1
-        processed_since_detail_cleanup += 1
-        if _should_cleanup_detail_windows_for_batch(config, processed_since_detail_cleanup):
-            _cleanup_detail_windows(
-                event_queue,
-                config,
-                deps,
-                home_window=home_window,
-                reason="batch",
-                processed_count=saved_count + failed_count,
-            )
-            processed_since_detail_cleanup = 0
+        _cleanup_detail_windows(
+            event_queue,
+            config,
+            deps,
+            home_window=home_window,
+            reason="article_done",
+            processed_count=saved_count + failed_count,
+        )
         if saved_count + failed_count < target_total:
             _wait_before_next_article(event_queue, config, deps)
     if saved_count + failed_count > 0:
@@ -545,6 +762,7 @@ def _capture_one_article(
     known_account_name: str = "",
     on_account_confirmed: Callable[[str], Any] | None = None,
     on_failed_record_deferred: Callable[[dict[str, Any]], Any] | None = None,
+    on_attempt_failed: Callable[[dict[str, Any]], Any] | None = None,
     save_failed_record: bool = True,
 ) -> bool:
     progress_logger = ProgressLogger(event_queue, run_id=run_id, article_index=article_index)
@@ -614,6 +832,18 @@ def _capture_one_article(
             f"主页第 {article_index} 篇文章保存失败：{failed_title}；原因：{failure_reason}",
             source="article_capture",
         )
+        duration_seconds = time.time() - click_started_at
+        _notify_attempt_failed(
+            on_attempt_failed,
+            report=failed_report,
+            article_index=article_index,
+            account_name=failure_account_name,
+            target_title=failed_title,
+            failure_reason=failure_reason,
+            duration_seconds=duration_seconds,
+            selections=selections_payload,
+            saved=save_failed_record,
+        )
         if save_failed_record:
             _save_or_defer_failed_article_record(
                 event_queue,
@@ -624,7 +854,7 @@ def _capture_one_article(
                 account_name=failure_account_name,
                 target_title=failed_title,
                 failure_reason=failure_reason,
-                duration_seconds=time.time() - click_started_at,
+                duration_seconds=duration_seconds,
                 selections=selections_payload,
                 on_failed_record_deferred=on_failed_record_deferred,
             )
@@ -662,6 +892,18 @@ def _capture_one_article(
             f"主页第 {article_index} 篇文章保存失败：{failed_title}；原因：{failure_reason}",
             source="article_capture",
         )
+        duration_seconds = time.time() - click_started_at
+        _notify_attempt_failed(
+            on_attempt_failed,
+            report=report,
+            article_index=article_index,
+            account_name=failure_account_name,
+            target_title=failed_title,
+            failure_reason=failure_reason,
+            duration_seconds=duration_seconds,
+            selections=selections_payload,
+            saved=save_failed_record,
+        )
         if save_failed_record:
             _save_or_defer_failed_article_record(
                 event_queue,
@@ -672,7 +914,7 @@ def _capture_one_article(
                 account_name=failure_account_name,
                 target_title=failed_title,
                 failure_reason=failure_reason,
-                duration_seconds=time.time() - click_started_at,
+                duration_seconds=duration_seconds,
                 selections=selections_payload,
                 on_failed_record_deferred=on_failed_record_deferred,
             )
@@ -733,6 +975,18 @@ def _capture_one_article(
             },
         )
         deps.put_event(event_queue, "ERROR", error_message, source="article_capture")
+        duration_seconds = time.time() - click_started_at
+        _notify_attempt_failed(
+            on_attempt_failed,
+            report=report,
+            article_index=article_index,
+            account_name=failure_account_name,
+            target_title=failed_title,
+            failure_reason=str(exc),
+            duration_seconds=duration_seconds,
+            selections=selections_payload,
+            saved=save_failed_record,
+        )
         if save_failed_record:
             _save_or_defer_failed_article_record(
                 event_queue,
@@ -743,7 +997,7 @@ def _capture_one_article(
                 account_name=failure_account_name,
                 target_title=failed_title,
                 failure_reason=str(exc),
-                duration_seconds=time.time() - click_started_at,
+                duration_seconds=duration_seconds,
                 selections=selections_payload,
                 on_failed_record_deferred=on_failed_record_deferred,
             )
@@ -765,11 +1019,18 @@ def _capture_one_article_with_retries(
     known_account_name: str = "",
     on_account_confirmed: Callable[[str], Any] | None = None,
     on_failed_record_deferred: Callable[[dict[str, Any]], Any] | None = None,
+    on_final_failed: Callable[[dict[str, Any]], Any] | None = None,
     home_window: Any | None = None,
 ) -> bool:
     retry_count = resolve_retry_count(config)
     for attempt_index in range(retry_count + 1):
         is_final_attempt = attempt_index >= retry_count
+        attempt_failure: dict[str, Any] = {}
+
+        def remember_attempt_failure(payload: dict[str, Any]) -> None:
+            attempt_failure.clear()
+            attempt_failure.update(payload)
+
         ok = _capture_one_article(
             event_queue,
             config,
@@ -784,12 +1045,38 @@ def _capture_one_article_with_retries(
             known_account_name=known_account_name,
             on_account_confirmed=on_account_confirmed,
             on_failed_record_deferred=on_failed_record_deferred if is_final_attempt else None,
+            on_attempt_failed=remember_attempt_failure,
             save_failed_record=is_final_attempt,
             home_window=home_window,
         )
         if ok:
             return True
         if is_final_attempt:
+            _notify_attempt_failed(on_final_failed, **attempt_failure)
+            return False
+        failure_reason = str(attempt_failure.get("failure_reason") or "")
+        if not should_retry_article_capture(config, failure_reason):
+            if not bool(attempt_failure.get("saved")):
+                _save_or_defer_failed_article_record(
+                    event_queue,
+                    store,
+                    deps,
+                    attempt_failure.get("report") if isinstance(attempt_failure.get("report"), dict) else {},
+                    article_index=int(attempt_failure.get("article_index") or article_index),
+                    account_name=str(attempt_failure.get("account_name") or known_account_name or config.get("account_name") or ""),
+                    target_title=str(attempt_failure.get("target_title") or getattr(candidate, "title", "") or ""),
+                    failure_reason=failure_reason,
+                    duration_seconds=float(attempt_failure.get("duration_seconds") or 0.0),
+                    selections=attempt_failure.get("selections") if isinstance(attempt_failure.get("selections"), dict) else None,
+                    on_failed_record_deferred=on_failed_record_deferred,
+                )
+            deps.put_event(
+                event_queue,
+                "WARN",
+                f"主页第 {article_index} 篇文章失败原因属于无效重试类型，已跳过重复重试",
+                source="article_capture",
+            )
+            _notify_attempt_failed(on_final_failed, **attempt_failure)
             return False
         _cleanup_detail_windows(
             event_queue,
@@ -806,6 +1093,31 @@ def _capture_one_article_with_retries(
             source="article_capture",
         )
     return False
+
+
+def _notify_attempt_failed(callback: Callable[[dict[str, Any]], Any] | None, **payload: Any) -> None:
+    if not callable(callback):
+        return
+    try:
+        callback(dict(payload))
+    except Exception:
+        return
+
+
+def should_retry_article_capture(config: dict | None, failure_reason: str) -> bool:
+    """判断单篇失败是否值得重试；缓存命中导致无主请求时，重复点击通常只会继续超时。"""
+    if not bool((config or {}).get("retry_non_retriable_mitm_failures", False)):
+        reason = str(failure_reason or "")
+        non_retriable_markers = (
+            "MITM 未看到文章主页面请求",
+            "未看到文章主页面请求",
+            "未触发网络请求",
+            "本地缓存",
+            "复用了缓存",
+        )
+        if any(marker in reason for marker in non_retriable_markers):
+            return False
+    return True
 
 
 def _save_failed_article_record(
@@ -975,17 +1287,62 @@ def resolve_retry_count(config: dict | None) -> int:
     return max(0, retry_count)
 
 
-def resolve_detail_window_close_every_articles(config: dict | None) -> int:
+def resolve_failed_article_skip_cooldown_minutes(config: dict | None) -> float:
     data = config if isinstance(config, dict) else {}
-    raw_value = data.get(
-        "wechat_detail_window_close_every_articles",
-        data.get("wechatDetailWindowCloseEveryArticles", DEFAULT_DETAIL_WINDOW_CLOSE_EVERY_ARTICLES),
+    value = data.get(
+        "failed_article_skip_cooldown_minutes",
+        data.get("failedArticleSkipCooldownMinutes", DEFAULT_FAILED_ARTICLE_SKIP_COOLDOWN_MINUTES),
     )
     try:
-        interval = int(raw_value)
+        minutes = float(value)
     except (TypeError, ValueError):
-        interval = DEFAULT_DETAIL_WINDOW_CLOSE_EVERY_ARTICLES
-    return max(0, interval)
+        minutes = DEFAULT_FAILED_ARTICLE_SKIP_COOLDOWN_MINUTES
+    return max(0.0, minutes)
+
+
+def resolve_homepage_max_cursor_iterations(config: dict | None, target_total: int) -> int:
+    default_value = max(
+        1,
+        int(target_total) * DEFAULT_CURSOR_LOOP_LIMIT_MULTIPLIER + DEFAULT_CURSOR_LOOP_LIMIT_EXTRA,
+    )
+    return _resolve_positive_int_config(
+        config,
+        "homepage_max_cursor_iterations",
+        "homepageMaxCursorIterations",
+        default_value,
+    )
+
+
+def resolve_homepage_max_capture_attempts(config: dict | None, target_total: int) -> int:
+    default_value = max(1, int(target_total) * DEFAULT_CAPTURE_ATTEMPT_LIMIT_MULTIPLIER)
+    return _resolve_positive_int_config(
+        config,
+        "homepage_max_capture_attempts",
+        "homepageMaxCaptureAttempts",
+        default_value,
+    )
+
+
+def resolve_homepage_max_no_progress_iterations(config: dict | None, target_total: int) -> int:
+    default_value = max(
+        1,
+        int(target_total) * DEFAULT_NO_PROGRESS_LIMIT_MULTIPLIER + DEFAULT_NO_PROGRESS_LIMIT_EXTRA,
+    )
+    return _resolve_positive_int_config(
+        config,
+        "homepage_max_no_progress_iterations",
+        "homepageMaxNoProgressIterations",
+        default_value,
+    )
+
+
+def _resolve_positive_int_config(config: dict | None, snake_key: str, camel_key: str, default_value: int) -> int:
+    data = config if isinstance(config, dict) else {}
+    try:
+        value = int(data.get(snake_key, data.get(camel_key, default_value)))
+    except (TypeError, ValueError):
+        value = default_value
+    return max(1, value)
 
 
 def _wait_before_next_article(event_queue, config: dict, deps: ArticleCaptureDependencies) -> None:
@@ -1016,7 +1373,7 @@ def resolve_home_candidate_wait_interval_seconds(config: dict | None) -> float:
         seconds = float(data.get("homepage_candidate_wait_interval_seconds", DEFAULT_HOME_CANDIDATE_WAIT_INTERVAL_SECONDS))
     except (TypeError, ValueError):
         seconds = DEFAULT_HOME_CANDIDATE_WAIT_INTERVAL_SECONDS
-    return max(0.0, seconds)
+    return max(MIN_HOME_CANDIDATE_WAIT_INTERVAL_SECONDS, seconds)
 
 
 def resolve_target_article_indices(run_options: dict | None) -> list[int]:

@@ -60,6 +60,11 @@ class ProcessManager:
         if process.is_alive():
             process.terminate()
         process.join(timeout=timeout)
+        if process.is_alive():
+            kill = getattr(process, "kill", None)
+            if callable(kill):
+                kill()
+                process.join(timeout=timeout)
         return True
 
     def stop_all(self, timeout: float = 3) -> None:

@@ -850,9 +850,15 @@ class FastApiAppTest(unittest.TestCase):
         events: list[tuple[str, str]] = []
 
         class FakeApi:
-            def __init__(self, runtime_config=None, auto_start: bool = False) -> None:
+            def __init__(
+                self,
+                runtime_config=None,
+                auto_start: bool = False,
+                auto_cleanup: bool = False,
+            ) -> None:
                 self.runtime_config = runtime_config
                 self.auto_start = auto_start
+                self.auto_cleanup = auto_cleanup
                 self.shutdown_called = False
 
             def set_window(self, window) -> None:

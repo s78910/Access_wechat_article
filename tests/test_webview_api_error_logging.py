@@ -21,6 +21,21 @@ class FailingTaskManager:
         self.logged_errors.append((source, message))
 
 
+class StatusTaskManager:
+    def __init__(self) -> None:
+        self.refresh_home_values: list[bool] = []
+
+    def get_status(self, refresh_home: bool = True) -> dict:
+        self.refresh_home_values.append(bool(refresh_home))
+        return {"ok": True, "status": "idle"}
+
+    def log_runtime_error(self, message: str, source: str = "runtime") -> None:
+        return None
+
+    def shutdown(self) -> None:
+        return None
+
+
 class StartupProxyTaskManager:
     def __init__(self, *, start_ok: bool = True, enable_ok: bool = True) -> None:
         self.start_ok = start_ok
@@ -56,6 +71,15 @@ class StartupProxyTaskManager:
 
 
 class WebviewApiErrorLoggingTest(unittest.TestCase):
+    def test_get_task_status_does_not_refresh_home_window_by_default(self) -> None:
+        manager = StatusTaskManager()
+        api = WebviewApi(task_manager=manager)
+
+        payload = json.loads(api.get_task_status())
+
+        self.assertTrue(payload["ok"])
+        self.assertEqual(manager.refresh_home_values, [False])
+
     def test_start_task_exception_is_returned_and_logged(self) -> None:
         manager = FailingTaskManager()
         api = WebviewApi(task_manager=manager)

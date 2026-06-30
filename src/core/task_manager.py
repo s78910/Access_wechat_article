@@ -30,6 +30,10 @@ MITM_READY_TIMEOUT_SECONDS = 5.0
 MITM_READY_POLL_INTERVAL_SECONDS = 0.1
 LONG_WAIT_TIMEOUT_THRESHOLD_SECONDS = 30.0
 LONG_WAIT_TIMEOUT_FALLBACK_SECONDS = 10.0
+MAX_RUNTIME_LOGS = 5000
+COMPLETED_RUNTIME_LOGS = 1000
+MAX_CAPTURE_QUEUE_DRAIN_ON_FINISH = 10000
+COLLECTION_FINISHED_STATUSES = {"stopped", "error", "failed", "completed", "finished", "cancelled"}
 ACCOUNT_NAME_PLACEHOLDER_MARKERS = (
     "等待识别",
     "未检测到",
@@ -120,12 +124,13 @@ class TaskManager:
         self._traffic_history: list[dict] = []
         self._auth_status: dict[str, Any] = {}
         self._restore_mitm_after_collection = False
+        self._stop_generation = 0
         self.refresh_home_snapshot()
         self._log("INFO", "应用后端已启动，等待用户开始采集任务")
 
     def start_task(self, options: dict | None = None) -> dict:
         self._drain_worker_events()
-        if self._status == "running":
+        if self._status in {"running", "starting"}:
             return {
                 "ok": False,
                 "status": self._status,
@@ -133,8 +138,12 @@ class TaskManager:
             }
 
         self._run_options = normalize_task_run_options(options)
+        stop_generation_at_start = self._stop_generation
+        self._status = "starting"
         self._log("INFO", "开始检测微信 PC 端公众号主页窗口")
         self.refresh_home_snapshot(activate=True)
+        if self._was_start_cancelled(stop_generation_at_start):
+            return self._cancelled_start_payload()
         if self._home_snapshot.found:
             self._log("SUCCESS", f"已获取公众号主页信息：{self._home_snapshot.account_name}")
         elif self._can_try_capture_with_home_snapshot(self._home_snapshot):
@@ -142,13 +151,11 @@ class TaskManager:
             self._log("WARN", self._home_snapshot.message or self._home_snapshot.description)
         else:
             self._log("WARN", self._home_snapshot.message or self._home_snapshot.description)
-            payload = self.get_status(refresh_home=False)
-            payload["ok"] = False
-            payload["message"] = self._home_snapshot.message or self._home_snapshot.description
-            return payload
+            message = self._home_snapshot.message or self._home_snapshot.description
+            return self._failed_start_payload(message)
 
         self._log("INFO", "开始启动采集任务")
-        return self._start_article_capture_task()
+        return self._start_article_capture_task(start_generation=stop_generation_at_start)
 
     def stop_task(self) -> dict:
         return self.stop_collection_task()
@@ -175,7 +182,7 @@ class TaskManager:
             return ""
         return account_name
 
-    def _start_article_capture_task(self) -> dict:
+    def _start_article_capture_task(self, *, start_generation: int | None = None) -> dict:
         if self.process_manager.is_running("article_capture"):
             return {
                 "ok": False,
@@ -185,7 +192,9 @@ class TaskManager:
 
         mitm_ready = self._ensure_mitm_ready_for_collection()
         if not mitm_ready["ok"]:
-            return mitm_ready
+            return self._failed_start_payload(str(mitm_ready.get("message") or "采集启动前置条件未满足"))
+        if start_generation is not None and self._was_start_cancelled(start_generation):
+            return self._cancelled_start_payload()
 
         try:
             worker_config = self.config.proxy.to_worker_payload()
@@ -227,16 +236,41 @@ class TaskManager:
         return self.get_status(refresh_home=False)
 
     def stop_collection_task(self) -> dict:
+        self._stop_generation += 1
         self._drain_worker_events()
         article_stopped = False
         if self.process_manager.is_running("article_capture"):
             article_stopped = self.process_manager.stop_worker("article_capture")
         self._status = "stopped"
+        self._clear_finished_collection_buffers()
         if article_stopped:
             self._log("INFO", "文章抓取任务已停止，系统代理保持程序启动时的配置")
         else:
             self._log("INFO", "采集任务未运行，系统代理保持程序启动时的配置")
+        self._trim_runtime_logs(COMPLETED_RUNTIME_LOGS)
         return self.get_status(refresh_home=False)
+
+    def _was_start_cancelled(self, start_generation: int) -> bool:
+        return self._stop_generation > int(start_generation)
+
+    def _cancelled_start_payload(self) -> dict:
+        self._status = "stopped"
+        self._clear_finished_collection_buffers()
+        self._log("INFO", "采集启动过程已取消，未继续启动文章抓取 worker")
+        self._trim_runtime_logs(COMPLETED_RUNTIME_LOGS)
+        payload = self.get_status(refresh_home=False)
+        payload["ok"] = False
+        payload["message"] = "采集启动过程已取消"
+        return payload
+
+    def _failed_start_payload(self, message: str) -> dict:
+        self._status = "stopped"
+        self._clear_finished_collection_buffers()
+        self._trim_runtime_logs(COMPLETED_RUNTIME_LOGS)
+        payload = self.get_status(refresh_home=False)
+        payload["ok"] = False
+        payload["message"] = message
+        return payload
 
     def start_mitm_proxy(self) -> dict:
         """启动 MITM 监听进程，不自动修改系统代理。"""
@@ -338,6 +372,8 @@ class TaskManager:
             self._log("ERROR", f"后端关闭时停止 MITM 代理失败：{exc}")
 
         self._status = "stopped"
+        self._clear_finished_collection_buffers()
+        self._trim_runtime_logs(COMPLETED_RUNTIME_LOGS)
 
     def update_config(self, config: AppRuntimeConfig, config_path: str | None = None) -> dict:
         """保存配置后同步当前运行对象，后续启动 worker 会使用新配置。"""
@@ -364,6 +400,8 @@ class TaskManager:
                 self._status = "error"
                 self._log("ERROR", "文章抓取 worker 已退出，MITM 监听保持当前状态；请检查采集日志后重新开始")
                 self._log("INFO", "检测到采集 worker 异常退出，系统代理和 MITM 保持程序启动时的配置")
+                self._clear_finished_collection_buffers()
+                self._trim_runtime_logs(COMPLETED_RUNTIME_LOGS)
         elif self._status == "stopped":
             self._restore_prepared_mitm_after_collection()
             workers = self.process_manager.running_workers()
@@ -670,6 +708,7 @@ class TaskManager:
         if not should_emit_log(event.get("level", "INFO"), self.config.app.log_level):
             return
         self._logs.append(event)
+        self._trim_runtime_logs(MAX_RUNTIME_LOGS)
         try:
             self.file_logger.write(event)
         except Exception:
@@ -718,6 +757,49 @@ class TaskManager:
         if status:
             self._status = status
         self._append_log(self._normalize_event(event))
+        if self._is_finished_collection_status(status):
+            self._clear_finished_collection_buffers()
+            self._trim_runtime_logs(COMPLETED_RUNTIME_LOGS)
+
+    @staticmethod
+    def _is_finished_collection_status(status: str) -> bool:
+        return str(status or "").strip().lower() in COLLECTION_FINISHED_STATUSES
+
+    def _trim_runtime_logs(self, limit: int) -> None:
+        try:
+            normalized_limit = int(limit)
+        except (TypeError, ValueError):
+            normalized_limit = MAX_RUNTIME_LOGS
+        if normalized_limit <= 0:
+            self._logs = []
+            return
+        if len(self._logs) > normalized_limit:
+            self._logs = self._logs[-normalized_limit:]
+
+    def _clear_finished_collection_buffers(self) -> int:
+        return self._drain_capture_event_queue(MAX_CAPTURE_QUEUE_DRAIN_ON_FINISH)
+
+    def _drain_capture_event_queue(self, limit: int = MAX_CAPTURE_QUEUE_DRAIN_ON_FINISH) -> int:
+        if self.capture_event_queue is None:
+            return 0
+
+        try:
+            normalized_limit = max(0, int(limit))
+        except (TypeError, ValueError):
+            normalized_limit = MAX_CAPTURE_QUEUE_DRAIN_ON_FINISH
+        if normalized_limit <= 0:
+            return 0
+
+        drained = 0
+        while drained < normalized_limit:
+            try:
+                self.capture_event_queue.get_nowait()
+            except queue.Empty:
+                break
+            except Exception:
+                break
+            drained += 1
+        return drained
 
     def _build_auth_status(self, workers: list[str]) -> dict:
         if self._auth_status.get("hasKeyUrl"):

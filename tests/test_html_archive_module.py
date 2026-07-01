@@ -13,6 +13,7 @@ from src.modules.html_archive.html_rewriter import (
 )
 from src.modules.html_archive.article_html_archiver import (
     build_article_only_html,
+    build_chromium_launch_kwargs,
     build_unavailable_article_html,
     build_scroll_warning,
     clean_article_content_html,
@@ -236,6 +237,28 @@ class HtmlArchiveModuleTest(unittest.TestCase):
                     __import__("os").environ.pop("PLAYWRIGHT_BROWSERS_PATH", None)
                 else:
                     __import__("os").environ["PLAYWRIGHT_BROWSERS_PATH"] = old_value
+
+    def test_playwright_launch_defaults_to_direct_network(self) -> None:
+        launch_kwargs = build_chromium_launch_kwargs(ArticleHtmlArchiveConfig(headless=True))
+
+        self.assertTrue(launch_kwargs["headless"])
+        self.assertIn("--proxy-server=direct://", launch_kwargs["args"])
+        self.assertIn("--proxy-bypass-list=*", launch_kwargs["args"])
+
+    def test_playwright_launch_can_preserve_extra_chromium_args(self) -> None:
+        launch_kwargs = build_chromium_launch_kwargs(
+            ArticleHtmlArchiveConfig(chromium_launch_args=("--disable-gpu",))
+        )
+
+        self.assertIn("--disable-gpu", launch_kwargs["args"])
+        self.assertIn("--proxy-server=direct://", launch_kwargs["args"])
+
+    def test_playwright_launch_can_disable_direct_network_override(self) -> None:
+        launch_kwargs = build_chromium_launch_kwargs(
+            ArticleHtmlArchiveConfig(bypass_system_proxy=False, chromium_launch_args=("--disable-gpu",))
+        )
+
+        self.assertEqual(launch_kwargs["args"], ["--disable-gpu"])
 
     def test_prepare_archive_output_dirs_removes_stale_assets_before_resaving(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

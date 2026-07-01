@@ -167,7 +167,7 @@ def archive_article_html(task: ArticleHtmlArchiveTask, config: ArticleHtmlArchiv
 
     try:
         with sync_playwright() as playwright:
-            browser = playwright.chromium.launch(headless=config.headless)
+            browser = playwright.chromium.launch(**build_chromium_launch_kwargs(config))
             headers = build_random_browser_headers(config)
             context = browser.new_context(
                 viewport={"width": config.viewport_width, "height": config.viewport_height},
@@ -271,6 +271,14 @@ def ensure_playwright_browser_path(config: ArticleHtmlArchiveConfig) -> Path:
     browser_dir = Path(config.browser_cache_dir)
     os.environ["PLAYWRIGHT_BROWSERS_PATH"] = str(browser_dir)
     return browser_dir
+
+
+def build_chromium_launch_kwargs(config: ArticleHtmlArchiveConfig) -> dict[str, Any]:
+    """统一生成 Chromium 启动参数；默认直连网络，避免系统代理劫持离线缓存。"""
+    args = list(config.chromium_launch_args)
+    if config.bypass_system_proxy:
+        args.extend(["--proxy-server=direct://", "--proxy-bypass-list=*"])
+    return {"headless": config.headless, "args": args}
 
 
 def prepare_archive_output_dirs(archive_dir: Path, assets_dir: Path) -> None:
@@ -658,6 +666,7 @@ def _strip_tags(value: str) -> str:
 __all__ = [
     "archive_article_html",
     "build_article_only_html",
+    "build_chromium_launch_kwargs",
     "build_unavailable_article_html",
     "build_scroll_warning",
     "clean_article_content_html",

@@ -134,19 +134,39 @@ def request_article_html(
 ) -> str:
     """实际发送 requests 请求；只返回响应文本，不落盘保存原始请求或响应。"""
     try:
-        import requests
+        requests = import_requests_module()
     except ModuleNotFoundError as exc:
-        raise ArticleDetailFetchError("当前 Python 环境缺少 requests，请先安装 requirements.txt 中的依赖") from exc
+        raise ArticleDetailFetchError("当前 Python 环境缺少 requests，请使用 uv add requests 安装依赖") from exc
 
     headers = normalize_request_headers(request_headers)
     try:
-        response = requests.get(str(keyed_url), headers=headers, timeout=normalize_timeout(timeout_seconds))
+        session = build_direct_requests_session(requests)
+        response = session.get(
+            str(keyed_url),
+            headers=headers,
+            timeout=normalize_timeout(timeout_seconds),
+            proxies={"http": None, "https": None},
+        )
     except requests.RequestException as exc:
         raise ArticleDetailFetchError(f"请求文章详情失败：{exc}") from exc
 
     if response.status_code < 200 or response.status_code >= 300:
         raise ArticleDetailFetchError(f"请求文章详情失败：HTTP {response.status_code}")
     return response.text
+
+
+def import_requests_module():
+    import requests
+
+    return requests
+
+
+def build_direct_requests_session(requests_module=None):
+    """创建直连 requests 会话，避免系统代理接管后再次进入本机 MITM。"""
+    requests = requests_module or import_requests_module()
+    session = requests.Session()
+    session.trust_env = False
+    return session
 
 
 def build_article_detail_from_html(html_text: str, keyed_url: str, *, collect_time: str | None = None) -> dict[str, Any]:

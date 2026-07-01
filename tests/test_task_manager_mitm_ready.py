@@ -129,6 +129,32 @@ class MemoryFileLogger:
 
 
 class TaskManagerMitmReadyTest(unittest.TestCase):
+    def test_debug_mitm_noise_is_hidden_when_log_level_is_info(self) -> None:
+        logger = MemoryFileLogger()
+        manager = TaskManager(
+            config=AppRuntimeConfig(app=AppFeatureConfig(log_level="INFO")),
+            process_manager=FakeProcessManager(),
+            home_detector=lambda **_kwargs: DEFAULT_WECHAT_HOME_SNAPSHOT,
+        )
+        manager.file_logger = logger
+
+        manager._append_log(
+            {
+                "level": "DEBUG",
+                "message": "MITM 已看到文章页候选请求但未保存主 HTML：article_referer_seen",
+                "source": "mitm",
+            }
+        )
+        manager._append_log(
+            {
+                "level": "SUCCESS",
+                "message": "已捕获文章主 HTML：测试文章",
+                "source": "mitm",
+            }
+        )
+
+        self.assertEqual([item["message"] for item in logger.written], ["已捕获文章主 HTML：测试文章"])
+
     def test_wait_for_tcp_listener_retries_until_port_accepts_connection(self) -> None:
         calls = 0
 

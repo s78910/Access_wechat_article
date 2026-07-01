@@ -26,6 +26,8 @@ tests/output/
 data/awa_public.sqlite3
 # AGENTS规则
 AGENTS.md
+PROJECT.md
+
 
 # 导出或本地数据库产物
 *.xlsx

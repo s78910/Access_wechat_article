@@ -124,6 +124,7 @@ class WeChatCaptureAddon:
         self.auto_save_content = auto_save_content
         self.target_probe_path = Path(target_probe_path) if target_probe_path else None
         self.article_main_html_seen: dict[str, float] = {}
+        self.article_main_html_request_seen: dict[str, float] = {}
         self.article_main_html_candidate_seen: dict[str, float] = {}
 
     def http_connect(self, flow: Any) -> None:
@@ -137,11 +138,11 @@ class WeChatCaptureAddon:
             url,
             reason="wechat_tunnel_seen",
             body_chars=0,
-            level="INFO",
+            level="DEBUG",
         )
         put_event(
             self.event_queue,
-            "INFO",
+            "DEBUG",
             f"MITM 已看到微信 HTTPS 隧道：{host}:{port or 443}",
             source="mitm",
         )
@@ -151,12 +152,13 @@ class WeChatCaptureAddon:
         if not is_wechat_host(host):
             return
         error = stringify_flow_error(flow)
+        level = article_flow_error_level(f"https://{host}/")
         self._emit_article_main_html_candidate_event(
             flow,
             f"https://{host}/",
             reason="wechat_tunnel_error",
             body_chars=0,
-            level="ERROR",
+            level=level,
             error=error,
         )
 
@@ -173,15 +175,15 @@ class WeChatCaptureAddon:
             data,
             reason="tls_clienthello",
             host=host,
-            level="INFO",
+            level="DEBUG",
             error=f"alpn={','.join(item for item in alpn_protocols if item)}",
         )
 
     def tls_established_client(self, data: Any) -> None:
-        self._emit_tls_diagnostic(data, reason="tls_client_established", level="INFO")
+        self._emit_tls_diagnostic(data, reason="tls_client_established", level="DEBUG")
 
     def tls_established_server(self, data: Any) -> None:
-        self._emit_tls_diagnostic(data, reason="tls_server_established", level="INFO")
+        self._emit_tls_diagnostic(data, reason="tls_server_established", level="DEBUG")
 
     def tls_failed_client(self, data: Any) -> None:
         self._emit_tls_diagnostic(data, reason="tls_client_failed")
@@ -194,12 +196,13 @@ class WeChatCaptureAddon:
         host = urlparse(url).hostname if url else extract_connect_address(flow)[0]
         if not is_wechat_host(host):
             return
+        level = article_flow_error_level(url or f"https://{host}/")
         self._emit_article_main_html_candidate_event(
             flow,
             url or f"https://{host}/",
             reason="mitm_flow_error",
             body_chars=0,
-            level="ERROR",
+            level=level,
             error=stringify_flow_error(flow),
         )
 
@@ -207,39 +210,41 @@ class WeChatCaptureAddon:
         url = getattr(flow.request, "pretty_url", "")
         if is_article_main_html_url(url):
             disable_article_request_cache(flow.request)
-            self._emit_article_main_html_request_event(flow, url, url_source="request")
+            if not self._emit_article_main_html_request_event(flow, url, url_source="request"):
+                return
             self._emit_article_main_html_candidate_event(
                 flow,
                 url,
                 reason="article_request_seen",
                 body_chars=0,
-                level="INFO",
+                level="DEBUG",
             )
             put_event(
                 self.event_queue,
-                "INFO",
+                "DEBUG",
                 f"MITM 已看到文章主页面请求：{redact_article_runtime_url(url)}",
                 source="mitm",
             )
         else:
             referer_url = compact_header_value(compact_headers(getattr(flow.request, "headers", {})), "referer")
             if is_article_main_html_url(referer_url):
-                self._emit_article_main_html_request_event(
+                if not self._emit_article_main_html_request_event(
                     flow,
                     referer_url,
                     url_source="referer",
                     carrier_url=url,
-                )
+                ):
+                    return
                 self._emit_article_main_html_candidate_event(
                     flow,
                     referer_url,
                     reason="article_referer_seen",
                     body_chars=0,
-                    level="INFO",
+                    level="DEBUG",
                 )
                 put_event(
                     self.event_queue,
-                    "INFO",
+                    "DEBUG",
                     f"MITM 已从资源请求 Referer 看到文章主 URL，但这不是文章主请求本身：{redact_article_runtime_url(referer_url)}",
                     source="mitm",
                 )
@@ -273,7 +278,7 @@ class WeChatCaptureAddon:
 
         put_event(
             self.event_queue,
-            "INFO",
+            "DEBUG",
             f"捕获微信请求：{kind} {sanitize_url(url)}",
             source="mitm",
         )
@@ -387,7 +392,7 @@ class WeChatCaptureAddon:
             )
             put_event(
                 self.event_queue,
-                "INFO",
+                "DEBUG",
                 f"MITM 已在非带 key 的微信 HTML response 中看到文章内容特征：title={article_title or '未识别'} url={redact_article_runtime_url(url)}",
                 source="mitm",
             )
@@ -400,14 +405,14 @@ class WeChatCaptureAddon:
                 url,
                 reason="wechat_response_title_candidate",
                 body_chars=len(str(html_text or "")),
-                level="INFO",
+                level="DEBUG",
                 title=title_candidates[0],
                 title_matched=True,
                 title_candidates=title_candidates,
             )
             put_event(
                 self.event_queue,
-                "INFO",
+                "DEBUG",
                 f"MITM 已在微信 HTML response 中发现标题候选：title={title_candidates[0]} url={redact_article_runtime_url(url)}",
                 source="mitm",
             )
@@ -435,7 +440,7 @@ class WeChatCaptureAddon:
             url,
             reason="wechat_response_target_title_seen",
             body_chars=len(str(response_text or "")),
-            level="INFO",
+            level="DEBUG",
             title=target_title,
             title_matched=True,
             title_candidates=[target_title],
@@ -443,7 +448,7 @@ class WeChatCaptureAddon:
         )
         put_event(
             self.event_queue,
-            "INFO",
+            "DEBUG",
             (
                 f"MITM 已在微信 response 正文中命中本轮点击标题：title={target_title} "
                 f"runtime_params={format_runtime_param_keys_for_log(runtime_params)} "
@@ -465,12 +470,12 @@ class WeChatCaptureAddon:
             url,
             reason="realtime_response_body_too_large",
             body_chars=body_bytes,
-            level="WARN",
+            level="DEBUG",
             runtime_params=runtime_params,
         )
         put_event(
             self.event_queue,
-            "WARN",
+            "DEBUG",
             (
                 f"MITM 5秒实时探针跳过大响应正文扫描：body_bytes={body_bytes} "
                 f"request={redact_article_runtime_url(url)} "
@@ -493,7 +498,7 @@ class WeChatCaptureAddon:
             url,
             reason=reason,
             body_chars=len(str(response_text or "")),
-            level="INFO",
+            level="DEBUG",
             title=target_title if title_matched else "",
             title_matched=title_matched,
             title_candidates=[target_title] if title_matched else [],
@@ -503,7 +508,7 @@ class WeChatCaptureAddon:
         if title_matched:
             put_event(
                 self.event_queue,
-                "INFO",
+                "DEBUG",
                 (
                     f"MITM 5秒实时探针命中点击标题：title={target_title} "
                     f"request={redact_article_runtime_url(url)} "
@@ -589,7 +594,7 @@ class WeChatCaptureAddon:
         *,
         url_source: str = "request",
         carrier_url: str = "",
-    ) -> None:
+    ) -> bool:
         event = build_article_main_html_request_event(
             url=url,
             method=str(getattr(flow.request, "method", "GET") or "GET"),
@@ -597,15 +602,22 @@ class WeChatCaptureAddon:
             url_source=url_source,
             carrier_url=carrier_url,
         )
+        now = time.time()
+        prune_expired_article_cache(self.article_main_html_request_seen, now)
+        identity = f"{article_main_html_identity(url)}|{event.get('url_source') or 'request'}"
+        if identity in self.article_main_html_request_seen:
+            return False
         if not self._put_capture_event(event):
-            return
+            return False
+        self.article_main_html_request_seen[identity] = now
         self._emit_auth_status_event(event)
         put_event(
             self.event_queue,
             "SUCCESS",
-            f"已捕获文章主请求 URL：{event.get('url_redacted')}",
+            article_main_html_request_log_message(event),
             source="mitm",
         )
+        return True
 
     def _emit_auth_status_event(self, request_event: dict[str, Any]) -> None:
         """把“已看到带 key URL”的事实同步给状态页，不暴露原始 key。"""
@@ -664,7 +676,7 @@ class WeChatCaptureAddon:
             return
         put_event(
             self.event_queue,
-            level,
+            mitm_ui_log_level(level),
             f"MITM 已看到文章页候选请求但未保存主 HTML：{reason} {event.get('url_redacted')}",
             source="mitm",
         )
@@ -683,7 +695,7 @@ class WeChatCaptureAddon:
         host = host or conn_host
         if not is_wechat_host(host):
             return
-        diagnostic_level = level or ("ERROR" if "failed" in reason else "INFO")
+        diagnostic_level = level or ("ERROR" if "failed" in reason else "DEBUG")
         error = str(error or getattr(conn, "error", "") or "")
         event = build_article_main_html_candidate_event(
             url=f"https://{host}/",
@@ -699,10 +711,29 @@ class WeChatCaptureAddon:
             return
         put_event(
             self.event_queue,
-            diagnostic_level,
+            mitm_ui_log_level(diagnostic_level),
             f"MITM TLS 诊断：{reason} {host}:{port or 443} {error}",
             source="mitm",
         )
+
+
+def mitm_ui_log_level(level: Any) -> str:
+    """把高频 MITM 诊断日志降为 DEBUG，保留真正错误在主运行日志中可见。"""
+    normalized = str(level or "DEBUG").strip().upper()
+    return "ERROR" if normalized == "ERROR" else "DEBUG"
+
+
+def article_flow_error_level(url: str) -> str:
+    """只有文章主请求失败才提升为 ERROR，文章页附属接口失败只作为诊断噪声。"""
+    return "ERROR" if is_article_main_html_url(url) or is_article_identity_url(url) else "DEBUG"
+
+
+def article_main_html_request_log_message(event: dict[str, Any]) -> str:
+    """区分真实主请求和 Referer 线索，避免用户把保底线索误认为重复点击。"""
+    url_redacted = str(event.get("url_redacted") or "")
+    if str(event.get("url_source") or "") == "referer":
+        return f"已从资源请求 Referer 发现文章主 URL（保底线索）：{url_redacted}"
+    return f"已捕获文章主请求 URL：{url_redacted}"
 
 
 def prune_expired_article_cache(

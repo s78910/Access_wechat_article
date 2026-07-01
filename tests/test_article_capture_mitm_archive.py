@@ -224,6 +224,60 @@ class ArticleCaptureMitmArchiveTest(unittest.TestCase):
             events,
         )
 
+    def test_mitm_request_hook_dedupes_repeated_article_request_logs(self) -> None:
+        event_queue = Queue()
+        capture_queue = Queue()
+        addon = WeChatCaptureAddon(
+            event_queue=event_queue,
+            capture_event_queue=capture_queue,
+            store=None,
+        )
+        url = "https://mp.weixin.qq.com/s?__biz=biz&mid=1&idx=1&sn=sn&key=secret"
+
+        addon.request(FakeHttpFlow(url, ""))
+        addon.request(FakeHttpFlow(url, ""))
+
+        events = drain_queue(capture_queue)
+        requested = [item for item in events if item.get("type") == "article_main_html_requested"]
+        self.assertEqual(len(requested), 1, events)
+
+        status_events = drain_queue(event_queue)
+        capture_logs = [
+            item
+            for item in status_events
+            if item.get("source") == "mitm" and "已捕获文章主请求 URL" in str(item.get("message") or "")
+        ]
+        self.assertEqual(len(capture_logs), 1, status_events)
+
+    def test_mitm_request_hook_dedupes_repeated_referer_fallback_logs(self) -> None:
+        event_queue = Queue()
+        capture_queue = Queue()
+        addon = WeChatCaptureAddon(
+            event_queue=event_queue,
+            capture_event_queue=capture_queue,
+            store=None,
+        )
+        referer_url = "https://mp.weixin.qq.com/s?__biz=biz&mid=1&idx=1&sn=sn&key=secret"
+
+        for _ in range(2):
+            flow = FakeHttpFlow("https://mp.weixin.qq.com/mp/geticon?biz=biz&mid=1&idx=1", "")
+            flow.request.headers["referer"] = referer_url
+            addon.request(flow)
+
+        events = drain_queue(capture_queue)
+        requested = [item for item in events if item.get("type") == "article_main_html_requested"]
+        self.assertEqual(len(requested), 1, events)
+        self.assertEqual(requested[0]["url_source"], "referer")
+
+        status_events = drain_queue(event_queue)
+        referer_logs = [
+            item
+            for item in status_events
+            if item.get("source") == "mitm"
+            and str(item.get("message") or "").startswith("已从资源请求 Referer 发现文章主 URL")
+        ]
+        self.assertEqual(len(referer_logs), 1, status_events)
+
     def test_mitm_request_hook_emits_requested_event_only_for_real_keyed_article_request(self) -> None:
         event_queue = Queue()
         capture_queue = Queue()
@@ -266,6 +320,33 @@ class ArticleCaptureMitmArchiveTest(unittest.TestCase):
         self.assertTrue(
             any(item.get("reason") == "article_identity_without_key" for item in events),
             events,
+        )
+
+    def test_mitm_flow_error_for_article_side_api_is_debug_noise(self) -> None:
+        event_queue = Queue()
+        capture_queue = Queue()
+        addon = WeChatCaptureAddon(
+            event_queue=event_queue,
+            capture_event_queue=capture_queue,
+            store=None,
+        )
+        flow = FakeHttpFlow(
+            "https://mp.weixin.qq.com/mp/searchkeywordreport?wxtoken=777&clientversion=f2541b17&__biz=biz&enterid=1&x5=0&f=json",
+            "",
+        )
+        flow.error = RuntimeError("stream closed")
+
+        addon.error(flow)
+
+        events = drain_queue(capture_queue)
+        diagnostics = [item for item in events if item.get("reason") == "mitm_flow_error"]
+        self.assertEqual(len(diagnostics), 1, events)
+        self.assertEqual(diagnostics[0].get("level"), "DEBUG")
+
+        status_events = drain_queue(event_queue)
+        self.assertFalse(
+            any(item.get("level") == "ERROR" and item.get("source") == "mitm" for item in status_events),
+            status_events,
         )
 
     def test_mitm_response_reports_article_html_title_when_seen_on_non_keyed_url(self) -> None:

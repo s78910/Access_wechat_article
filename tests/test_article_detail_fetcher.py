@@ -5,6 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
+from unittest.mock import patch
 
 from src.modules.detail.article_detail import (
     ArticleDetailFetchError,
@@ -16,6 +17,42 @@ from src.modules.detail.article_detail import (
 
 
 class ArticleDetailFetcherTest(unittest.TestCase):
+    def test_request_article_html_uses_direct_session_without_system_proxy(self) -> None:
+        from src.modules.detail.article_detail import request_article_html
+
+        class FakeResponse:
+            status_code = 200
+            text = "<html>ok</html>"
+
+        class FakeSession:
+            def __init__(self) -> None:
+                self.trust_env = True
+                self.get_calls: list[dict[str, object]] = []
+
+            def get(self, url: str, **kwargs):
+                self.get_calls.append({"url": url, **kwargs})
+                return FakeResponse()
+
+        fake_session = FakeSession()
+
+        with patch("requests.Session", return_value=fake_session):
+            html_text = request_article_html(
+                "https://mp.weixin.qq.com/s?__biz=biz&mid=1&idx=1&sn=sn&key=secret",
+                request_headers={
+                    "User-Agent": "MicroMessenger/8.0",
+                    "Host": "mp.weixin.qq.com",
+                },
+                timeout_seconds=5,
+            )
+
+        self.assertEqual(html_text, "<html>ok</html>")
+        self.assertFalse(fake_session.trust_env)
+        self.assertEqual(len(fake_session.get_calls), 1)
+        call = fake_session.get_calls[0]
+        self.assertEqual(call["headers"], {"user-agent": "MicroMessenger/8.0"})
+        self.assertEqual(call["timeout"], 5.0)
+        self.assertEqual(call["proxies"], {"http": None, "https": None})
+
     def test_fetch_keyed_url_writes_only_structured_article_detail(self) -> None:
         html_text = """
         <html><body>

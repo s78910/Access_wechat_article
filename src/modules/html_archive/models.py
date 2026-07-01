@@ -22,6 +22,8 @@ class ArticleHtmlArchiveConfig:
     concurrency: int = 2
     resource_dir_name: str = "assets"
     browser_cache_dir: Path = PROJECT_ROOT / ".playwright-browsers"
+    bypass_system_proxy: bool = True
+    chromium_launch_args: tuple[str, ...] = ()
     viewport_width: int = 1365
     viewport_height: int = 1600
     wait_until: str = "domcontentloaded"

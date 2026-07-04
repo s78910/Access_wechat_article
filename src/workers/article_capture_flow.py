@@ -155,6 +155,7 @@ def _run_cursor_article_capture(
     max_cursor_iterations = resolve_homepage_max_cursor_iterations(config, target_total)
     max_capture_attempts = resolve_homepage_max_capture_attempts(config, target_total)
     max_no_progress_iterations = resolve_homepage_max_no_progress_iterations(config, target_total)
+    skip_collected_records = should_skip_collected_records(selections)
     cursor_iterations = 0
     capture_attempts = 0
     no_progress_iterations = 0
@@ -234,6 +235,7 @@ def _run_cursor_article_capture(
             original_candidate=candidate,
             run_failed_titles=run_failed_titles,
             failed_cooldown_minutes=failed_cooldown_minutes,
+            skip_collected_records=skip_collected_records,
         )
         if candidate is None:
             skipped_count += 1
@@ -258,6 +260,7 @@ def _run_cursor_article_capture(
             title,
             run_failed_titles=run_failed_titles,
             failed_cooldown_minutes=failed_cooldown_minutes,
+            skip_collected_records=skip_collected_records,
         )
         if skip_reason:
             skipped_count += 1
@@ -382,6 +385,7 @@ def _refresh_current_visible_candidate_before_click(
     original_candidate: Any,
     run_failed_titles: set[str] | None = None,
     failed_cooldown_minutes: float = 0.0,
+    skip_collected_records: bool = True,
 ) -> Any | None:
     """点击前重新读取当前可见候选；主页自动刷新后，以最新可点击候选为准。"""
     if not bool(config.get("homepage_reselect_current_visible_before_click", True)):
@@ -402,13 +406,14 @@ def _refresh_current_visible_candidate_before_click(
         account_name,
         run_failed_titles=run_failed_titles,
         failed_cooldown_minutes=failed_cooldown_minutes,
+        skip_collected_records=skip_collected_records,
     )
     if selected is None:
         _skip_cursor_visible_candidates(cursor, fresh_candidates)
         deps.put_event(
             event_queue,
             "INFO",
-            f"点击前当前可见 {len(fresh_candidates)} 篇文章均已保存或处于失败冷却，继续向下滚动查找未保存文章",
+            f"点击前当前可见 {len(fresh_candidates)} 篇文章均不可采集或处于失败冷却，继续向下滚动查找可采集文章",
             source="article_capture",
         )
         return None
@@ -445,6 +450,7 @@ def _select_first_unsaved_candidate(
     *,
     run_failed_titles: set[str] | None = None,
     failed_cooldown_minutes: float = 0.0,
+    skip_collected_records: bool = True,
 ) -> Any | None:
     for candidate in candidates:
         title = str(getattr(candidate, "title", "") or "").strip()
@@ -458,6 +464,7 @@ def _select_first_unsaved_candidate(
             title,
             run_failed_titles=run_failed_titles,
             failed_cooldown_minutes=failed_cooldown_minutes,
+            skip_collected_records=skip_collected_records,
         ):
             continue
         return candidate
@@ -475,13 +482,14 @@ def _candidate_skip_reason(
     *,
     run_failed_titles: set[str] | None = None,
     failed_cooldown_minutes: float = 0.0,
+    skip_collected_records: bool = True,
 ) -> str:
     normalized_title = _normalize_skip_title(title)
     if not normalized_title:
         return ""
     if normalized_title in (run_failed_titles or set()):
         return "run_failed"
-    if account_name and _store_has_saved_title(store, account_name, title):
+    if skip_collected_records and account_name and _store_has_saved_title(store, account_name, title):
         return "saved"
     if account_name and _store_has_recent_failed_title(store, account_name, title, failed_cooldown_minutes):
         return "recent_failed"
@@ -496,6 +504,12 @@ def _format_candidate_skip_message(article_index: int, title: str, reason: str) 
     if reason == "recent_failed":
         return f"主页第 {article_index} 篇文章最近失败仍在冷却期，跳过：{title}"
     return f"主页第 {article_index} 篇文章已跳过：{title}"
+
+
+def should_skip_collected_records(selections: dict | None) -> bool:
+    """是否跳过数据库中已经成功采集过的文章。默认开启，保持旧版本主流程行为。"""
+    data = selections if isinstance(selections, dict) else {}
+    return bool(data.get("skipCollectedRecords", True))
 
 
 def _remember_failed_title(run_failed_titles: set[str], title: str) -> None:

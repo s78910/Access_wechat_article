@@ -1,4 +1,4 @@
-<h1 align="center">Access WeChat Article</h1>
+﻿<h1 align="center">Access WeChat Article</h1>
 
 <p align="center">
   <strong>面向学术研究与公开文章材料整理的科研辅助工具</strong>
@@ -125,7 +125,7 @@ uv run python main.py
 http://127.0.0.1:8766/
 ```
 
-完整安装步骤请看 [`安装说明`](./doc/install_zh.md)，功能说明请看 [`功能说明`](./doc/features_zh.md)。
+完整安装步骤请看 [`安装说明`](./doc/install.md)，功能说明请看 [`功能说明`](./doc/features.md)。
 
 ---
 
@@ -228,3 +228,4 @@ flowchart LR
    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=yeximm/Access_wechat_article&type=date&legend=top-left" />
    <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=yeximm/Access_wechat_article&type=date&legend=top-left" />
 </picture>
+

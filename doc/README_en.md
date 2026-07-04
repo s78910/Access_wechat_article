@@ -49,7 +49,7 @@ Contributions are welcome in these areas:
 - Pull requests for code, documentation, tests, or workflow improvements.
 - CI, testing, and type checking improvements.
 
-For detailed contribution guidance, see [Contributing Guide](./contributing_en.md).
+For detailed contribution, conduct, and security guidance, see [Contribution Guide](./contributing_en.md).
 
 ---
 

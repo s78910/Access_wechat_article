@@ -29,26 +29,43 @@ class FakeRect:
         self.bottom = bottom
 
 
+class FakePattern:
+    def __init__(self, *, value: str = "", name: str = "") -> None:
+        self.Value = value
+        self.Name = name
+
+
 class FakeControl:
     def __init__(
         self,
         name: str,
         *,
+        value: str = "",
+        legacy_value: str = "",
+        legacy_name: str | None = None,
         children: list["FakeControl"] | None = None,
         hwnd: int = 0,
         rect: tuple[int, int, int, int] = (0, 0, 0, 0),
         control_type: str = "TextControl",
     ) -> None:
         self.Name = name
-        self.Value = ""
+        self.Value = value
         self.ControlTypeName = control_type
         self.ClassName = ""
         self.NativeWindowHandle = hwnd
         self.BoundingRectangle = FakeRect(*rect)
+        self._value_pattern = FakePattern(value=value)
+        self._legacy_pattern = FakePattern(value=legacy_value or value, name=name if legacy_name is None else legacy_name)
         self._children = children or []
 
     def GetChildren(self):
         return self._children
+
+    def GetValuePattern(self):
+        return self._value_pattern
+
+    def GetLegacyIAccessiblePattern(self):
+        return self._legacy_pattern
 
 
 class FakeAutoModule:
@@ -67,14 +84,15 @@ class FakeRootControl:
 
 
 class FakeAutoModuleWithWindows:
-    def __init__(self, windows: list[FakeControl]) -> None:
+    def __init__(self, windows: list[FakeControl], handle_controls: dict[int, FakeControl] | None = None) -> None:
         self._windows = windows
+        self._handle_controls = handle_controls or {}
 
     def GetRootControl(self):
         return FakeRootControlWithWindows(self._windows)
 
-    def ControlFromHandle(self, _hwnd):
-        return None
+    def ControlFromHandle(self, hwnd):
+        return self._handle_controls.get(int(hwnd))
 
 
 class FakeRootControlWithWindows:
@@ -258,6 +276,7 @@ class WechatWindowActivationTest(unittest.TestCase):
                 wechat_home,
                 "_collect_best_wechat_texts",
                 return_value=[
+                    "weixin://resourceid/SubscriptionProfile/profile.html?showName=%E9%87%91%E9%A2%86%E5%86%A0%E7%88%B1%E5%84%BF%E4%BF%B1%E4%B9%90%E9%83%A8",
                     "服务号",
                     "全部",
                     "贴图",
@@ -277,6 +296,90 @@ class WechatWindowActivationTest(unittest.TestCase):
 
         self.assertTrue(snapshot.found)
         self.assertEqual(snapshot.account_name, "金领冠爱儿俱乐部")
+
+    def test_home_detector_reads_account_name_from_profile_url_show_name(self) -> None:
+        profile_url = (
+            "weixin://resourceid/SubscriptionProfile/profile.html?"
+            "userName=gh_86329e29aee2&showName=%E5%AD%A6%E4%BF%A1%E7%BD%91"
+            "&signature=%E5%AD%A6%E4%BF%A1%E7%BD%91%EF%BC%88%E4%B8%AD%E5%9B%BD%EF%BC%89"
+        )
+        shell_window = FakeControl(
+            "\u670d\u52a1\u53f7",
+            hwnd=100,
+            rect=(100, 100, 900, 900),
+            control_type="PaneControl",
+            children=[FakeControl("\u670d\u52a1\u53f7", control_type="TextControl")],
+        )
+        shell_window.ClassName = "Chrome_WidgetWin_0"
+        shell_window.ProcessId = 100
+        profile_document = FakeControl(
+            "\u670d\u52a1\u53f7",
+            value=profile_url,
+            legacy_value=profile_url,
+            hwnd=200,
+            rect=(120, 180, 880, 900),
+            control_type="DocumentControl",
+            children=[
+                FakeControl("\u5b66\u4fe1\u7f51\uff08\u4e2d\u56fd\u9ad8\u7b49\u6559\u80b2\u5b66\u751f\u4fe1\u606f\u7f51\uff09\u662f\u6211\u56fd\u9ad8\u7b49\u6559\u80b2\u5b66\u5386\u8bc1\u4e66\u67e5\u8be2\u7684\u552f\u4e00\u7f51\u7ad9\u3002"),
+                FakeControl("\u5c55\u5f00", control_type="HyperlinkControl"),
+                FakeControl("24\u7bc7\u539f\u521b\u5185\u5bb9"),
+                FakeControl("35\u4e2a\u670b\u53cb\u5173\u6ce8"),
+                FakeControl("\u5df2\u5173\u6ce8"),
+                FakeControl("\u53d1\u6d88\u606f"),
+                FakeControl("\u5168\u90e8", control_type="HyperlinkControl"),
+                FakeControl("\u8d34\u56fe", control_type="HyperlinkControl"),
+                FakeControl("\u6587\u7ae0", control_type="HyperlinkControl"),
+            ],
+        )
+        auto_module = FakeAutoModuleWithWindows([shell_window], handle_controls={200: profile_document})
+
+        with (
+            patch.object(wechat_home.platform, "system", return_value="Windows"),
+            patch.object(wechat_home, "_get_process_name", return_value="WeChatAppEx.exe"),
+            patch.object(wechat_home, "_enumerate_child_window_handles", return_value=[200]),
+        ):
+            snapshot = wechat_home._detect_with_uiautomation(auto_module=auto_module)
+
+        self.assertTrue(snapshot.found)
+        self.assertEqual(snapshot.account_name, "\u5b66\u4fe1\u7f51")
+        self.assertNotIn("weixin://resourceid", snapshot.description)
+        self.assertEqual(snapshot.account_confidence, "high")
+        self.assertEqual(snapshot.account_source, "profile_url_show_name")
+
+    def test_home_detector_does_not_trust_text_account_name_without_profile_url(self) -> None:
+        service_window = FakeControl(
+            "\u670d\u52a1\u53f7",
+            hwnd=100,
+            rect=(100, 100, 900, 900),
+            control_type="PaneControl",
+        )
+        service_window.ClassName = "Chrome_WidgetWin_0"
+        service_window.ProcessId = 100
+        auto_module = FakeAutoModuleWithWindows([service_window])
+
+        with (
+            patch.object(wechat_home.platform, "system", return_value="Windows"),
+            patch.object(wechat_home, "_get_process_name", return_value="WeChatAppEx.exe"),
+            patch.object(
+                wechat_home,
+                "_collect_best_wechat_texts",
+                return_value=[
+                    "\u670d\u52a1\u53f7",
+                    "\u5b66\u4fe1\u7f51",
+                    "24\u7bc7\u539f\u521b\u5185\u5bb9",
+                    "35\u4e2a\u670b\u53cb\u5173\u6ce8",
+                    "\u5168\u90e8",
+                    "\u8d34\u56fe",
+                    "\u6587\u7ae0",
+                ],
+            ),
+        ):
+            snapshot = wechat_home._detect_with_uiautomation(auto_module=auto_module)
+
+        self.assertFalse(snapshot.found)
+        self.assertEqual(snapshot.account_name, "\u672a\u8bfb\u53d6\u5230\u53ef\u4fe1\u516c\u4f17\u53f7\u540d")
+        self.assertEqual(snapshot.account_confidence, "none")
+        self.assertEqual(snapshot.account_source, "")
 
     def test_article_clicker_activates_home_window_before_collecting_targets(self) -> None:
         calls: list[str] = []
@@ -541,6 +644,44 @@ class WechatWindowActivationTest(unittest.TestCase):
             ],
         )
 
+    def test_article_clicker_keeps_article_titles_that_start_with_date_text(self) -> None:
+        home_window = FakeControl(
+            "服务号正文",
+            hwnd=200,
+            rect=(100, 100, 900, 1200),
+            control_type="DocumentControl",
+            children=[
+                FakeControl("全部", hwnd=200, rect=(155, 180, 215, 212), control_type="TextControl"),
+                FakeControl("贴图", hwnd=200, rect=(235, 180, 295, 212), control_type="TextControl"),
+                FakeControl("文章", hwnd=200, rect=(315, 180, 375, 212), control_type="TextControl"),
+                FakeControl("视频号", hwnd=200, rect=(395, 180, 470, 212), control_type="TextControl"),
+                FakeControl("6月5日", hwnd=200, rect=(155, 330, 235, 360), control_type="TextControl"),
+                FakeControl("6月11日起，公益直播课上线！", hwnd=200, rect=(155, 410, 520, 450), control_type="TextControl"),
+                FakeControl("阅读 10万+ 赞 1683", hwnd=200, rect=(155, 460, 330, 482), control_type="TextControl"),
+                FakeControl(
+                    "6月22日至28日举行！2025年高考“云咨询周”活动来了",
+                    hwnd=200,
+                    rect=(155, 540, 640, 590),
+                    control_type="TextControl",
+                ),
+                FakeControl("阅读 10万+ 赞 1188", hwnd=200, rect=(155, 600, 330, 622), control_type="TextControl"),
+            ],
+        )
+
+        targets = home_article_clicker.collect_article_click_targets(
+            home_window,
+            max_depth=4,
+            max_nodes=100,
+        )
+
+        self.assertEqual(
+            [target.title for target in targets],
+            [
+                "6月11日起，公益直播课上线！",
+                "6月22日至28日举行！2025年高考“云咨询周”活动来了",
+            ],
+        )
+
     def test_article_clicker_fails_when_uia_titles_unreadable(self) -> None:
         window = FakeControl(
             "公众号",
@@ -744,7 +885,13 @@ class WechatWindowActivationTest(unittest.TestCase):
         def collect(window, **_kwargs):
             calls.append(f"collect:{getattr(window, 'NativeWindowHandle', 0)}")
             if window is home_window:
-                return ["公众号", "测试公众号", "1篇原创", "2个朋友关注"]
+                return [
+                    "weixin://resourceid/SubscriptionProfile/profile.html?showName=%E6%B5%8B%E8%AF%95%E5%85%AC%E4%BC%97%E5%8F%B7",
+                    "公众号",
+                    "测试公众号",
+                    "1篇原创",
+                    "2个朋友关注",
+                ]
             return ["微信", "三秋叶磨一剑", "阅读 10万+ 赞 928"]
 
         with (
@@ -1123,7 +1270,12 @@ class WechatWindowActivationTest(unittest.TestCase):
 
         def collect(_window, **_kwargs):
             calls.append("collect")
-            return ["测试公众号", "1篇原创", "朋友关注 2"]
+            return [
+                "weixin://resourceid/SubscriptionProfile/profile.html?showName=%E6%B5%8B%E8%AF%95%E5%85%AC%E4%BC%97%E5%8F%B7",
+                "测试公众号",
+                "1篇原创",
+                "朋友关注 2",
+            ]
 
         with (
             patch.object(wechat_home, "activate_wechat_window_for_uia", side_effect=activate),
@@ -1144,7 +1296,12 @@ class WechatWindowActivationTest(unittest.TestCase):
 
         def collect(_window, **_kwargs):
             calls.append("collect")
-            return ["测试公众号", "1篇原创", "朋友关注 2"]
+            return [
+                "weixin://resourceid/SubscriptionProfile/profile.html?showName=%E6%B5%8B%E8%AF%95%E5%85%AC%E4%BC%97%E5%8F%B7",
+                "测试公众号",
+                "1篇原创",
+                "朋友关注 2",
+            ]
 
         with (
             patch.object(wechat_home, "activate_wechat_window_for_uia", side_effect=activate),
@@ -1394,6 +1551,51 @@ class WechatWindowActivationTest(unittest.TestCase):
                 found=True,
                 account_confidence="low",
                 account_source="content_list",
+            )
+
+        manager = TaskManager(
+            process_manager=FakeProcessManager(),
+            home_detector=detector,
+            file_logger=NoopFileLogger(),
+        )
+
+        with patch.object(manager, "_ensure_mitm_ready_for_collection", return_value={"ok": True}):
+            manager.start_task({"recordLimit": 1})
+
+        self.assertEqual(started["name"], "article_capture")
+        self.assertNotIn("account_name", started["config"])
+
+    def test_task_manager_only_passes_profile_url_show_name_account(self) -> None:
+        started: dict = {}
+
+        class NoopFileLogger:
+            path = "test.log"
+
+            def write(self, _event):
+                return None
+
+        class FakeProcessManager:
+            def is_running(self, _name: str) -> bool:
+                return False
+
+            def start_worker(self, name: str, _target=None, args=(), **_kwargs):
+                started["name"] = name
+                started["config"] = args[1]
+
+            def running_workers(self) -> list[str]:
+                return []
+
+        def detector(*, activate: bool = False):
+            return WeChatHomeSnapshot(
+                status="ready",
+                status_label="主页信息已获取",
+                account_name="学信网",
+                description="测试简介",
+                original_count="1",
+                friend_follow_count="2",
+                found=True,
+                account_confidence="high",
+                account_source="profile_header",
             )
 
         manager = TaskManager(

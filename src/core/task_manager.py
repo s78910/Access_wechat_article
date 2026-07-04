@@ -176,9 +176,9 @@ class TaskManager:
             return ""
         account_confidence = str(getattr(snapshot, "account_confidence", "") or "").strip().lower()
         account_source = str(getattr(snapshot, "account_source", "") or "").strip().lower()
-        if account_confidence and account_confidence not in {"high", "medium"}:
+        if account_source != "profile_url_show_name":
             return ""
-        if account_source == "content_list":
+        if account_confidence != "high":
             return ""
         return account_name
 
@@ -952,6 +952,7 @@ def normalize_task_run_options(options: dict | None) -> dict:
         "selections": {
             "articleDetail": True,
             "commentInfo": bool(selections.get("commentInfo", True)),
+            "skipCollectedRecords": bool(selections.get("skipCollectedRecords", True)),
         },
     }
 

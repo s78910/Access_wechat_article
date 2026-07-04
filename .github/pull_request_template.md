@@ -1,4 +1,4 @@
-## 变更内容
+﻿## 变更内容
 
 - 
 
@@ -20,4 +20,5 @@
 
 - [ ] 未提交 `.mitmproxy/`、`data/awa_public.sqlite3`、`storages/`、日志、证书或真实文章归档
 - [ ] 日志、截图和测试数据中没有 `key`、`pass_ticket`、`appmsg_token`、Cookie 等敏感内容
-- [ ] 已阅读 `doc/contributing_zh.md` 和 `doc/security_zh.md`
+- [ ] 已阅读 `doc/contributing.md` 和 `doc/security_zh.md`
+

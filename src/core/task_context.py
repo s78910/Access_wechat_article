@@ -13,7 +13,13 @@ class TaskContext:
 
     run_id: str
     record_limit: int = 1
-    selections: dict[str, bool] = field(default_factory=lambda: {"articleDetail": True, "commentInfo": True})
+    selections: dict[str, bool] = field(
+        default_factory=lambda: {
+            "articleDetail": True,
+            "commentInfo": True,
+            "skipCollectedRecords": True,
+        }
+    )
     account_name: str = ""
     storage_root: str = "storages"
     db_path: str = ""

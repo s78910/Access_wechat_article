@@ -3173,6 +3173,122 @@ class ArticleCaptureMitmArchiveTest(unittest.TestCase):
         self.assertEqual(saved_records[0]["article_title"], "未保存C")
         self.assertEqual(cursor_holder["cursor"].skip_calls, ["已保存A", "已保存B"])
 
+    def test_flow_clicks_saved_candidate_when_skip_collected_records_disabled(self) -> None:
+        from src.workers.article_capture_flow import ArticleCaptureDependencies, run_article_capture_flow
+
+        saved_records: list[dict] = []
+        open_calls: list[tuple[int, str]] = []
+
+        class FakeCandidate:
+            def __init__(self, title: str, article_index: int) -> None:
+                self.title = title
+                self.article_index = article_index
+                self.rect = (100, 100, 500, 140)
+                self.hwnd = 200
+
+        class FakeCursor:
+            def __init__(self, *_args, **_kwargs) -> None:
+                self.items = [FakeCandidate("已保存A", 1)]
+                self.position = 0
+                self.skip_calls: list[str] = []
+
+            @property
+            def visible_candidates(self):
+                return list(self.items)
+
+            def next_candidate(self):
+                if self.position >= len(self.items):
+                    return None
+                candidate = self.items[self.position]
+                self.position += 1
+                return candidate
+
+            def refresh_visible_candidates(self) -> bool:
+                return True
+
+            def skip_visible_candidates(self, titles=None) -> None:
+                self.skip_calls.extend(list(titles or []))
+                self.position = len(self.items)
+
+            def invalidate(self) -> None:
+                self.position = 0
+
+        cursor_holder: dict[str, FakeCursor] = {}
+
+        def make_cursor(*_args, **_kwargs):
+            cursor = FakeCursor()
+            cursor_holder["cursor"] = cursor
+            return cursor
+
+        class FakeStore:
+            def has_saved_public_article_title(self, _account_name: str, title: str) -> bool:
+                return str(title) == "已保存A"
+
+            def save_public_article(self, record: dict) -> None:
+                saved_records.append(record)
+
+        def open_article(**kwargs):
+            candidate = kwargs.get("candidate")
+            title = str(getattr(candidate, "title", ""))
+            open_calls.append((int(kwargs["article_index"]), title))
+            return {
+                "target_title": title,
+                "click_started_at": time.time(),
+                "click_result": {"ok": True},
+            }
+
+        deps = ArticleCaptureDependencies(
+            put_event=lambda event_queue, level, message, **kwargs: event_queue.put({"level": level, "message": message, **kwargs}),
+            create_public_article_store=lambda _path: FakeStore(),
+            find_wechat_home_window=lambda: FakeHomeWindow(),
+            home_article_cursor_cls=make_cursor,
+            open_home_article_for_capture=open_article,
+            close_detail_windows=lambda **_kwargs: {"ok": True, "closed": [], "skipped": [], "errors": []},
+            click_home_article=lambda *_args, **_kwargs: {"ok": True},
+            write_probe=lambda *_args, **_kwargs: None,
+            drain_capture_events=lambda _queue: 0,
+            collect_report=lambda *_args, **_kwargs: {"ready": True},
+            resolve_timeout=lambda _config: 1.0,
+            is_report_ready=lambda _report: True,
+            resolve_failure_reason=lambda _report: "",
+            resolve_failure_title=lambda _report, title, _index: title,
+            build_ready_message=lambda _report: "ready",
+            get_capture_source=lambda _report: "test",
+            build_archive=lambda *_args, **_kwargs: {"archive": True},
+            build_record=lambda _archive: {
+                "account_name": "account-a",
+                "article_title": open_calls[-1][1],
+                "published_article_time": "2026-06-21 10:00",
+                "article_link": "https://mp.weixin.qq.com/s/saved-a",
+                "record_type": "article-detail",
+                "collect_time": "2026-06-21 10:00:00",
+                "collect_status": "saved",
+            },
+            build_failed_record=build_failed_public_article_record,
+        )
+
+        event_queue = Queue()
+        run_article_capture_flow(
+            event_queue,
+            {
+                "account_name": "account-a",
+                "enable_home_article_click": True,
+                "run_options": {
+                    "recordLimit": 1,
+                    "selections": {
+                        "articleDetail": True,
+                        "skipCollectedRecords": False,
+                    },
+                },
+            },
+            Queue(),
+            deps,
+        )
+
+        self.assertEqual(open_calls, [(1, "已保存A")])
+        self.assertEqual(saved_records[0]["article_title"], "已保存A")
+        self.assertEqual(cursor_holder["cursor"].skip_calls, [])
+
     def test_flow_records_success_duration_from_click_start_until_sqlite_saved(self) -> None:
         from src.workers.article_capture_flow import ArticleCaptureDependencies, run_article_capture_flow
 

@@ -425,7 +425,7 @@ def _looks_like_article_title(text: str) -> bool:
         "已关注",
     }:
         return False
-    if re.search(r"^(?:\d{4}年)?\d{1,2}月\d{1,2}日", value):
+    if _is_article_date_anchor(value):
         return False
     if re.search(r"^阅读\s*[\d.]+(?:万)?\+?\s*赞\s*\d+", value):
         return False

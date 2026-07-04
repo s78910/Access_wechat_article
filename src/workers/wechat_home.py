@@ -6,6 +6,7 @@ import re
 from collections import deque
 from dataclasses import dataclass
 from typing import Any, Iterable
+from urllib.parse import parse_qs, unquote, urlparse
 
 from src.modules.window.wechat_home_window_finder import is_wechat_home_window_candidate
 from src.workers.wechat_window_activation import activate_wechat_window_for_uia
@@ -210,6 +211,7 @@ def _detect_with_uiautomation(
     root = auto_module.GetRootControl()
     windows = root.GetChildren()
     matched_window = False
+    readable_snapshot: WeChatHomeSnapshot | None = None
     for window in windows:
         name = str(getattr(window, "Name", "") or "")
         class_name = str(getattr(window, "ClassName", "") or "")
@@ -226,11 +228,25 @@ def _detect_with_uiautomation(
             max_nodes=6000,
             control_from_handle=auto_module.ControlFromHandle,
         )
-        snapshot = parse_wechat_home_text("\n".join(texts))
+        snapshot = parse_wechat_home_text("\n".join(_without_profile_resource_values(texts)))
+        url_account_name = _extract_account_name_from_profile_values(texts)
+        if url_account_name:
+            snapshot = _snapshot_with_resolved_account_name(
+                snapshot,
+                account_name=url_account_name,
+                account_source="profile_url_show_name",
+                account_confidence="high",
+            )
+        else:
+            snapshot = _snapshot_without_text_account_name(snapshot)
         if snapshot.found:
             return snapshot
+        if snapshot.status in {"content_only", "content_unreadable"}:
+            readable_snapshot = snapshot
 
     if matched_window:
+        if readable_snapshot is not None:
+            return readable_snapshot
         return _window_content_unreadable_snapshot()
 
     return _not_found_snapshot("未检测到已打开的微信 PC 公众号主页窗口")
@@ -306,10 +322,12 @@ def _walk_uia_text_tree(control, *, max_depth: int, max_nodes: int) -> list[_Uia
 
     while queue and len(nodes) < max_nodes:
         current, depth = queue.popleft()
+        pattern_values = _collect_uia_pattern_values(current)
         nodes.append(
             _UiaTextNode(
                 name=str(_safe_get(current, "Name", "") or "").strip(),
-                value=str(_safe_get(current, "Value", "") or "").strip(),
+                value="\n".join(pattern_values).strip()
+                or str(_safe_get(current, "Value", "") or "").strip(),
                 control_type=str(_safe_get(current, "ControlTypeName", "") or "").strip(),
                 class_name=str(_safe_get(current, "ClassName", "") or "").strip(),
                 hwnd=_safe_int(_safe_get(current, "NativeWindowHandle", 0)),
@@ -356,8 +374,115 @@ def _texts_from_uia_nodes(nodes: list[_UiaTextNode]) -> list[str]:
     values: list[str] = []
     for node in nodes:
         values.append(node.name)
-        values.append(node.value)
+        values.extend(str(node.value or "").splitlines())
     return _normalize_lines(values)
+
+
+def _collect_uia_pattern_values(control) -> list[str]:
+    """Read UIA pattern values; WeChat profile URLs often carry the showName parameter."""
+    values: list[str] = []
+    for method_name in ("GetValuePattern", "GetLegacyIAccessiblePattern"):
+        method = _safe_get(control, method_name, None)
+        if not callable(method):
+            continue
+        pattern = _safe_call(method)
+        if pattern is None:
+            continue
+        for attr_name in ("Value",):
+            value = str(_safe_get(pattern, attr_name, "") or "").strip()
+            if value:
+                values.append(value)
+    return _normalize_lines(values)
+
+
+def _without_profile_resource_values(values: Iterable[str]) -> list[str]:
+    return [str(value or "") for value in values if not _looks_like_profile_resource_url(str(value or ""))]
+
+
+def _extract_account_name_from_profile_values(values: Iterable[str]) -> str:
+    for value in values:
+        account_name = _extract_show_name_from_profile_url(str(value or ""))
+        if account_name and _looks_like_account_name(account_name):
+            return account_name
+    return ""
+
+
+def _extract_show_name_from_profile_url(value: str) -> str:
+    text = str(value or "").strip()
+    if "showName=" not in text or not _looks_like_profile_resource_url(text):
+        return ""
+    parsed = urlparse(text)
+    query = parsed.query
+    if not query and "?" in text:
+        query = text.split("?", 1)[1]
+    raw_value = parse_qs(query).get("showName", [""])[0]
+    return unquote(raw_value).strip()
+
+
+def _looks_like_profile_resource_url(value: str) -> bool:
+    text = str(value or "").strip()
+    return text.startswith("weixin://resourceid/SubscriptionProfile/profile.html") or (
+        "SubscriptionProfile/profile.html" in text and "showName=" in text
+    )
+
+
+def _snapshot_with_resolved_account_name(
+    snapshot: WeChatHomeSnapshot,
+    *,
+    account_name: str,
+    account_source: str,
+    account_confidence: str,
+) -> WeChatHomeSnapshot:
+    found = bool(account_name)
+    status = snapshot.status
+    status_label = snapshot.status_label
+    message = snapshot.message
+    if found and status in {"not_found", "content_only", "content_unreadable"}:
+        status = "partial" if not _snapshot_has_profile_detail(snapshot) else "ready"
+        status_label = "\u4e3b\u9875\u5c40\u90e8\u4fe1\u606f\u5df2\u83b7\u53d6" if status == "partial" else "\u4e3b\u9875\u4fe1\u606f\u5df2\u83b7\u53d6"
+        message = ""
+    return WeChatHomeSnapshot(
+        status=status,
+        status_label=status_label,
+        account_name=account_name or snapshot.account_name,
+        description=snapshot.description,
+        original_count=snapshot.original_count,
+        friend_follow_count=snapshot.friend_follow_count,
+        found=found or snapshot.found,
+        message=message,
+        account_confidence=account_confidence,
+        account_source=account_source,
+        visible_tabs=snapshot.visible_tabs,
+    )
+
+
+def _snapshot_without_text_account_name(snapshot: WeChatHomeSnapshot) -> WeChatHomeSnapshot:
+    """主流程不再把普通文本解析出的名称当作可信账号名，只保留其他主页资料。"""
+    if not snapshot.found:
+        return snapshot
+    status = "content_only" if _snapshot_has_profile_detail(snapshot) else "content_unreadable"
+    status_label = "已读取主页资料，未读取到可信账号名" if status == "content_only" else "已检测到主页窗口"
+    message = "未从主页 DocumentControl 的 showName 参数读取到可信公众号名"
+    return WeChatHomeSnapshot(
+        status=status,
+        status_label=status_label,
+        account_name="未读取到可信公众号名",
+        description=snapshot.description,
+        original_count=snapshot.original_count,
+        friend_follow_count=snapshot.friend_follow_count,
+        found=False,
+        message=message,
+        account_confidence="none",
+        account_source="",
+        visible_tabs=snapshot.visible_tabs,
+    )
+
+
+def _snapshot_has_profile_detail(snapshot: WeChatHomeSnapshot) -> bool:
+    return any(
+        str(value or "").strip() and not str(value or "").startswith("\u672a\u8bc6\u522b")
+        for value in (snapshot.description, snapshot.original_count, snapshot.friend_follow_count)
+    )
 
 
 def _looks_like_shell_only(nodes: list[_UiaTextNode]) -> bool:

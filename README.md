@@ -149,7 +149,8 @@ flowchart LR
 
 <p align="center">
   <img src="./README/64a99030-d5ec-4ddc-8802-1ae9a4a05626.png" alt="Access WeChat Article visual workflow architecture" width="92%">
-    <sub>Access WeChat Article 总体工作流架构图</sub>
+  <br>
+  <sub>Access WeChat Article 总体工作流架构图</sub>
 </p>
 
 ---

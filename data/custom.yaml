@@ -22,7 +22,7 @@ retry_count: 3
 version: 2.0.1
 
 # 系统代理：true 时，开启代理后自动接管系统代理；软件关闭时恢复原代理。
-enable_system_proxy: true
+enable_system_proxy: false
 
 proxy:
   host: localhost

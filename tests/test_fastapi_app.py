@@ -7,7 +7,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from src.app.fastapi_app import create_app
-from src.app.fastapi_app.app import ArchiveCacheArticlesPayload, ArchiveExportPayload
+from src.app.fastapi_app.app import ArchiveArticleOpenDirectoryPayload, ArchiveCacheArticlesPayload, ArchiveExportPayload
 from src.core.config import AppRuntimeConfig, StorageConfig
 from src.modules.storage.sqlite_store import SQLiteStore
 
@@ -650,6 +650,43 @@ class FastApiAppTest(unittest.TestCase):
         self.assertFalse(archive_dir_exists)
         self.assertFalse(duplicate_dir_exists)
         self.assertEqual(remaining_article_count, 0)
+
+    def test_open_archive_article_directory_route_resolves_path_from_article_id(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            db_path = Path(temp_dir) / "awa_public.sqlite3"
+            store = SQLiteStore(db_path)
+            article_id = store.save_public_article(
+                {
+                    "account_name": "测试公众号",
+                    "article_title": "测试文章",
+                    "published_article_time": "2026-06-19 18:30",
+                    "article_link": "https://mp.weixin.qq.com/s/open-me",
+                    "record_type": "文章详情",
+                    "collect_time": "2026-06-19 18:31:00",
+                    "collect_status": "saved",
+                }
+            )
+            archive_dir = Path(temp_dir) / "storages" / "测试公众号" / "2026-06-19 18-30 测试文章"
+            archive_dir.mkdir(parents=True)
+            (archive_dir / "article_detail.json").write_text(
+                json.dumps({"short_link": "https://mp.weixin.qq.com/s/open-me"}, ensure_ascii=False),
+                encoding="utf-8",
+            )
+
+            runtime_config = AppRuntimeConfig(storage=StorageConfig(db_path=db_path))
+            app = create_app(FakeWebviewApi(), runtime_config=runtime_config)
+            endpoint = _find_route_endpoint(app, "/api/archive/articles/open-directory", "POST")
+
+            with patch("src.app.fastapi_app.app.open_directory_in_explorer", return_value=True) as opener:
+                response = endpoint(ArchiveArticleOpenDirectoryPayload(articleId=article_id))
+                payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["status"], "opened")
+        self.assertEqual(payload["articleId"], article_id)
+        self.assertEqual(payload["path"], str(archive_dir))
+        opener.assert_called_once_with(archive_dir)
 
     def test_delete_archive_account_route_removes_account_articles_and_account(self) -> None:
         from fastapi.testclient import TestClient

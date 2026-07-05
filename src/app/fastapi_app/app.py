@@ -12,7 +12,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from src.app.pywebview_app.webview_api import WebviewApi
+from src.app.pywebview_app.webview_api import WebviewApi, open_directory_in_explorer
 from src.app.pywebview_app.config import WEBVIEW_DIR
 from src.config.runtime_config import load_runtime_config
 from src.core.config import AppRuntimeConfig
@@ -205,6 +205,10 @@ def create_app(
             "dbPath": str(app_config.storage.db_path),
         }
 
+    @app.post("/api/archive/articles/open-directory")
+    def open_archive_article_directory(payload: ArchiveArticleOpenDirectoryPayload):
+        return parse_api_payload(_open_archive_article_directory_by_id(app_config, payload.articleId))
+
     @app.delete("/api/archive/articles")
     def delete_archive_articles(payload: ArchiveArticleDeletePayload):
         delete_service = _create_archive_delete_service(app_config)
@@ -381,6 +385,10 @@ class CertificateDeletePayload(BaseModel):
     thumbprints: list[str] = []
 
 
+class ArchiveArticleOpenDirectoryPayload(BaseModel):
+    articleId: int
+
+
 class ArchiveArticleDeletePayload(BaseModel):
     articleIds: list[int] = []
 
@@ -400,6 +408,56 @@ def _create_archive_delete_service(app_config: AppRuntimeConfig) -> ArchiveDelet
         store=store,
         storage_root=default_storage_root_for_db(app_config.storage.db_path),
     )
+
+
+def _open_archive_article_directory_by_id(app_config: AppRuntimeConfig, article_id: int) -> dict[str, Any]:
+    """按数据库文章 ID 定位本地归档目录，避免前端直接传入任意本地路径。"""
+    store = SQLiteStore(app_config.storage.db_path)
+    rows = store.get_public_articles_by_ids([article_id])
+    if not rows:
+        return {
+            "ok": False,
+            "status": "not-found",
+            "articleId": int(article_id),
+            "message": "未找到对应文章记录。",
+        }
+
+    storage_root = default_storage_root_for_db(app_config.storage.db_path).resolve()
+    archive_info = ArchiveStorageInfoResolver(storage_root).resolve_for_row(rows[0])
+    archive_dir = archive_info.archive_dir
+    if archive_dir is None or not archive_dir.exists():
+        return {
+            "ok": False,
+            "status": "missing",
+            "articleId": int(article_id),
+            "message": "该文章没有可打开的本地归档目录。",
+        }
+
+    resolved_archive_dir = archive_dir.resolve()
+    if not _path_is_inside(resolved_archive_dir, storage_root):
+        return {
+            "ok": False,
+            "status": "invalid-path",
+            "articleId": int(article_id),
+            "message": "归档目录不在 storages 范围内，已拒绝打开。",
+        }
+
+    opened = open_directory_in_explorer(resolved_archive_dir)
+    return {
+        "ok": bool(opened),
+        "status": "opened" if opened else "open-failed",
+        "articleId": int(article_id),
+        "path": str(resolved_archive_dir),
+        "message": "已打开文章归档目录。" if opened else "打开文章归档目录失败。",
+    }
+
+
+def _path_is_inside(path: Path, root: Path) -> bool:
+    try:
+        path.relative_to(root)
+    except ValueError:
+        return False
+    return True
 
 
 def parse_api_payload(raw_payload: str | dict[str, Any]) -> JSONResponse:

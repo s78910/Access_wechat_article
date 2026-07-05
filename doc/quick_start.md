@@ -66,345 +66,109 @@ uv run python dev_server.py
 
 ## 3. 主流程程序流程图
 
-```mermaid
-flowchart TD
-    A["用户点击开始运行"] --> B["任务编排模块<br/>TaskManager"]
-    B --> C["窗口控制模块<br/>识别主页窗口"]
-    C --> D{主页窗口可用?}
-    D -- "否" --> Z1["记录错误并停止"]
-    D -- "是" --> E["启动文章采集 worker"]
-    E --> F["窗口控制模块<br/>刷新可见文章候选"]
-    F --> G{有可点击文章?}
-    G -- "否" --> H["滚动主页并等待新候选"]
-    H --> F
-    G -- "是" --> I["跳过规则检查<br/>saved / 本轮失败 / 失败冷却"]
-    I --> J{需要跳过?}
-    J -- "是" --> F
-    J -- "否" --> K["窗口控制模块<br/>点击文章标题"]
-    K --> L["代理监听与捕获模块<br/>等待本次文章请求"]
-    L --> M{捕获成功?}
-    M -- "否" --> N["记录失败原因"]
-    M -- "是" --> O["文章详情解析模块"]
-    O --> P{是否采集评论?}
-    P -- "是" --> Q["评论采集模块"]
-    P -- "否" --> R["数据清洗与存储模块"]
-    Q --> R
-    R --> S["写入本地归档和 SQLite"]
-    N --> T["窗口控制模块<br/>关闭详情窗口"]
-    S --> T
-    T --> U{达到目标篇数?}
-    U -- "否" --> F
-    U -- "是" --> V["汇总保存/跳过/失败数量并结束"]
-```
+![9a2375dc-bee5-4f6e-8e9f-327d046cb854](./quick_start/9a2375dc-bee5-4f6e-8e9f-327d046cb854.png)
 
 ## 4. 任务编排模块
 
-任务编排模块是主流程的入口层。它不直接解析文章内容，也不直接操作微信控件，而是负责把前端操作转换成可控的后台任务。
+任务编排模块是主流程的入口和调度层，负责把前端的开始、停止、状态查询和日志查询请求转换成可控的后台任务。
 
-### 4.1 模块职责
+它不直接解析文章内容，也不直接操作微信窗口，而是集中处理运行选项、主页窗口快照、worker 启动、进程生命周期、任务状态和运行日志。
 
-它主要负责：
+主要代码在 `src/core/task_manager.py`、`src/core/process_manager.py`、`src/services/task_service.py`、`src/workers/article_capture.py` 和 `src/core/events.py`。
 
-- 接收主服务页面的开始、停止、状态查询和日志查询请求。
-- 读取用户配置、采集数量、采集内容选项和跳过规则。
-- 启动文章采集 worker。
-- 管理 MITM 代理、系统代理、任务状态和进程生命周期。
-- 汇总 worker 上报的运行事件，提供给前端日志区域展示。
+![任务编排流程图](./quick_start/9441cadc-2945-4083-8617-dc06120b7d43.png)
 
-### 4.2 主要代码位置
+前端、FastAPI 和 pywebview 都只是入口，最终会汇总到 `TaskManager.start_task`；真正决定能不能启动采集的是运行选项规范化、主页窗口检测和 `ProcessManager` 启动 worker 这几步。
 
-- `src/core/task_manager.py`
-- `src/core/process_manager.py`
-- `src/core/events.py`
-- `src/core/file_logger.py`
-- `src/workers/article_capture.py`
-
-### 4.3 内部流程图
-
-```mermaid
-flowchart TD
-    A["前端调用 start_task"] --> B["TaskManager.start_task"]
-    B --> C["规范化运行选项"]
-    C --> D["检测主页窗口快照"]
-    D --> E{可启动采集?}
-    E -- "否" --> F["返回失败状态"]
-    E -- "是" --> G["构建 worker_config"]
-    G --> H["ProcessManager 启动 article_capture worker"]
-    H --> I["状态置为 running"]
-    I --> J["前端轮询 task status / logs"]
-```
-
-### 4.4 需要关注的设计点
-
-任务编排模块的重点是“可控”和“可恢复”。例如开始任务时要避免重复启动 worker，停止任务时要确保子进程能结束，任务完成后要裁剪运行期内存日志，避免长时间运行导致日志无限增长。
+图中的失败/取消路径单独下沉，是因为启动失败不应该混入文章采集循环。比如主页窗口不可用、已有 worker 正在运行、启动过程被取消，都应该尽早返回状态和日志，而不是让后面的窗口点击、MITM 捕获或存储模块继续执行。
 
 ## 5. 窗口控制模块
 
-窗口控制模块是主流程中和微信 PC 客户端交互最多的部分。它负责回答四个问题：当前应该操作哪个主页窗口、当前屏幕有哪些文章、应该点击哪篇、采集结束后应该关闭哪个详情窗口。
+窗口控制模块负责所有和微信 PC 客户端 UI 直接交互的动作：找到真实可见的公众号/服务号/订阅号主页，读取账号和文章候选，滚动主页，点击目标文章，并在单篇采集完成后关闭微信内置浏览器详情窗口。
 
-### 5.1 模块职责
+它的核心代码集中在 `src/modules/window/wechat_home_window_finder.py`、`src/workers/wechat_home.py`、`src/modules/window/home_article_cursor.py`、`src/workers/home_article_clicker.py`、`src/modules/window/article_window_flow.py`、`src/modules/window/detail_window_manager.py` 和 `src/modules/window/home_window_focus_guard.py`。
 
-它主要负责：
+![主页窗口识别流程图](./quick_start/cd423299-39c1-443d-b553-75ddec977702.png)
 
-- 找到真实可见的公众号/服务号/订阅号主页窗口。
-- 读取主页账号名和主页内容状态。
-- 识别当前可见区域中有坐标、可点击的文章标题。
-- 跳过贴图、视频号、无坐标节点、非文章区域等干扰项。
-- 当前屏幕处理完后滚动主页，加载下一批文章候选。
-- 点击目标文章，等待微信内置浏览器文章详情页打开。
-- 单篇采集完成后关闭详情窗口，不能误关主页窗口。
+主页窗口识别需要排除微信聊天主窗口、隐藏壳窗口、微信内置浏览器详情页和本程序窗口。
 
-### 5.2 主要代码位置
+文章候选优先选择当前屏幕可见、有坐标、符合文章区域特征的节点，不把 UI 树里所有文字都当成标题。
 
-- `src/modules/window/wechat_home_window_finder.py`
-- `src/workers/wechat_home.py`
-- `src/modules/window/home_article_cursor.py`
-- `src/workers/home_article_clicker.py`
-- `src/modules/window/home_content_sections.py`
-- `src/modules/window/home_window_focus_guard.py`
-- `src/modules/window/article_window_flow.py`
-- `src/modules/window/detail_window_manager.py`
-- `src/modules/window/window_activator.py`
-
-### 5.3 主页窗口识别
-
-主页窗口识别会在 Windows 桌面窗口中筛选微信相关窗口，并优先选择真实可见的公众号/服务号/订阅号主页。它需要排除微信聊天主窗口、隐藏壳窗口、微信内置浏览器详情页和本程序窗口。
-
-账号名不应该从普通标题、简介或状态提示中猜测。当前更可信的方式是读取主页 `DocumentControl` 中的 profile URL，并从 `profile.html?showName=` 解码出账号名。
-
-![cd423299-39c1-443d-b553-75ddec977702](./quick_start/cd423299-39c1-443d-b553-75ddec977702.png)
-
-### 5.4 主页内容和文章候选识别
-
-主页内容识别不是把 UI 树里的所有文字都当成文章标题，而是优先寻找有坐标、在可视区域、具备文章特征的标题节点。这样可以避免程序纠结于 UI 树中不可见或没有坐标的历史节点。
-
-候选会按屏幕坐标从上到下排序，保证主流程从当前可见区域开始逐篇处理。
-
-### 5.5 主页滚动和候选刷新
-
-当当前可见区域没有可继续处理的候选时，程序会向下滚动主页并重新读取候选。如果滚动后长时间没有加载出新内容，会尝试小幅回弹再继续向下滚动，用来触发微信主页的懒加载。
-
-```mermaid
-flowchart TD
-    A["读取当前可见候选"] --> B{有未处理候选?}
-    B -- "是" --> C["返回下一篇候选"]
-    B -- "否" --> D["向下滚动主页"]
-    D --> E["等待内容变化"]
-    E --> F{候选有变化?}
-    F -- "是" --> A
-    F -- "否" --> G["小幅上滚再下滚"]
-    G --> A
-```
-
-### 5.6 目标点击和详情窗口关闭
-
-点击前会尽量让主页窗口重新获得焦点，然后使用候选文章的真实坐标点击。点击后，程序等待微信内置浏览器文章详情窗口出现。
-
-采集完成后，窗口关闭逻辑只应关闭文章详情窗口，不得通过模糊标题或固定坐标误关公众号/服务号主页。
+详情窗口关闭逻辑只能关闭文章详情窗口，不关主页窗口。
 
 ## 6. 代理监听与捕获模块
 
-代理监听与捕获模块负责拿到“点击文章后产生的真实文章请求”。它不负责选择文章，也不负责解析文章字段，而是负责把微信内置浏览器请求中的目标 HTML 和请求信息交给后续模块。
+代理监听与捕获模块负责拿到“用户本次点击文章后产生的真实文章请求”。它通过本地 MITM 代理监听微信内置浏览器访问 `mp.weixin.qq.com` 的请求，过滤无关资源和诊断噪声，等待当前文章的主 HTML，并生成后续解析和存储所需的 capture report；主要代码在 `src/workers/mitm_worker.py`、`src/modules/proxy/mitm_capture_waiter.py`、`src/modules/proxy/mitm_controller.py`、`src/modules/proxy/proxy_manager.py`、`src/modules/proxy/system_proxy.py` 和 `src/modules/proxy/certificate.py`。
 
-### 6.1 模块职责
+![代理监听与捕获流程图](./quick_start/adaa2696-8cd6-49e4-a828-0e72279804e4.png)
 
-它主要负责：
+MITM 模块不负责选择文章，也不主动刷新文章页来补救失败；它只监听、过滤、匹配并上报请求证据。
 
-- 启动和管理本地 MITM 代理。
-- 监听微信内置浏览器访问 `mp.weixin.qq.com` 时产生的请求。
-- 过滤与当前文章无关的资源请求、诊断请求和其他噪声。
-- 等待当前点击文章对应的主 HTML。
-- 生成 capture report，提供给文章详情解析和存储模块。
-- 对日志和诊断中的敏感参数做脱敏。
+图里的 capture report 是后续模块的交接物，里面包含主 HTML、URL、请求摘要、脱敏后的关键参数和诊断信息。
 
-### 6.2 主要代码位置
-
-- `src/workers/mitm_worker.py`
-- `src/modules/proxy/mitm_controller.py`
-- `src/modules/proxy/mitm_capture_waiter.py`
-- `src/modules/proxy/proxy_manager.py`
-- `src/modules/proxy/system_proxy.py`
-- `src/modules/proxy/certificate.py`
-
-### 6.3 捕获流程
-
-![adaa2696-8cd6-49e4-a828-0e72279804e4](./quick_start/adaa2696-8cd6-49e4-a828-0e72279804e4.png)
-
-### 6.4 关键原则
-
-代理模块只应该等待本次点击产生的请求。为了避免重复请求带 `key` 的 URL，程序不应为了补救捕获失败而主动刷新文章页或反复访问临时链接。
-
-日志中涉及 `key`、`pass_ticket`、`appmsg_token`、Cookie 等字段时，需要脱敏后再展示或保存。
+日志中涉及 `key`、`pass_ticket`、`appmsg_token`、Cookie 等字段时脱敏，避免把短时间有效的敏感参数直接暴露到日志中。
 
 ## 7. 文章详情解析模块
 
-文章详情解析模块负责把 MITM 捕获到的 HTML 转换为结构化字段。它是从“网页内容”进入“研究数据”的第一层。
+文章详情解析模块负责把 MITM 捕获到的文章 HTML 转换成结构化字段，是从“网页内容”进入“可存储数据”的第一层。
 
-### 7.1 模块职责
+它主要解析公众号名、文章标题、发布时间、短链接、IP 属地，以及阅读量、点赞量、转发量、推荐量、评论量等可用指标。
 
-它主要负责解析：
+主要代码在 `src/modules/detail/article_detail.py`、`src/modules/detail/account_identity.py` 和 `src/modules/storage/article_archive_store.py`。
 
-- 公众号名。
-- 文章标题。
-- 发布时间。
-- 文章短链接。
-- IP 属地。
-- 听众量、阅读量、点赞量、转发量、推荐量、评论量等可用指标。
-- 文章详情 JSON 所需的基础字段。
+![文章详情解析流程图](./quick_start/4640ce7a-0c0a-4922-adef-44ab11721634.png)
 
-### 7.2 主要代码位置
+窗口识别拿到的账号名、标题或时间只能作为兜底，最终落库前更可信的是文章详情 HTML 中解析出的字段。
 
-- `src/modules/detail/article_detail.py`
-- `src/modules/detail/account_identity.py`
-- `src/modules/storage/article_archive_store.py`
-
-### 7.3 解析流程
-
-![4640ce7a-0c0a-4922-adef-44ab11721634](./quick_start/4640ce7a-0c0a-4922-adef-44ab11721634.png)
-
-### 7.4 和其他模块的关系
-
-文章详情模块的输出会继续交给数据清洗与存储模块。如果用户勾选了评论信息，评论采集模块还会使用文章 HTML 中的评论参数继续获取评论数据。
+短链接是存储模块判断一篇文章是否成功保存的重要字段。如果详情中无法解析到有效的 `https://mp.weixin.qq.com/s/...` 短链接，后续不应该强行写入 `saved` 记录，而是进入失败路径，避免污染 SQLite 的去重键。
 
 ## 8. 评论采集模块
 
-评论采集模块是可选模块，只有主服务页面勾选“评论信息”时才会进入。它依赖文章详情 HTML 中的评论相关参数，不独立选择文章。
+评论采集模块是可选链路，只有用户在主服务页面勾选“评论信息”时才会进入。
 
-### 8.1 模块职责
+它依赖文章详情 HTML 中的评论接口参数，用原请求上下文读取一级评论、评论回复、评论图片和表情资源，并把结果写入当前文章归档目录。
 
-它主要负责：
+主要代码在 `src/modules/detail/comment_detail.py`、`src/workers/comment_worker.py` 和相关测试 `tests/test_comment_fetcher.py`。
 
-- 从文章 HTML 中提取评论接口所需参数。
-- 构造评论接口请求。
-- 分页读取一级评论。
-- 读取评论回复。
-- 保存评论正文、昵称、时间、点赞数、回复关系等结构化字段。
-- 保存评论中的图片和表情资源。
-- 头像默认保存链接到 JSON，不默认下载头像。
+![评论采集流程图](./quick_start/17f0ded7-4bbf-4940-a3ba-3ba44f098a06.png)
 
-### 8.2 主要代码位置
+评论采集和文章详情保存不是同一个成功条件。
 
-- `src/modules/detail/comment_detail.py`
-- `src/workers/comment_worker.py`
-- `tests/test_comment_fetcher.py`
+文章详情已经解析成功时，即使评论接口失败，也不应该直接否定文章详情本身的保存结果，而是记录评论失败原因并继续走文章详情存储链路。
 
-### 8.3 评论采集流程
-
-![875a2100-29d0-47c8-8e61-b70416e41c90](./quick_start/875a2100-29d0-47c8-8e61-b70416e41c90.png)
-
-### 8.4 需要注意的点
-
-评论数据依赖微信接口返回结果，因此比文章详情更容易受到网络、接口状态、参数有效期和页面内容差异影响。评论采集失败时，不应该影响已经成功解析的文章详情字段入库判断，需要把失败原因记录清楚。
+图里评论分页、回复读取和资源保存是相对容易受接口状态影响的部分。评论接口依赖临时参数、网络状态和微信返回内容，失败原因需要写入日志或归档信息，方便后续判断是参数过期、接口无数据，还是请求本身异常。
 
 ## 9. 数据清洗与存储模块
 
-数据清洗与存储模块负责把前面模块得到的结果落地。它的核心原则是：大内容进本地归档目录，轻量索引进 SQLite。
+数据清洗与存储模块负责把前面模块得到的结果落地，核心原则是“大内容进本地归档目录，轻量索引进 SQLite”。
 
-### 9.1 模块职责
+它会清洗公众号名、标题和发布时间，分配 Windows 可用的文章目录，写入 `article_detail.json`、主 HTML 证据和可选评论文件，再构造 SQLite 记录并区分 `saved` / `failed` 状态。
 
-它主要负责：
+主要代码在 `src/modules/storage/article_archive_store.py`、`src/modules/storage/path_builder.py`、`src/modules/storage/sqlite_store.py`、`src/modules/storage/public_article_store.py` 和 `src/modules/storage/awa_public_schema.sql`。
 
-- 清洗公众号名、文章标题和发布时间。
-- 生成 Windows 可用的本地归档路径。
-- 写入 `article_detail.json`、`original_main.html`、`comments_final.json` 等文件。
-- 处理评论图片、表情等资源目录。
-- 构建 SQLite 文章记录。
-- 区分 `saved` 和 `failed` 状态。
-- 处理同名目录、重复短链接和失败记录更新。
+![数据清洗与存储流程图](./quick_start/028ef0ca-db2b-427d-9075-86e1f1174adb.png)
 
-### 9.2 主要代码位置
+存储图要分开看两条线：本地归档和 SQLite 索引。本地归档保存结构化详情、原始 HTML 证据和评论相关文件；SQLite 只保存账号、标题、发布时间、短链接、采集类型、采集时间、耗时和采集状态等轻量字段。
 
-- `src/modules/storage/article_archive_store.py`
-- `src/modules/storage/path_builder.py`
-- `src/modules/storage/sqlite_store.py`
-- `src/modules/storage/public_article_store.py`
-- `src/modules/storage/awa_public_schema.sql`
+点击/捕获失败、归档异常、解析不到短链接、SQLite 入库异常都可能汇入失败记录逻辑。
 
-### 9.3 本地归档结构
-
-单篇文章默认保存到：
-
-```text
-storages/公众号名/文章发布时间 文章标题/
-```
-
-常见文件包括：
-
-- `article_detail.json`：文章结构化详情。
-- `original_main.html`：MITM 捕获的文章 HTML。
-- `comments_final.json`：评论结构化结果，只有采集评论时生成。
-- `comments_img/`：评论图片、表情等资源目录。
-
-### 9.4 SQLite 索引结构
-
-SQLite 主要保存两张表：
-
-- `awa_public_accounts`：公众号索引。
-- `awa_public_articles`：文章索引。
-
-SQLite 只保存账号、标题、发布时间、短链接、采集类型、采集时间、耗时和状态等轻量字段，不保存正文大内容。
-
-### 9.5 存储流程图
-
-```mermaid
-flowchart TD
-    A["详情/评论解析结果"] --> B["清洗字段"]
-    B --> C["生成归档目录"]
-    C --> D["写入 HTML / JSON / 评论资源"]
-    D --> E{是否成功生成有效短链接?}
-    E -- "是" --> F["构建 saved 记录"]
-    E -- "否" --> G["构建 failed 记录或跳过落库"]
-    F --> H["写入 SQLite"]
-    G --> H
-```
+失败记录不写 `failed://` 这类占位短链，避免污染后续按 `account_id + article_link` 进行成功文章去重的业务键。
 
 ## 10. 状态日志与异常保护模块
 
-状态日志与异常保护模块贯穿所有主流程模块。它不是单独的一步，而是保证任务可观察、可停止、可排查的重要基础设施。
+状态日志与异常保护模块贯穿整个主流程，负责让任务“看得见、停得住、查得到”。
 
-### 10.1 模块职责
+worker、MITM、详情解析、评论采集和存储过程都会通过事件队列上报日志或状态，`TaskManager` 负责统一归一化、等级过滤、内存裁剪、文件落盘和前端查询。
 
-它主要负责：
+主要代码在 `src/core/task_manager.py`、`src/core/events.py`、`src/core/progress_logger.py`、`src/core/file_logger.py`、`src/core/log_levels.py`、`src/core/process_manager.py` 和 `src/workers/mitm_worker.py`。
 
-- 接收 worker 上报的运行事件。
-- 给前端提供运行状态和日志列表。
-- 写入本地日志文件。
-- 裁剪内存日志，避免长时间运行导致内存增长。
-- 记录成功、失败、跳过、停止等状态。
-- 在异常情况下尽量关闭详情窗口、停止进程、恢复代理状态。
+![日志链路流程图](./quick_start/fce77fe3-de0e-4093-829f-6c08d203581e.png)
 
-### 10.2 主要代码位置
+`ProgressLogger` 和 `put_event` 负责把 worker 侧的步骤、进度、成功、警告和错误放入 `event_queue`；`TaskManager._drain_worker_events` 再把事件分成普通日志、采集状态、鉴权状态和流量事件分别处理。
 
-- `src/core/task_manager.py`
-- `src/core/events.py`
-- `src/core/file_logger.py`
-- `src/core/log_levels.py`
-- `src/core/process_manager.py`
-- `src/core/progress_logger.py`
+日志有两个主要出口：一份保存在内存 `_logs` 中供 `/api/task/logs` 快速读取，另一份通过 `SessionFileLogger.write` 写入 `data/logs/yyyy-mm-dd/*.log`。
 
-### 10.3 日志链路流程图
-
-```mermaid
-flowchart TD
-    A["worker put_event"] --> B["event_queue"]
-    B --> C["TaskManager 拉取事件"]
-    C --> D["标准化日志等级和来源"]
-    D --> E["写入内存日志"]
-    D --> F["写入本地日志文件"]
-    E --> G["前端轮询 /api/task/logs 展示"]
-```
-
-### 10.4 异常保护重点
-
-需要重点关注这些异常场景：
-
-- 主页窗口不可读或被其他窗口遮挡。
-- 点击文章失败。
-- MITM 没有捕获到目标 HTML。
-- 评论接口请求失败。
-- SQLite 入库失败。
-- worker 进程无法正常停止。
-- MITM 或系统代理异常退出后影响其他应用联网。
+任务结束或异常时，系统会裁剪内存日志、更新任务状态，并尽量完成详情窗口清理、worker 停止和代理状态恢复。
 
 ## 11. 主流程之外的辅助模块
 
@@ -419,11 +183,12 @@ flowchart TD
 - `src/modules/storage/archive_delete_service.py`
 - `src/modules/storage/archive_excel_export_service.py`
 - `src/modules/storage/archive_storage_info.py`
-- `vue-project/src/pages/DataFilesPage.vue`
 
 ### 11.2 Playwright 离线缓存模块
 
-离线缓存模块用于根据 SQLite 中已保存的短链接，使用 Playwright 打开文章并保存离线 `index.html` 和正文实际引用资源。它和主流程采集不同，不依赖 MITM 的临时 key 参数。
+离线缓存模块用于根据 SQLite 中已保存的短链接，使用 Playwright 打开文章并保存离线 `index.html` 和正文实际引用资源。
+
+它和主流程采集不同，不依赖 MITM 的临时 key 参数。
 
 相关代码：
 
@@ -480,5 +245,4 @@ uv run python -m py_compile main.py dev_server.py
 - `127.0.0.1:8766` 没有遗留自己启动的服务。
 - `127.0.0.1:18000` / `localhost:18000` 没有遗留 MITM 子进程。
 - 系统代理已恢复到测试前状态。
-- 没有把测试产物写到项目根目录、`D:\tmp` 或未受控目录。
-
+- 没有把测试产物写到项目根目录、`your_disk_path\tmp` 或未受控目录。

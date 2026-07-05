@@ -5,15 +5,16 @@
 </p>
 
 <p align="center">
-  <a href="../README.md">简体中文</a> | <a href="./README_en.md">English</a>
+  <a href="../README.md">简体中文</a> | <span style="color: #6b7280; text-decoration: underline;">English</span>
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Python-3.13-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python 3.13">
-  <img src="https://img.shields.io/badge/requests-http-009688?style=flat-square&logo=python&logoColor=white" alt="requests http">
-  <img src="https://img.shields.io/badge/SQLite-storage-003B57?style=flat-square&logo=sqlite&logoColor=white" alt="SQLite storage">
-  <img src="https://img.shields.io/badge/License-CC_BY--NC--SA_4.0-6C5CE7?style=flat-square" alt="License CC BY-NC-SA 4.0">
+  <img src="https://img.shields.io/badge/-Python_3.13-3776AB?style=flat&labelColor=000000&logo=python&logoColor=ffffff" alt="Python 3.13">
+  <img src="https://img.shields.io/badge/-MITMProxy-FF6F00?style=flat&labelColor=000000&logo=data%3Aimage%2Fsvg%2Bxml%3Bbase64%2CPHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxNiIgaGVpZ2h0PSIxNiIgdmlld0JveD0iLTEyMCAtMTIwIDI0MCAyNDAiPjxjaXJjbGUgcj0iMTQiIGZpbGw9IiNGMTVBMjkiLz48Y2lyY2xlIHI9IjE5LjUiIHN0cm9rZT0iI0Y3OTQxRSIgc3Ryb2tlLXdpZHRoPSI0IiBmaWxsPSJub25lIi8%2BPGNpcmNsZSByPSIzMCIgc3Ryb2tlPSJ3aGl0ZSIgc3Ryb2tlLXdpZHRoPSIxMCIgZmlsbD0ibm9uZSIvPjxwYXRoIHN0cm9rZT0id2hpdGUiIGZpbGw9Im5vbmUiIHN0cm9rZS13aWR0aD0iMTAiIGQ9Ik02Ny03MkExMDAgMTAwIDAgMCAwLTk0IDMzSC01NkE2NSA2NSAwIDAgMCA1NSAzN00tMTAwIDBILTMwIi8%2BPGNpcmNsZSBjeD0iNTgiIGN5PSIyOSIgcj0iNiIgZmlsbD0iI0Y3OTQxRSIvPjxjaXJjbGUgY3g9IjU4IiBjeT0iMjkiIHI9IjEwIiBzdHJva2U9IndoaXRlIiBmaWxsPSJub25lIiBzdHJva2Utd2lkdGg9IjMuMiIvPjxjaXJjbGUgY3g9IjczIiBjeT0iLTY1IiByPSI2IiBmaWxsPSIjRjc5NDFFIi8%2BPGNpcmNsZSBjeD0iNzMiIGN5PSItNjUiIHI9IjEwIiBzdHJva2U9IndoaXRlIiBmaWxsPSJub25lIiBzdHJva2Utd2lkdGg9IjMuMiIvPjxwYXRoIHN0cm9rZT0id2hpdGUiIGZpbGw9Im5vbmUiIHN0cm9rZS13aWR0aD0iMTAiIGQ9Ik0tNjcgNzJBMTAwIDEwMCAwIDAgMCA5NC0zM0g1NkE2NSA2NSAwIDAgMC01NS0zN00xMDAgMEgzMCIvPjxjaXJjbGUgY3g9Ii01OCIgY3k9Ii0yOSIgcj0iNiIgZmlsbD0iI0Y3OTQxRSIvPjxjaXJjbGUgY3g9Ii01OCIgY3k9Ii0yOSIgcj0iMTAiIHN0cm9rZT0id2hpdGUiIGZpbGw9Im5vbmUiIHN0cm9rZS13aWR0aD0iMy4yIi8%2BPGNpcmNsZSBjeD0iLTczIiBjeT0iNjUiIHI9IjYiIGZpbGw9IiNGNzk0MUUiLz48Y2lyY2xlIGN4PSItNzMiIGN5PSI2NSIgcj0iMTAiIHN0cm9rZT0id2hpdGUiIGZpbGw9Im5vbmUiIHN0cm9rZS13aWR0aD0iMy4yIi8%2BPC9zdmc%2B" alt="MITMProxy">
+  <img src="https://img.shields.io/badge/-Requests-009688?style=flat&labelColor=000000&logo=python&logoColor=ffffff" alt="Requests">
+  <img src="https://img.shields.io/badge/-License-6C5CE7?style=flat&labelColor=000000&logo=creativecommons&logoColor=ffffff" alt="License CC BY-NC-SA 4.0">
   <a href="https://zread.ai/yeximm/Access_wechat_article"><img src="https://img.shields.io/badge/Ask_Zread-_.svg?style=flat&color=00b0aa&labelColor=000000&logo=data%3Aimage%2Fsvg%2Bxml%3Bbase64%2CPHN2ZyB3aWR0aD0iMTYiIGhlaWdodD0iMTYiIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHBhdGggZD0iTTQuOTYxNTYgMS42MDAxSDIuMjQxNTZDMS44ODgxIDEuNjAwMSAxLjYwMTU2IDEuODg2NjQgMS42MDE1NiAyLjI0MDFWNC45NjAxQzEuNjAxNTYgNS4zMTM1NiAxLjg4ODEgNS42MDAxIDIuMjQxNTYgNS42MDAxSDQuOTYxNTZDNS4zMTUwMiA1LjYwMDEgNS42MDE1NiA1LjMxMzU2IDUuNjAxNTYgNC45NjAxVjIuMjQwMUM1LjYwMTU2IDEuODg2NjQgNS4zMTUwMiAxLjYwMDEgNC45NjE1NiAxLjYwMDFaIiBmaWxsPSIjZmZmIi8%2BCjxwYXRoIGQ9Ik00Ljk2MTU2IDEwLjM5OTlIMi4yNDE1NkMxLjg4ODEgMTAuMzk5OSAxLjYwMTU2IDEwLjY4NjQgMS42MDE1NiAxMS4wMzk5VjEzLjc1OTlDMS42MDE1NiAxNC4xMTM0IDEuODg4MSAxNC4zOTk5IDIuMjQxNTYgMTQuMzk5OUg0Ljk2MTU2QzUuMzE1MDIgMTQuMzk5OSA1LjYwMTU2IDE0LjExMzQgNS42MDE1NiAxMy43NTk5VjExLjAzOTlDNS42MDE1NiAxMC42ODY0IDUuMzE1MDIgMTAuMzk5OSA0Ljk2MTU2IDEwLjM5OTlaIiBmaWxsPSIjZmZmIi8%2BCjxwYXRoIGQ9Ik0xMy43NTg0IDEuNjAwMUgxMS4wMzg0QzEwLjY4NSAxLjYwMDEgMTAuMzk4NCAxLjg4NjY0IDEwLjM5ODQgMi4yNDAxVjQuOTYwMUMxMC4zOTg0IDUuMzEzNTYgMTAuNjg1IDUuNjAwMSAxMS4wMzg0IDUuNjAwMUgxMy43NTg0QzE0LjExMTkgNS42MDAxIDE0LjM5ODQgNS4zMTM1NiAxNC4zOTg0IDQuOTYwMVYyLjI0MDFDMTQuMzk4NCAxLjg4NjY0IDE0LjExMTkgMS42MDAxIDEzLjc1ODQgMS42MDAxWiIgZmlsbD0iI2ZmZiIvPgo8cGF0aCBkPSJNNCAxMkwxMiA0TDQgMTJaIiBmaWxsPSIjZmZmIi8%2BCjxwYXRoIGQ9Ik00IDEyTDEyIDQiIHN0cm9rZT0iI2ZmZiIgc3Ryb2tlLXdpZHRoPSIxLjUiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIvPgo8L3N2Zz4K&logoColor=ffffff" alt="zread"></a>
+  <a href="./quick_start.md"><img src="https://img.shields.io/badge/-Quick_Start-2563EB?style=flat&labelColor=000000&logo=readthedocs&logoColor=ffffff" alt="Quick Start"></a>
 </p>
 
 <p align="center">
@@ -129,7 +130,7 @@ For full setup instructions, see [Installation Guide](./install_en.md). For feat
 
 ---
 
-## Visual Workflow
+## 🧭 Visual Workflow
 
 This section shows the overall runtime flow. The Mermaid diagram describes how the core modules work together.
 
@@ -155,7 +156,7 @@ The architecture image provides a more visual view of the collaboration between 
 
 ---
 
-## Feature Overview
+## 🧩 Feature Overview
 
 This section shows the main application pages.
 
@@ -193,7 +194,7 @@ The settings page is used to manage base configuration, proxy switches, system p
 
 ---
 
-## Support
+## 🤝 Support
 
 If this project helps your research workflow, a GitHub Star is appreciated.
 
@@ -202,13 +203,12 @@ For questions, feature requests, or discussions, please use GitHub Issues.
 <p align="center">
   <img src="../README/qrcode_1749894334903.jpg" alt="Project discussion QR code" width="300" />
 </p>
-
-[![Stargazers repo roster for @yeximm/Access_wechat_article](https://reporoster.com/stars/yeximm/Access_wechat_article)](https://github.com/yeximm/Access_wechat_article/stargazers)
-[![Forkers repo roster for @yeximm/Access_wechat_article](https://reporoster.com/forks/yeximm/Access_wechat_article)](https://github.com/yeximm/Access_wechat_article/network/members)
+[![Stargazers repo roster for @yeximm/Access_wechat_article](http://reporoster.com/stars/yeximm/Access_wechat_article)](https://github.com/yeximm/Access_wechat_article/stargazers)
+[![Forkers repo roster for @yeximm/Access_wechat_article](http://reporoster.com/forks/yeximm/Access_wechat_article)](https://github.com/yeximm/Access_wechat_article/network/members)
 
 ---
 
-## License
+## 📄 License
 
 This project uses the [`CC BY-NC-SA 4.0`](https://creativecommons.org/licenses/by-nc-sa/4.0/) license. For the full terms, see the [Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International](https://creativecommons.org/licenses/by-nc-sa/4.0/) license.
 
@@ -219,10 +219,11 @@ Please read the license and project notice carefully before viewing, using, copy
 - Third-party software, hardware, platforms, or tools mentioned in this repository are only used to describe the runtime environment or technical background.
 - Risks and consequences arising from the use of third-party software, hardware, platforms, or tools are borne by the actual user.
 
-## Star History
+## ⭐ Star History
 
 <picture>
    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=yeximm/Access_wechat_article&type=date&theme=dark&legend=top-left" />
    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=yeximm/Access_wechat_article&type=date&legend=top-left" />
    <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=yeximm/Access_wechat_article&type=date&legend=top-left" />
 </picture>
+/

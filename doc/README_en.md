@@ -221,9 +221,10 @@ Please read the license and project notice carefully before viewing, using, copy
 
 ## ⭐ Star History
 
-<picture>
+<a href="https://www.star-history.com/?repos=yeximm%2FAccess_wechat_article&type=date&legend=top-left">
+ <picture>
    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=yeximm/Access_wechat_article&type=date&theme=dark&legend=top-left" />
    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=yeximm/Access_wechat_article&type=date&legend=top-left" />
    <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=yeximm/Access_wechat_article&type=date&legend=top-left" />
-</picture>
-/
+ </picture>
+</a>

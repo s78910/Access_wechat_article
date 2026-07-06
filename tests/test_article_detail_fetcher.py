@@ -87,6 +87,7 @@ class ArticleDetailFetcherTest(unittest.TestCase):
                 article_dir,
                 request_headers={"user-agent": "MicroMessenger"},
                 collect_time="2026-06-19 22:00:00",
+                duration_time=2.75,
                 fetch_html=fake_fetch_html,
             )
 
@@ -113,6 +114,7 @@ class ArticleDetailFetcherTest(unittest.TestCase):
                 "recommend_count",
                 "comment_count",
                 "collect_time",
+                "duration_time",
             },
         )
         self.assertEqual(detail["account_name"], "测试公众号")
@@ -128,6 +130,7 @@ class ArticleDetailFetcherTest(unittest.TestCase):
         self.assertEqual(detail["recommend_count"], 2450)
         self.assertEqual(detail["comment_count"], 11)
         self.assertEqual(detail["collect_time"], "2026-06-19 22:00:00")
+        self.assertEqual(detail["duration_time"], 2.75)
         self.assertIn("_source_html", runtime_detail)
         self.assertIn("https://mp.weixin.qq.com/s/testShort123", runtime_detail["_source_html"])
         self.assertNotIn("_source_html", detail)

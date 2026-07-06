@@ -151,6 +151,9 @@ class CommentFetcherTest(unittest.TestCase):
         self.assertEqual(result["reply_count"], 2)
         self.assertEqual(final_path.name, "comments_final.json")
         self.assertEqual(data["schema_version"], "wechat_comments_v1")
+        self.assertNotIn("created_at", data)
+        self.assertEqual(data["collect_time"], "2026-06-19 22:00:00")
+        self.assertGreaterEqual(data["duration_time"], 0)
         self.assertEqual(data["summary"]["top_level_comment_count"], 2)
         self.assertEqual(data["summary"]["reply_count"], 2)
         self.assertEqual(data["summary"]["reply_missing_count"], 0)
@@ -252,6 +255,9 @@ class CommentFetcherTest(unittest.TestCase):
         comment = data["comments"][0]
         reply = comment["replies"][0]
         self.assertTrue(result["ok"])
+        self.assertEqual(data["collect_time"], "2026-06-19 22:00:00")
+        self.assertNotIn("created_at", data)
+        self.assertGreaterEqual(data["duration_time"], 0)
         self.assertFalse(avatar_dir_exists)
         self.assertTrue(emoji_dir_exists)
         self.assertTrue(picture_dir_exists)

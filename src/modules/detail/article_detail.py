@@ -36,6 +36,7 @@ DETAIL_FIELD_NAMES = (
     "recommend_count",
     "comment_count",
     "collect_time",
+    "duration_time",
 )
 METRIC_KEY_MAP = {
     "audience_count": ("tts_heard_person_cnt", "audience_count", "ori_read_num"),
@@ -89,6 +90,7 @@ def fetch_article_detail_to_file(
     request_headers: dict[str, Any] | None = None,
     timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
     collect_time: str | None = None,
+    duration_time: Any = 0.0,
     fetch_html: FetchHtmlCallable | None = None,
 ) -> dict[str, Any]:
     """请求带 key URL 并把结构化详情写到单篇文章归档目录下的 article_detail.json。"""
@@ -97,6 +99,7 @@ def fetch_article_detail_to_file(
         request_headers=request_headers,
         timeout_seconds=timeout_seconds,
         collect_time=collect_time,
+        duration_time=duration_time,
         fetch_html=fetch_html,
     )
     detail_path = write_article_detail_json(detail, article_dir)
@@ -109,6 +112,7 @@ def fetch_article_detail_from_keyed_url(
     request_headers: dict[str, Any] | None = None,
     timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
     collect_time: str | None = None,
+    duration_time: Any = 0.0,
     fetch_html: FetchHtmlCallable | None = None,
 ) -> dict[str, Any]:
     """使用 requests 重新访问带 key URL，并从响应 HTML 中提取文章详情。"""
@@ -120,7 +124,7 @@ def fetch_article_detail_from_keyed_url(
         if fetch_html
         else request_article_html(url, request_headers=request_headers, timeout_seconds=timeout_seconds)
     )
-    detail = build_article_detail_from_html(html_text, url, collect_time=collect_time)
+    detail = build_article_detail_from_html(html_text, url, collect_time=collect_time, duration_time=duration_time)
     # 内部字段只在主流程内传递，供评论接口从同一份 HTML 提取 comment_id，不写入 article_detail.json。
     detail["_source_html"] = html_text
     return detail
@@ -169,7 +173,13 @@ def build_direct_requests_session(requests_module=None):
     return session
 
 
-def build_article_detail_from_html(html_text: str, keyed_url: str, *, collect_time: str | None = None) -> dict[str, Any]:
+def build_article_detail_from_html(
+    html_text: str,
+    keyed_url: str,
+    *,
+    collect_time: str | None = None,
+    duration_time: Any = 0.0,
+) -> dict[str, Any]:
     """从文章 HTML 中提取最终 article_detail.json 需要的扁平字段。"""
     text = str(html_text or "")
     short_link = extract_wechat_short_link(text)
@@ -190,6 +200,7 @@ def build_article_detail_from_html(html_text: str, keyed_url: str, *, collect_ti
         "recommend_count": metrics["recommend_count"],
         "comment_count": metrics["comment_count"],
         "collect_time": collect_time or current_time_text(),
+        "duration_time": normalize_duration_seconds(duration_time),
     }
     return {field: detail.get(field) for field in DETAIL_FIELD_NAMES}
 
@@ -408,6 +419,16 @@ def first_int(values: Any) -> int | None:
         except (TypeError, ValueError):
             continue
     return None
+
+
+def normalize_duration_seconds(value: Any) -> float:
+    try:
+        seconds = float(value)
+    except (TypeError, ValueError):
+        return 0.0
+    if seconds < 0:
+        return 0.0
+    return seconds
 
 
 def redact_sensitive_url(url: str) -> str:

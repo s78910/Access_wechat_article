@@ -48,6 +48,7 @@ EXPECTED_ARTICLE_DETAIL_FIELDS = {
     "recommend_count",
     "comment_count",
     "collect_time",
+    "duration_time",
 }
 
 
@@ -772,6 +773,7 @@ class ArticleCaptureMitmArchiveTest(unittest.TestCase):
                 selections={"articleDetail": True},
                 storage_root=root / "storages",
                 detail_fetcher=fake_detail_fetcher,
+                duration_time=6.5,
             )
 
             archive_dir = Path(archive["storage_dir"])
@@ -782,6 +784,7 @@ class ArticleCaptureMitmArchiveTest(unittest.TestCase):
             self.assertEqual(detail["account_name"], "测试公众号")
             self.assertEqual(detail["article_title"], "今晚，油价调整")
             self.assertEqual(detail["short_link"], "https://mp.weixin.qq.com/s/testShort123")
+            self.assertEqual(detail["duration_time"], 6.5)
             self.assertEqual(set(detail), EXPECTED_ARTICLE_DETAIL_FIELDS)
             self.assertEqual(record["record_type"], "文章详情")
             self.assertEqual(record["article_link"], "https://mp.weixin.qq.com/s/testShort123")
@@ -849,6 +852,7 @@ class ArticleCaptureMitmArchiveTest(unittest.TestCase):
                 selections={"articleDetail": True, "commentInfo": True},
                 storage_root=root / "storages",
                 comment_fetcher=fake_comment_fetcher,
+                duration_time=8.25,
             )
             record = build_public_article_record(archive)
 
@@ -857,6 +861,7 @@ class ArticleCaptureMitmArchiveTest(unittest.TestCase):
             self.assertEqual(Path(captured["args"][2]), archive_dir)
             self.assertEqual(captured["kwargs"]["request_headers"]["user-agent"], "MicroMessenger/8.0")
             self.assertEqual(captured["kwargs"]["collect_time"], "2026-06-19 22:00:00")
+            self.assertNotIn("duration_time", captured["kwargs"])
             self.assertTrue(captured["kwargs"]["download_resources"])
             self.assertFalse(captured["kwargs"]["download_avatars"])
             self.assertTrue(captured["kwargs"]["download_emojis"])
@@ -866,6 +871,47 @@ class ArticleCaptureMitmArchiveTest(unittest.TestCase):
             self.assertEqual(report["comment_fetch"]["comment_count"], 1)
             self.assertEqual(archive["comment_fetch"]["comments_final_json_path"], str(archive_dir / "comments_final.json"))
             self.assertEqual(record["record_type"], "文章详情, 评论信息")
+
+    def test_archive_writes_article_detail_duration_from_provider_right_before_json_write(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            source_html = root / "captured.html"
+            source_html.write_text(
+                """
+                <html><body>
+                  <script>
+                    var nickname = '测试公众号';
+                    var msg_title = '实时耗时文章';
+                    var publish_time = '2026-06-19 21:39';
+                    var short_link = 'https://mp.weixin.qq.com/s/liveDuration123';
+                  </script>
+                </body></html>
+                """,
+                encoding="utf-8",
+            )
+            report = {
+                "created_at": "2026-06-19 22:00:00",
+                "storage": {"account_name": "测试公众号", "title": "实时耗时文章"},
+                "main_html_capture": {
+                    "url": "https://mp.weixin.qq.com/s?__biz=biz&mid=1&idx=1&sn=sn&key=secret",
+                    "private_html_path": str(source_html),
+                    "request_headers": {"user-agent": "MicroMessenger/8.0"},
+                },
+                "article_detail": {"html_text": source_html.read_text(encoding="utf-8")},
+            }
+
+            archive = build_local_article_archive(
+                report,
+                article_index=1,
+                selections={"articleDetail": True},
+                storage_root=root / "storages",
+                duration_time=1.0,
+                duration_time_provider=lambda: 4.25,
+            )
+
+            detail = json.loads(Path(archive["article_detail_path"]).read_text(encoding="utf-8"))
+            self.assertEqual(detail["duration_time"], 4.25)
+            self.assertEqual(archive["detail"]["duration_time"], 4.25)
 
     def test_archive_skips_comments_when_comment_info_not_selected(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -3293,7 +3339,6 @@ class ArticleCaptureMitmArchiveTest(unittest.TestCase):
         from src.workers.article_capture_flow import ArticleCaptureDependencies, run_article_capture_flow
 
         saved_records: list[dict] = []
-
         class FakeCandidate:
             title = "耗时文章"
             article_index = 1
@@ -3340,7 +3385,7 @@ class ArticleCaptureMitmArchiveTest(unittest.TestCase):
             resolve_failure_title=lambda _report, title, _index: title,
             build_ready_message=lambda _report: "ready",
             get_capture_source=lambda _report: "test",
-            build_archive=lambda *_args, **_kwargs: {"archive": True},
+            build_archive=lambda *_args, **_kwargs: {"detail": {"duration_time": 0}},
             build_record=lambda _archive: {
                 "account_name": "account-a",
                 "article_title": "耗时文章",
@@ -3367,6 +3412,93 @@ class ArticleCaptureMitmArchiveTest(unittest.TestCase):
 
         self.assertEqual(len(saved_records), 1)
         self.assertGreaterEqual(saved_records[0]["duration_seconds"], 1.0)
+
+    def test_flow_passes_live_article_detail_duration_provider_to_archive(self) -> None:
+        from src.workers.article_capture_flow import ArticleCaptureDependencies, run_article_capture_flow
+
+        saved_records: list[dict] = []
+        captured_archive_kwargs: dict[str, Any] = {}
+
+        class FakeCandidate:
+            title = "实时耗时文章"
+            article_index = 1
+            rect = (100, 100, 500, 140)
+            hwnd = 200
+
+        class FakeCursor:
+            def __init__(self, *_args, **_kwargs) -> None:
+                self.items = [FakeCandidate()]
+
+            def next_candidate(self):
+                if not self.items:
+                    return None
+                return self.items.pop(0)
+
+            def invalidate(self) -> None:
+                pass
+
+        class FakeStore:
+            def has_saved_public_article_title(self, _account_name: str, _title: str) -> bool:
+                return False
+
+            def save_public_article(self, record: dict) -> None:
+                saved_records.append(record)
+
+        def build_archive(*_args, **kwargs):
+            captured_archive_kwargs.update(kwargs)
+            provider = kwargs.get("duration_time_provider")
+            return {"detail": {"duration_time": provider() if callable(provider) else kwargs.get("duration_time")}}
+
+        deps = ArticleCaptureDependencies(
+            put_event=lambda event_queue, level, message, **kwargs: event_queue.put({"level": level, "message": message, **kwargs}),
+            create_public_article_store=lambda _path: FakeStore(),
+            find_wechat_home_window=lambda: FakeHomeWindow(),
+            home_article_cursor_cls=FakeCursor,
+            open_home_article_for_capture=lambda **_kwargs: {
+                "target_title": "实时耗时文章",
+                "click_started_at": time.time() - 1.0,
+                "click_result": {"ok": True},
+            },
+            close_detail_windows=lambda **_kwargs: {"ok": True, "closed": [], "skipped": [], "errors": []},
+            click_home_article=lambda *_args, **_kwargs: {"ok": True},
+            write_probe=lambda *_args, **_kwargs: None,
+            drain_capture_events=lambda _queue: 0,
+            collect_report=lambda *_args, **_kwargs: {"ready": True},
+            resolve_timeout=lambda _config: 1.0,
+            is_report_ready=lambda _report: True,
+            resolve_failure_reason=lambda _report: "",
+            resolve_failure_title=lambda _report, title, _index: title,
+            build_ready_message=lambda _report: "ready",
+            get_capture_source=lambda _report: "test",
+            build_archive=build_archive,
+            build_record=lambda _archive: {
+                "account_name": "account-a",
+                "article_title": "实时耗时文章",
+                "published_article_time": "2026-06-21 10:00",
+                "article_link": "https://mp.weixin.qq.com/s/live-duration",
+                "record_type": "文章详情",
+                "collect_time": "2026-06-21 10:00:00",
+                "duration_seconds": 0,
+                "collect_status": "saved",
+            },
+            build_failed_record=build_failed_public_article_record,
+        )
+
+        run_article_capture_flow(
+            Queue(),
+            {
+                "account_name": "account-a",
+                "enable_home_article_click": True,
+                "run_options": {"recordLimit": 1, "selections": {"articleDetail": True}},
+            },
+            Queue(),
+            deps,
+        )
+
+        self.assertIn("duration_time_provider", captured_archive_kwargs)
+        self.assertTrue(callable(captured_archive_kwargs["duration_time_provider"]))
+        self.assertGreaterEqual(captured_archive_kwargs["duration_time_provider"](), 1.0)
+        self.assertEqual(len(saved_records), 1)
 
     def test_flow_waits_and_continues_when_home_becomes_unreadable_mid_run(self) -> None:
         from src.workers.article_capture_flow import ArticleCaptureDependencies, run_article_capture_flow

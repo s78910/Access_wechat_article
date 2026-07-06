@@ -961,9 +961,12 @@ def _capture_one_article(
             selections=selections_payload,
             storage_root=Path(config.get("storage_root") or DEFAULT_STORAGE_ROOT),
             progress_logger=progress_logger,
+            duration_time=max(0.0, time.time() - click_started_at),
+            duration_time_provider=lambda: max(0.0, time.time() - click_started_at),
         )
         record = deps.build_record(archive)
-        record["duration_seconds"] = max(0.0, time.time() - click_started_at)
+        duration_seconds = max(0.0, time.time() - click_started_at)
+        record["duration_seconds"] = duration_seconds
         progress_logger.info(
             "sqlite",
             "开始写入 awa_public_accounts / awa_public_articles",
@@ -971,7 +974,6 @@ def _capture_one_article(
             progress=94,
             meta={"dedupeKey": "account_id + article_link", "articleLink": record["article_link"]},
         )
-        record["duration_seconds"] = max(0.0, time.time() - click_started_at)
         store.save_public_article(record)
         confirmed_account_name = str(record.get("account_name") or "").strip()
         if confirmed_account_name and callable(on_account_confirmed):

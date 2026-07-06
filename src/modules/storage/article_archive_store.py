@@ -5,7 +5,7 @@ import json
 import re
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 from urllib.parse import parse_qs, urlparse, urlunparse
 
 from src.core.progress_logger import ProgressLogger
@@ -13,6 +13,7 @@ from src.modules.detail.article_detail import (
     ArticleDetailFetchError,
     build_article_detail_from_html,
     fetch_article_detail_from_keyed_url,
+    normalize_duration_seconds,
     write_article_detail_json,
 )
 from src.modules.detail.account_identity import (
@@ -51,6 +52,16 @@ def first_non_empty(*values: Any) -> Any:
             continue
         return value
     return None
+
+
+def current_duration_time(fallback: Any, provider: Callable[[], Any] | None = None) -> float:
+    """优先读取实时耗时；提供器异常时回退，避免计时问题影响归档主流程。"""
+    if callable(provider):
+        try:
+            return normalize_duration_seconds(provider())
+        except Exception:
+            pass
+    return normalize_duration_seconds(fallback)
 
 
 def build_sqlite_capture_record(
@@ -98,6 +109,8 @@ def build_local_article_archive(
     progress_logger: ProgressLogger | None = None,
     detail_fetcher=None,
     comment_fetcher=None,
+    duration_time: Any = 0.0,
+    duration_time_provider: Callable[[], Any] | None = None,
 ) -> dict[str, Any]:
     """整理单篇文章本地归档，并生成 article_detail.json 作为数据库入库来源。"""
     if not isinstance(progress_logger, ProgressLogger):
@@ -105,6 +118,7 @@ def build_local_article_archive(
     storage = report.get("storage") if isinstance(report.get("storage"), dict) else {}
     main_capture = report.get("main_html_capture") if isinstance(report.get("main_html_capture"), dict) else {}
     collect_time = normalize_time_text(report.get("created_at"))
+    detail_duration_time = current_duration_time(duration_time, duration_time_provider)
     keyed_url = str(main_capture.get("url") or "")
     if not keyed_url:
         raise ArticleArchiveError("缺少带 key 的文章 URL，已跳过 article_detail.json 生成和 SQLite 写入")
@@ -120,7 +134,12 @@ def build_local_article_archive(
             meta={"urlRedacted": str(main_capture.get("url_redacted") or _redact_url(keyed_url))},
         )
         try:
-            detail = build_article_detail_from_html(source_html, keyed_url, collect_time=collect_time)
+            detail = build_article_detail_from_html(
+                source_html,
+                keyed_url,
+                collect_time=collect_time,
+                duration_time=detail_duration_time,
+            )
         except ArticleDetailFetchError as exc:
             raise ArticleArchiveError(str(exc)) from exc
     elif str(main_capture.get("source") or "") in {"mitm_referer_fallback", "mitm_keyed_url_fallback"}:
@@ -141,6 +160,7 @@ def build_local_article_archive(
                 keyed_url,
                 request_headers=dict(main_capture.get("request_headers") or {}),
                 collect_time=collect_time,
+                duration_time=detail_duration_time,
             )
         except TypeError:
             detail = fetcher(keyed_url)
@@ -177,6 +197,7 @@ def build_local_article_archive(
     detail["article_title"] = article_title
     detail["published_article_time"] = published_time
     detail["short_link"] = captured_article_url
+    detail["duration_time"] = detail_duration_time
 
     progress_logger.info(
         "local_archive",
@@ -200,6 +221,8 @@ def build_local_article_archive(
         progress=45,
         meta={"targetDir": str(archive_dir)},
     )
+    detail_duration_time = current_duration_time(detail_duration_time, duration_time_provider)
+    detail["duration_time"] = detail_duration_time
     detail_path = write_article_detail_json(detail, archive_dir)
     progress_logger.success(
         "article_detail",
@@ -295,7 +318,7 @@ def build_public_article_record(archive: dict[str, Any]) -> dict[str, Any]:
         "article_link": article_link,
         "record_type": build_record_type_from_selections(selections),
         "collect_time": detail.get("collect_time") or datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "duration_seconds": float(detail.get("duration_seconds") or 0),
+        "duration_seconds": float(detail.get("duration_seconds") or detail.get("duration_time") or 0),
         "collect_status": "saved",
     }
 

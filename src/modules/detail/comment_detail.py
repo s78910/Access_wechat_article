@@ -15,6 +15,7 @@ from src.modules.detail.article_detail import (
     extract_account_name,
     extract_article_title,
     extract_published_article_time,
+    normalize_duration_seconds,
     normalize_request_headers,
     redact_sensitive_url,
 )
@@ -189,9 +190,11 @@ def fetch_comments_to_archive(
         reply_fetch=reply_fetch,
         resource_result=resource_result,
     )
+    collect_time_text = collect_time or current_time_text()
     package = {
         "schema_version": "wechat_comments_v1",
-        "created_at": collect_time or current_time_text(),
+        "collect_time": collect_time_text,
+        "duration_time": normalize_duration_seconds(time.time() - started_at),
         "article": {
             "account_name": extract_account_name(html_text),
             "article_title": extract_article_title(html_text),

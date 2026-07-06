@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import tempfile
-import threading
 import unittest
-from concurrent.futures import Future, ThreadPoolExecutor
+from concurrent.futures import Future
 from pathlib import Path
+from unittest.mock import patch
 
 from src.modules.html_archive.models import ArticleHtmlArchiveConfig, ArticleHtmlArchiveResult, ArticleHtmlArchiveTask
 from src.modules.storage.sqlite_store import SQLiteStore
@@ -120,16 +120,9 @@ class ArchiveCacheServiceTest(unittest.TestCase):
     def test_archive_cache_job_records_results_as_each_article_finishes(self) -> None:
         from src.modules.html_archive.archive_cache_service import ArchiveCacheJobRunner
 
-        first_started = threading.Event()
-        second_finished = threading.Event()
+        submitted_futures: list[Future] = []
 
         def fake_archive(task: ArticleHtmlArchiveTask, config: ArticleHtmlArchiveConfig):
-            if task.article_id == 1:
-                first_started.set()
-                self.assertTrue(second_finished.wait(timeout=1))
-            if task.article_id == 2:
-                self.assertTrue(first_started.wait(timeout=1))
-                second_finished.set()
             return ArticleHtmlArchiveResult(
                 ok=True,
                 archive_dir=Path("storages") / task.account_name / task.article_title,
@@ -138,6 +131,31 @@ class ArchiveCacheServiceTest(unittest.TestCase):
                 message="HTML 离线归档完成",
             )
 
+        class FakeExecutor:
+            def __init__(self, max_workers: int):
+                self.max_workers = max_workers
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, traceback):
+                return False
+
+            def submit(self, func, task, config):
+                future: Future = Future()
+                future.task = task
+                future.func = func
+                future.config = config
+                submitted_futures.append(future)
+                return future
+
+        def fake_as_completed(futures):
+            future_by_article_id = {future.task.article_id: future for future in futures}
+            for article_id in (2, 1):
+                future = future_by_article_id[article_id]
+                future.set_result(future.func(future.task, future.config))
+                yield future
+
         tasks = [
             ArticleHtmlArchiveTask(1, "https://mp.weixin.qq.com/s/slow", "账号", "2026-06-20 10:30", "慢文章", Path("storages")),
             ArticleHtmlArchiveTask(2, "https://mp.weixin.qq.com/s/fast", "账号", "2026-06-20 10:31", "快文章", Path("storages")),
@@ -145,11 +163,12 @@ class ArchiveCacheServiceTest(unittest.TestCase):
         runner = ArchiveCacheJobRunner(
             concurrency=2,
             archive_func=fake_archive,
-            executor_factory=ThreadPoolExecutor,
+            executor_factory=FakeExecutor,
         )
 
         job = runner.create_job(tasks)
-        runner.run_job(job.job_id)
+        with patch("src.modules.html_archive.archive_cache_service.as_completed", fake_as_completed):
+            runner.run_job(job.job_id)
         snapshot = runner.get_job(job.job_id)
 
         self.assertIsNotNone(snapshot)

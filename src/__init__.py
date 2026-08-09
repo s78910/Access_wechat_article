@@ -1,1 +1,1 @@
-"""Application modules for the desktop collector."""
+"""Access WeChat Article v2.1 后端源码包。"""

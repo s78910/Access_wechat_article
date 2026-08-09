@@ -4,10 +4,14 @@ old-version/
 vue-project/
 # 数据存储目录
 storages/
-# 运行时数据目录：保留 data/custom.yaml，数据库、日志和临时文件不纳入版本管理
+# 运行时数据目录：保留 data/custom.yaml 和版本化建表 SQL，数据库、日志和临时文件不纳入版本管理
 data/*
 !data/
 !data/custom.yaml
+!data/sql/
+data/sql/*
+!data/sql/create_script/
+!data/sql/create_script/*.sql
 # 临时文件
 tmp/
 output/
@@ -27,6 +31,8 @@ data/awa_public.sqlite3
 # AGENTS规则
 AGENTS.md
 PROJECT.md
+PLANS.md
+PRODUCT.md
 
 
 # 导出或本地数据库产物

@@ -1,5 +1,1 @@
-"""微信窗口控制模块。"""
-
-from src.modules.window.home_display_cache import HomeDisplayCache
-
-__all__ = ["HomeDisplayCache"]
+"""微信窗口识别、点击和关闭工具。"""

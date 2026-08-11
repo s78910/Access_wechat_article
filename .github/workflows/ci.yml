@@ -30,12 +30,4 @@ jobs:
         run: uv run python -m py_compile main.py dev_server.py
 
       - name: Run unit tests
-        run: >
-          uv run python -m unittest
-          tests.test_archive_cache_service
-          tests.test_archive_delete_service
-          tests.test_archive_excel_export_service
-          tests.test_runtime_cleanup
-          tests.test_sqlite_store
-          tests.test_home_article_cursor
-          tests.test_wechat_window_activation
+        run: uv run python -m unittest discover -s tests -p "test_*.py"

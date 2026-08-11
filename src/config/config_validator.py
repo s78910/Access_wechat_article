@@ -105,6 +105,11 @@ def validate_app_config(config: AppConfig) -> None:
         ("comment.max_pages", config.comment.max_pages, 1),
         ("comment.max_concurrent_processes", config.comment.max_concurrent_processes, 1),
         ("offline_cache.max_scroll_count", config.offline_cache.max_scroll_count, 1),
+        (
+            "offline_cache.max_concurrent_processes",
+            config.offline_cache.max_concurrent_processes,
+            1,
+        ),
         ("runtime.temp_retention_days", config.runtime.temp_retention_days, 0),
         ("runtime.log_retention_days", config.runtime.log_retention_days, 0),
         ("window.scroll_wheel_steps", config.window.scroll_wheel_steps, 1),
@@ -120,6 +125,8 @@ def validate_app_config(config: AppConfig) -> None:
 
     if config.comment.max_concurrent_processes > 10:
         raise ConfigValidationError("comment.max_concurrent_processes 不能大于 10")
+    if config.offline_cache.max_concurrent_processes > 10:
+        raise ConfigValidationError("offline_cache.max_concurrent_processes 不能大于 10")
 
     if not config.mitm_capture.close_as_capture_deadline:
         raise ConfigValidationError("mitm_capture.close_as_capture_deadline 当前必须为 true")

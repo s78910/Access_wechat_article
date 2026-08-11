@@ -91,6 +91,7 @@ class OfflineCacheConfig:
     max_scroll_seconds: float
     max_scroll_count: int
     resource_timeout_seconds: float
+    max_concurrent_processes: int
 
 
 @dataclass(frozen=True, slots=True)

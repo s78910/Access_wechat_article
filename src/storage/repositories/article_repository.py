@@ -33,6 +33,18 @@ class ArticleRecord:
     updated_time: str
 
 
+@dataclass(frozen=True, slots=True)
+class OfflineCacheArticleRecord:
+    id: int
+    account_id: int
+    account_name: str
+    article_title: str
+    published_article_time: str
+    article_link: str
+    archive_dir: str
+    resource_types_json: str
+
+
 class ArticleRepository:
     def __init__(self, connection: sqlite3.Connection) -> None:
         self.connection = connection
@@ -153,6 +165,54 @@ class ArticleRepository:
         ).fetchone()
         return row is not None
 
+    def list_offline_cache_records_by_ids(
+        self,
+        article_ids,
+    ) -> tuple[OfflineCacheArticleRecord, ...]:
+        """按用户勾选顺序读取离线缓存目标，并去除重复或无效 ID。"""
+        ordered_ids: list[int] = []
+        seen: set[int] = set()
+        for value in article_ids:
+            try:
+                article_id = int(value)
+            except (TypeError, ValueError):
+                continue
+            if article_id <= 0 or article_id in seen:
+                continue
+            seen.add(article_id)
+            ordered_ids.append(article_id)
+        if not ordered_ids:
+            return ()
+
+        placeholders = ",".join("?" for _ in ordered_ids)
+        rows = self.connection.execute(
+            f"""
+            SELECT article.*, account.account_name
+            FROM awa_public_articles AS article
+            JOIN awa_public_accounts AS account ON account.id = article.account_id
+            WHERE article.id IN ({placeholders})
+            """,
+            tuple(ordered_ids),
+        ).fetchall()
+        records = {int(row["id"]): _to_offline_cache_record(row) for row in rows}
+        return tuple(records[article_id] for article_id in ordered_ids if article_id in records)
+
+    def list_offline_cache_records_by_account(
+        self,
+        account_id: int,
+    ) -> tuple[OfflineCacheArticleRecord, ...]:
+        rows = self.connection.execute(
+            """
+            SELECT article.*, account.account_name
+            FROM awa_public_articles AS article
+            JOIN awa_public_accounts AS account ON account.id = article.account_id
+            WHERE article.account_id = ?
+            ORDER BY article.published_article_time DESC, article.id DESC
+            """,
+            (int(account_id),),
+        ).fetchall()
+        return tuple(_to_offline_cache_record(row) for row in rows)
+
 
 def _to_record(row: sqlite3.Row | None) -> ArticleRecord | None:
     if row is None:
@@ -169,4 +229,17 @@ def _to_record(row: sqlite3.Row | None) -> ArticleRecord | None:
         last_collected_time=str(row["last_collected_time"]),
         created_time=str(row["created_time"]),
         updated_time=str(row["updated_time"]),
+    )
+
+
+def _to_offline_cache_record(row: sqlite3.Row) -> OfflineCacheArticleRecord:
+    return OfflineCacheArticleRecord(
+        id=int(row["id"]),
+        account_id=int(row["account_id"]),
+        account_name=str(row["account_name"]),
+        article_title=str(row["article_title"]),
+        published_article_time=str(row["published_article_time"]),
+        article_link=str(row["article_link"]),
+        archive_dir=str(row["archive_dir"]),
+        resource_types_json=str(row["resource_types_json"]),
     )

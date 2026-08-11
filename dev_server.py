@@ -41,6 +41,10 @@ from src.modules.request.chrome_headers import build_chrome_document_headers
 from src.modules.system.windows_system_proxy import WindowsSystemProxy
 from src.services.archive.archive_delete_service import ArchiveDeleteService
 from src.services.archive.archive_excel_export_service import ArchiveExcelExportService
+from src.services.archive.offline_cache_job_service import (
+    OfflineCacheConflictError,
+    OfflineCacheJobService,
+)
 from src.services.capture.capture_runtime_factory import CaptureRuntimeFactory
 from src.services.capture.window_runtime_factory import WindowRuntimeFactory
 from src.services.history.history_query_service import HistoryQueryService
@@ -113,6 +117,7 @@ class DevBackendContext:
     health_check_results: dict[str, dict[str, Any]] = field(default_factory=dict)
     health_startup_completed: bool = False
     health_check_lock: Any = field(default_factory=Lock, repr=False)
+    offline_cache_service: Any | None = None
 
     def append_log(
         self,
@@ -188,6 +193,10 @@ class ArchiveExcelExportPayload(BaseModel):
     accountIds: list[int]
 
 
+class ArchiveCacheArticlesPayload(BaseModel):
+    articleIds: list[int]
+
+
 class UnsupportedPayload(BaseModel):
     """占位请求体，避免前端 POST 空对象时触发 422。"""
 
@@ -224,6 +233,17 @@ def create_dev_backend(
             runtime_logger=runtime_logger,
         ),
         runtime_logger=runtime_logger,
+        offline_cache_service=OfflineCacheJobService(
+            database_path=db_path,
+            storage_root=runtime.config.storage.article_storage_root,
+            temp_root=runtime.config.storage.temp_dir,
+            browser_cache_dir=root / ".playwright-browsers",
+            max_concurrent_processes=runtime.config.offline_cache.max_concurrent_processes,
+            max_scroll_seconds=runtime.config.offline_cache.max_scroll_seconds,
+            max_scroll_count=runtime.config.offline_cache.max_scroll_count,
+            resource_timeout_seconds=runtime.config.offline_cache.resource_timeout_seconds,
+            write_coordinator=runtime.database_write_coordinator,
+        ),
     )
     backend.append_log(
         "INFO",
@@ -711,13 +731,19 @@ def create_backend_app(backend: DevBackendContext) -> FastAPI:
         )
         return JSONResponse(result.to_payload(), status_code=result.http_status)
 
-    _register_unsupported_mutation_routes(app)
+    _register_archive_cache_routes(app, backend)
     mount_webview_static_files(app, WEBVIEW_DIR)
     return app
 
 
 def shutdown_backend(backend: DevBackendContext) -> None:
     """后端退出时只取消当前采集任务；8766 端口由 uvicorn 生命周期关闭。"""
+    if backend.offline_cache_service is not None:
+        try:
+            backend.offline_cache_service.shutdown()
+            backend.append_log("INFO", "后端退出，已停止离线缓存子进程。")
+        except Exception as exc:
+            backend.append_log("ERROR", f"离线缓存子进程停止失败：{exc}")
     if backend.diagnostic_mitm_listener is not None:
         try:
             backend.diagnostic_mitm_listener.stop()
@@ -1217,6 +1243,9 @@ def _runtime_cache_busy_reason(backend: DevBackendContext) -> str | None:
 
     if backend.diagnostic_mitm_listener is not None:
         return "MITM 诊断正在运行"
+
+    if backend.offline_cache_service is not None and backend.offline_cache_service.is_busy():
+        return "离线缓存任务正在运行"
 
     diagnostic_groups = (
         (backend.window_click_flow_diagnostic_jobs, backend.window_click_flow_diagnostic_lock),
@@ -2182,28 +2211,54 @@ def _open_archive_article_directory(backend: DevBackendContext, article_id: int)
     }
 
 
-def _register_unsupported_mutation_routes(app: FastAPI) -> None:
+def _register_archive_cache_routes(app: FastAPI, backend: Any) -> None:
     @app.post("/api/archive/cache/articles")
-    def cache_archive_articles(_payload: dict[str, Any] | None = None):
-        return _unsupported("新结构下离线缓存服务尚未接入开发后端。")
+    def cache_archive_articles(payload: ArchiveCacheArticlesPayload):
+        try:
+            job = backend.offline_cache_service.create_articles_job(payload.articleIds)
+        except OfflineCacheConflictError as exc:
+            return JSONResponse(
+                {"ok": False, "status": "conflict", "message": str(exc)},
+                status_code=409,
+            )
+        return job.to_payload()
 
-    @app.post("/api/archive/accounts/{_account_id}/cache")
-    def cache_archive_account(_account_id: int):
-        return _unsupported("新结构下离线缓存服务尚未接入开发后端。")
+    @app.post("/api/archive/accounts/{account_id}/cache")
+    def cache_archive_account(account_id: int):
+        try:
+            job = backend.offline_cache_service.create_account_job(account_id)
+        except OfflineCacheConflictError as exc:
+            return JSONResponse(
+                {"ok": False, "status": "conflict", "message": str(exc)},
+                status_code=409,
+            )
+        return job.to_payload()
 
     @app.get("/api/archive/cache/jobs/{job_id}")
     def get_archive_cache_job(job_id: str):
-        return {
-            "ok": False,
-            "jobId": job_id,
-            "status": "missing",
-            "total": 0,
-            "finished": 0,
-            "running": 0,
-            "concurrency": 0,
-            "results": [],
-            "message": "新结构下离线缓存任务服务尚未接入开发后端。",
-        }
+        try:
+            return backend.offline_cache_service.get_job(job_id).to_payload()
+        except KeyError:
+            return JSONResponse(
+                {
+                    "ok": False,
+                    "jobId": job_id,
+                    "status": "missing",
+                    "total": 0,
+                    "finished": 0,
+                    "running": 0,
+                    "skipped": 0,
+                    "requestedTotal": 0,
+                    "processed": 0,
+                    "queued": 0,
+                    "failed": 0,
+                    "activeProcesses": [],
+                    "concurrency": 0,
+                    "results": [],
+                    "message": "离线缓存任务不存在。",
+                },
+                status_code=404,
+            )
 
 
 def _ca_certificate_status_payload(backend: DevBackendContext) -> dict[str, Any]:

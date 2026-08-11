@@ -185,6 +185,10 @@ def build_app_config(mapping: Mapping[str, Any], *, project_root: str | Path) ->
             max_scroll_seconds=_as_float(offline_cache, "max_scroll_seconds"),
             max_scroll_count=_as_int(offline_cache, "max_scroll_count"),
             resource_timeout_seconds=_as_float(offline_cache, "resource_timeout_seconds"),
+            max_concurrent_processes=_as_int(
+                offline_cache,
+                "max_concurrent_processes",
+            ),
         ),
         runtime=RuntimeConfig(
             log_level=_as_string(runtime, "log_level").upper(),
@@ -353,6 +357,7 @@ def _latest_menu_mapping(mapping: Mapping[str, Any]) -> dict[str, Any]:
             "max_scroll_seconds",
             "max_scroll_count",
             "resource_timeout_seconds",
+            "max_concurrent_processes",
         ),
     )
 

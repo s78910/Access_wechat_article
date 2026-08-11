@@ -107,3 +107,4 @@ data_acquisition:
     max_scroll_seconds: 30.0  # 离线缓存时最长滚动加载时间。
     max_scroll_count: 30  # 离线缓存时最大滚动次数。
     resource_timeout_seconds: 10.0  # 单个资源下载超时。
+    max_concurrent_processes: 3  # 同时运行的 Playwright 离线缓存子进程上限。

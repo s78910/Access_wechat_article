@@ -88,6 +88,7 @@ class CommentConfig:
 
 @dataclass(frozen=True, slots=True)
 class OfflineCacheConfig:
+    enabled_by_default: bool
     max_scroll_seconds: float
     max_scroll_count: int
     resource_timeout_seconds: float

@@ -60,6 +60,7 @@ from src.services.runtime.initial_content_storage_diagnostic_service import (
 )
 from src.services.runtime.runtime_cache_clear_service import RuntimeCacheClearService
 from src.services.runtime.runtime_log_service import RuntimeLogService
+from src.services.runtime.startup_self_check_service import StartupSelfCheckService
 from src.services.runtime.task_runtime_state import TaskRuntimeTracker
 from src.services.runtime.window_diagnostic_service import (
     WINDOW_DIAGNOSTIC_ACTIONS,
@@ -117,6 +118,7 @@ class DevBackendContext:
     health_check_results: dict[str, dict[str, Any]] = field(default_factory=dict)
     health_startup_completed: bool = False
     health_check_lock: Any = field(default_factory=Lock, repr=False)
+    startup_self_check_lock: Any = field(default_factory=Lock, repr=False)
     offline_cache_service: Any | None = None
 
     def append_log(
@@ -309,6 +311,14 @@ def create_backend_app(backend: DevBackendContext) -> FastAPI:
     @app.post("/api/health/startup")
     def run_startup_health_checks(_payload: UnsupportedPayload | None = None) -> dict[str, Any]:
         return _startup_health_payload(backend)
+
+    @app.get("/api/startup-self-check/status")
+    def get_startup_self_check_status() -> dict[str, Any]:
+        return _startup_self_check_status_payload(backend)
+
+    @app.post("/api/startup-self-check/run")
+    def run_startup_self_check(_payload: UnsupportedPayload | None = None) -> dict[str, Any]:
+        return _startup_self_check_run_payload(backend)
 
     @app.post("/api/health/check")
     def run_health_check(payload: HealthCheckPayload):
@@ -822,6 +832,9 @@ def _task_command_from_payload(payload: dict[str, Any], config: Any) -> TaskComm
         collect_comments=bool(
             selections.get("commentInfo", config.comment.enabled_by_default)
         ),
+        build_offline_cache=bool(
+            selections.get("offlineArchive", config.offline_cache.enabled_by_default)
+        ),
         skip_collected_records=bool(
             selections.get("skipCollectedRecords", False)
         ),
@@ -954,6 +967,64 @@ def _proxy_status_label(proxy_payload: Any) -> str:
 
 
 HEALTH_CHECK_TARGETS = ("storage", "ca", "proxy-port", "https")
+
+
+def _startup_self_check_service(backend: DevBackendContext) -> StartupSelfCheckService:
+    return StartupSelfCheckService(
+        project_root=backend.project_root,
+        ca_status_checker=lambda _config: _startup_self_check_ca_status_payload(backend),
+    )
+
+
+def _startup_self_check_ca_status_payload(backend: DevBackendContext) -> dict[str, Any]:
+    try:
+        return _ca_certificate_status_payload(backend)
+    except Exception as exc:
+        append_log = getattr(backend, "append_log", None)
+        if callable(append_log):
+            append_log("WARN", f"启动自检读取 CA 状态失败：{exc}", source="startup_self_check")
+        return {
+            "ok": False,
+            "caFileExists": False,
+            "projectCertificateInstalled": False,
+            "message": f"CA 状态未确认：{exc}",
+        }
+
+
+def _startup_self_check_status_payload(backend: DevBackendContext) -> dict[str, Any]:
+    return _startup_self_check_service(backend).get_status(backend.runtime.config)
+
+
+def _startup_self_check_run_payload(backend: DevBackendContext) -> dict[str, Any]:
+    # 自检会读取数据库、目录和系统证书状态，串行执行避免重复点击导致结果互相覆盖。
+    with backend.startup_self_check_lock:
+        try:
+            return _startup_self_check_service(backend).run(backend.runtime.config)
+        except Exception as exc:
+            append_log = getattr(backend, "append_log", None)
+            if callable(append_log):
+                append_log("ERROR", f"启动自检失败：{exc}", source="startup_self_check", exception=exc)
+            return {
+                "ok": False,
+                "status": "failed",
+                "fatalCount": 1,
+                "warningCount": 0,
+                "items": [
+                    {
+                        "key": "startup_self_check_error",
+                        "group": "runtime",
+                        "label": "启动自检",
+                        "status": "failed",
+                        "severity": "fatal",
+                        "ok": False,
+                        "message": f"{type(exc).__name__}: {exc}",
+                        "action": "请查看运行日志中的 ERROR 详情。",
+                    }
+                ],
+                "checkedAt": datetime.now().isoformat(timespec="seconds"),
+                "durationSeconds": 0,
+                "statePath": "data/runtime/startup_self_check.json",
+            }
 
 
 def _startup_health_payload(backend: DevBackendContext) -> dict[str, Any]:

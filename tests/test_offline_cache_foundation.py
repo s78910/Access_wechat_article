@@ -20,6 +20,7 @@ class OfflineCacheFoundationTest(unittest.TestCase):
             project_root=PROJECT_ROOT,
         )
 
+        self.assertFalse(config.offline_cache.enabled_by_default)
         self.assertEqual(config.offline_cache.max_concurrent_processes, 3)
 
     def test_article_repository_preserves_selected_order_and_lists_account_records(self) -> None:

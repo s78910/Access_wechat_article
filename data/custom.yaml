@@ -95,7 +95,7 @@ data_acquisition:
 
   # 评论采集：控制首页默认是否采集评论，以及评论接口请求、分页节奏和页数上限。
   comment_collection:
-    enabled_by_default: false  # 默认评论采集开关；开启后首页应默认勾选评论采集。
+    enabled_by_default: true  # 默认评论采集开关；开启后首页应默认勾选评论采集。
     request_timeout_seconds: 10.0  # 每一次评论 HTTP 请求最多等待 10 秒，不是整篇文章评论采集总耗时。
     page_interval_seconds: 0.5  # 评论分页之间的等待时间，避免连续请求过快。
     top_level_max_pages: 50  # 一级评论最多请求 50 页。
@@ -104,6 +104,7 @@ data_acquisition:
 
   # 离线缓存：控制离线页面缓存时的滚动加载范围和单个资源下载超时。
   offline_cache:
+    enabled_by_default: false  # 默认离线归档开关；开启后主服务页默认勾选离线归档，具体任务仍以前端当前开关为准。
     max_scroll_seconds: 30.0  # 离线缓存时最长滚动加载时间。
     max_scroll_count: 30  # 离线缓存时最大滚动次数。
     resource_timeout_seconds: 10.0  # 单个资源下载超时。

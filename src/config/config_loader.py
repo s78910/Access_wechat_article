@@ -182,6 +182,7 @@ def build_app_config(mapping: Mapping[str, Any], *, project_root: str | Path) ->
             max_concurrent_processes=_as_int(comment, "max_concurrent_processes"),
         ),
         offline_cache=OfflineCacheConfig(
+            enabled_by_default=_as_bool(offline_cache, "enabled_by_default"),
             max_scroll_seconds=_as_float(offline_cache, "max_scroll_seconds"),
             max_scroll_count=_as_int(offline_cache, "max_scroll_count"),
             resource_timeout_seconds=_as_float(offline_cache, "resource_timeout_seconds"),
@@ -354,6 +355,7 @@ def _latest_menu_mapping(mapping: Mapping[str, Any]) -> dict[str, Any]:
         offline_cache,
         result.setdefault("offline_cache", {}),
         (
+            "enabled_by_default",
             "max_scroll_seconds",
             "max_scroll_count",
             "resource_timeout_seconds",

@@ -15,6 +15,7 @@ class TaskCommand:
     target_success_count: int
     max_attempts: int
     collect_comments: bool = False
+    build_offline_cache: bool = False
     skip_collected_records: bool = False
     request_interval_seconds: float = 0
     article_retry_count: int = 0

@@ -1,7 +1,29 @@
 # Custom rules (everything added below won't be overriden by 'Generate .gitignore File' if you use 'Update' option)
 old-version/
 # vue 页面构建目录
-vue-project/
+# 前端源码目录需要入仓；只忽略依赖、构建产物、缓存和本地日志。
+vue-project/node_modules/
+vue-project/dist/
+vue-project/dist-ssr/
+vue-project/coverage/
+vue-project/.cache/
+vue-project/.vite/
+vue-project/.turbo/
+vue-project/.impeccable/
+vue-project/.impeccable-live/
+vue-project/node_modules/.impeccable-live/
+vue-project/*.log
+vue-project/npm-debug.log*
+vue-project/yarn-debug.log*
+vue-project/yarn-error.log*
+vue-project/pnpm-debug.log*
+vue-project/lerna-debug.log*
+vue-project/*.tsbuildinfo
+vue-project/*.local
+vue-project/*.timestamp-*-*.mjs
+vue-project/__screenshots__/
+vue-project/cypress/videos/
+vue-project/cypress/screenshots/
 # 数据存储目录
 storages/
 # 运行时数据目录：保留 data/custom.yaml 和版本化建表 SQL，数据库、日志和临时文件不纳入版本管理

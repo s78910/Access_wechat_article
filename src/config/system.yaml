@@ -1,5 +1,5 @@
 software:
-  version: 2.1.0
+  version: 2.1.1
 basic_settings:
   # 运行维护：日志、临时文件清理和请求控制。
   runtime_maintenance:

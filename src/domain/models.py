@@ -66,6 +66,13 @@ class ArticleTarget:
     home_window_handle: int
     fingerprint: str
     control: Any = field(default=None, repr=False, compare=False)
+    date_text: str = ""
+    published_date: str = ""
+    date_rect: tuple[int, int, int, int] | None = None
+    title_rect: tuple[int, int, int, int] | None = None
+    metric_text: str = ""
+    metric_rect: tuple[int, int, int, int] | None = None
+    raw_title: str = ""
 
 
 @dataclass(frozen=True, slots=True)

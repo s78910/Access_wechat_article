@@ -405,6 +405,9 @@ export type WindowDiagnosticResultItem = {
   label: string
   value: string
   cells?: Array<{ label: string, value: string }>
+  kind?: 'summary' | 'operation' | 'discarded' | 'article'
+  tone?: 'info' | 'success' | 'warning' | 'error'
+  sequence?: number
 }
 
 export type WindowDiagnosticResult = {
@@ -415,6 +418,17 @@ export type WindowDiagnosticResult = {
   message?: string
   tone?: 'info' | 'success' | 'warning' | 'error'
   items?: WindowDiagnosticResultItem[]
+}
+
+export type WindowDiagnosticOptions = {
+  scrollSteps?: number
+}
+
+export type WindowClickFlowDiagnosticOptions = {
+  maxRecords: number
+  dateFilterMode: 'all' | 'range' | 'before' | 'after'
+  startDate?: string
+  endDate?: string
 }
 
 export type ArticleDetailDiagnosticResult = {
@@ -445,10 +459,12 @@ export type ArticleDetailDiagnosticResult = {
   commentPath?: string
   commentAssetCount?: number
   commentAssetDir?: string
-  clickedCount?: number
-  openedCount?: number
-  closedCount?: number
+  recognizedCount?: number
+  skippedCount?: number
   stoppedByUser?: boolean
+  traceDir?: string
+  executionLogPath?: string
+  resultPath?: string
 }
 
 export type ArchiveAccountItem = {
@@ -833,12 +849,15 @@ export async function testProxyConnection() {
   return postJson<ProxyConnectionTestResult>('/api/proxy/test')
 }
 
-export async function runWindowDiagnosticAction(action: WindowDiagnosticAction) {
-  return postJson<WindowDiagnosticResult>('/api/diagnostics/window', { action })
+export async function runWindowDiagnosticAction(
+  action: WindowDiagnosticAction,
+  options: WindowDiagnosticOptions = {},
+) {
+  return postJson<WindowDiagnosticResult>('/api/diagnostics/window', { action, ...options })
 }
 
-export async function startWindowClickFlowDiagnostic() {
-  return postJson<ArticleDetailDiagnosticResult>('/api/diagnostics/window-click-flow', {})
+export async function startWindowClickFlowDiagnostic(options: WindowClickFlowDiagnosticOptions) {
+  return postJson<ArticleDetailDiagnosticResult>('/api/diagnostics/window-click-flow', options)
 }
 
 export async function getWindowClickFlowDiagnostic(jobId: string) {

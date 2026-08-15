@@ -15,13 +15,13 @@ test('download options are compact and right aligned', () => {
   assert.match(match.groups.body, /width:\s*min\(100%,\s*190px\);/)
 })
 
-test('task illustrations share the adjusted horizontal artwork offset', () => {
+test('指定记录总量插画保留水平位置并单独向上移动 5px', () => {
   const listArtRule = appVue.match(/\.task-art-list\s*\{(?<body>[\s\S]*?)\}/)
   const heartArtRule = appVue.match(/\.task-card-content \.task-art-heart\s*\{(?<body>[\s\S]*?)\}/)
 
   assert.ok(listArtRule?.groups?.body, 'missing .task-art-list style block')
   assert.ok(heartArtRule?.groups?.body, 'missing .task-card-content .task-art-heart style block')
-  assert.match(listArtRule.groups.body, /transform:\s*translateX\(-14px\);/)
+  assert.match(listArtRule.groups.body, /transform:\s*translate\(20px,\s*-5px\);/)
   assert.match(heartArtRule.groups.body, /transform:\s*translate\(-14px,\s*12px\);/)
 })
 

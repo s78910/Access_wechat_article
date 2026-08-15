@@ -57,6 +57,7 @@ class WindowConfig:
     article_close_confirm_timeout_seconds: float
     visible_snapshot_max_age_seconds: float
     scroll_wheel_steps: int
+    date_seek_max_steps: int
     max_scroll_attempts: int
     scroll_initial_delay_seconds: float
     scroll_probe_interval_seconds: float

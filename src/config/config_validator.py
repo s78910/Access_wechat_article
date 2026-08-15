@@ -113,6 +113,7 @@ def validate_app_config(config: AppConfig) -> None:
         ("runtime.temp_retention_days", config.runtime.temp_retention_days, 0),
         ("runtime.log_retention_days", config.runtime.log_retention_days, 0),
         ("window.scroll_wheel_steps", config.window.scroll_wheel_steps, 1),
+        ("window.date_seek_max_steps", config.window.date_seek_max_steps, 1),
         ("window.max_scroll_attempts", config.window.max_scroll_attempts, 0),
         ("window.bounce_attempts", config.window.bounce_attempts, 0),
         ("window.bounce_up_steps", config.window.bounce_up_steps, 1),
@@ -127,6 +128,10 @@ def validate_app_config(config: AppConfig) -> None:
         raise ConfigValidationError("comment.max_concurrent_processes 不能大于 10")
     if config.offline_cache.max_concurrent_processes > 10:
         raise ConfigValidationError("offline_cache.max_concurrent_processes 不能大于 10")
+    if config.window.date_seek_max_steps < config.window.scroll_wheel_steps:
+        raise ConfigValidationError(
+            "window.date_seek_max_steps 不能小于 scroll_wheel_steps"
+        )
 
     if not config.mitm_capture.close_as_capture_deadline:
         raise ConfigValidationError("mitm_capture.close_as_capture_deadline 当前必须为 true")

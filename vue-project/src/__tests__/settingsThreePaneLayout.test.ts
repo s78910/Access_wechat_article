@@ -494,7 +494,8 @@ test('流程测试按钮使用流程名称作为标题，并用说明表达执�
 
   assert.match(flowDiagnosticsBlock, /label: '窗口点击流程'/)
   assert.match(flowDiagnosticsBlock, /buttonLabel: '窗口测试'/)
-  assert.match(flowDiagnosticsBlock, /description: '最多连续测试 20 条文章/)
+  assert.match(flowDiagnosticsBlock, /description: '首次立即激活公众号主页，按 UIA 日期组和文章卡片/)
+  assert.match(flowDiagnosticsBlock, /showWindowClickFlowOptions: true/)
   assert.match(flowDiagnosticsBlock, /handleWindowClickFlowDiagnosticAction/)
   assert.doesNotMatch(flowDiagnosticsBlock, /handleWindowDiagnosticAction\('first-article-test'\)/)
   assert.doesNotMatch(flowDiagnosticsBlock, /handlePendingDiagnosticAction\('单篇文章流程'\)/)
@@ -559,6 +560,25 @@ test('窗口操作诊断按钮接入真实窗口诊断接口并使用最新命�
   assert.doesNotMatch(windowDiagnosticsBlock, /handleWindowDiagnosticAction\('close-all-tabs'\)/)
   assert.doesNotMatch(windowDiagnosticsBlock, /handlePendingDiagnosticAction\('微信主页窗口激活'\)/)
   assert.doesNotMatch(windowDiagnosticsBlock, /handlePendingDiagnosticAction\('点击可见区第一篇文章'\)/)
+})
+
+test('滚动页面诊断提供独立步长输入并随请求发送', () => {
+  const windowDiagnosticsBlock = extractSettingsCaseBlock('window-diagnostics')
+  const runtimeConfigApplyBlock = settingsPageSource.match(
+    /function applyRuntimeConfigValues\([\s\S]*?(?=\nfunction replaceRuntimeConfigValues)/,
+  )?.[0] ?? ''
+
+  assert.match(windowDiagnosticsBlock, /label: '滚动页面'[\s\S]*?showScrollStepInput: true/)
+  assert.match(settingsPageSource, /const windowDiagnosticScrollSteps = ref\(3\)/)
+  assert.match(settingsPageSource, /aria-label="滚动页面步长"/)
+  assert.match(settingsPageSource, /min="1"/)
+  assert.match(settingsPageSource, /max="200"/)
+  assert.match(settingsPageSource, /scrollSteps: normalizeWindowDiagnosticScrollSteps\(\)/)
+  assert.doesNotMatch(runtimeConfigApplyBlock, /windowDiagnosticScrollSteps/)
+  assert.match(
+    pythonApiSource,
+    /runWindowDiagnosticAction\([\s\S]*?options: WindowDiagnosticOptions = \{\}[\s\S]*?\{ action, \.\.\.options \}/,
+  )
 })
 
 test('配置详情说明下方展示 custom.yaml 变量路径', () => {
@@ -757,6 +777,7 @@ test('主页滚动操作使用 windows_command 键、开关和步数/次数/秒�
   for (const [configKey, unit] of [
     ['windows_command.home_scroll.max_scroll_attempts', '次'],
     ['windows_command.home_scroll.scroll_wheel_steps', '步'],
+    ['windows_command.home_scroll.date_seek_max_steps', '步'],
     ['windows_command.home_scroll.scroll_initial_delay_seconds', '秒'],
     ['windows_command.home_scroll.scroll_probe_interval_seconds', '秒'],
     ['windows_command.home_scroll.scroll_probe_max_interval_seconds', '秒'],
@@ -885,6 +906,17 @@ test('三段式配置中心覆盖 custom.yaml 的主要配置分组', () => {
   assert.match(settingsPageSource, /诊断工具/)
   assert.match(settingsPageSource, /diagnostic-action-grid/)
   assert.doesNotMatch(settingsPageSource, /key: 'runtime-environment'/)
+})
+
+test('设置类别将诊断工具显示在第一项', () => {
+  assert.match(
+    settingsPageSource,
+    /const settingsCategories: SettingsCategory\[\] = \[\s*\{\s*key: 'diagnostics'/,
+  )
+  assert.match(
+    settingsPageSource,
+    /const selectedSettingsCategoryKey = ref<SettingsCategoryKey>\(settingsCategories\[0\]!\.key\)/,
+  )
 })
 
 test('系统配置页目录浏览对接系统目录选择接口', () => {

@@ -40,8 +40,10 @@ import type {
   RuntimePathKey,
   TaskStatus,
   WindowDiagnosticAction,
+  WindowDiagnosticOptions,
   WindowDiagnosticResult,
   ArticleDetailDiagnosticResult,
+  WindowClickFlowDiagnosticOptions,
   StartupSelfCheckResult,
 } from '../bridge/pythonApi'
 
@@ -63,6 +65,9 @@ type DiagnosticResultCell = {
 
 type DiagnosticResultItem = DiagnosticResultCell & {
   cells?: DiagnosticResultCell[]
+  kind?: 'summary' | 'operation' | 'discarded' | 'article'
+  tone?: DiagnosticResultTone
+  sequence?: number
 }
 
 type CaCertificateDialogMode = 'check' | 'install' | 'delete'
@@ -116,6 +121,16 @@ const logLevelOptions = [
 ]
 
 const selectPopupConfig = { transfer: true, zIndex: 3000 }
+const windowClickFlowDatePopupConfig = {
+  transfer: true,
+  zIndex: 3000,
+  className: 'window-click-flow-date-picker-panel',
+}
+const windowClickFlowDateRangePopupConfig = {
+  transfer: true,
+  zIndex: 3000,
+  className: 'window-click-flow-date-range-picker-panel',
+}
 
 const settings = reactive({
   autoStartProxy: false,
@@ -263,6 +278,8 @@ type SettingsDetailAction = {
   icon: string
   tone?: 'primary' | 'success' | 'orange' | 'danger' | 'ghost' | 'blue' | 'purple'
   disabled?: () => boolean
+  showWindowClickFlowOptions?: boolean
+  showScrollStepInput?: boolean
   run: () => void | Promise<void>
 }
 
@@ -308,7 +325,8 @@ const settingsNumberValues = reactive<Record<string, number>>({
   'windows_command.home_window.screen_click_wait_seconds': 0.3,
   'windows_command.home_window.uia_control_click_wait_seconds': 0,
   'windows_command.home_scroll.max_scroll_attempts': 6,
-  'windows_command.home_scroll.scroll_wheel_steps': 5,
+  'windows_command.home_scroll.scroll_wheel_steps': 3,
+  'windows_command.home_scroll.date_seek_max_steps': 18,
   'windows_command.home_scroll.scroll_initial_delay_seconds': 0.05,
   'windows_command.home_scroll.scroll_probe_interval_seconds': 0.1,
   'windows_command.home_scroll.scroll_probe_max_interval_seconds': 0.4,
@@ -375,6 +393,18 @@ function getSettingsFieldLabel(field: SettingsDetailField) {
 
 const settingsCategories: SettingsCategory[] = [
   {
+    key: 'diagnostics',
+    label: '诊断工具',
+    icon: 'fa-solid fa-list-check',
+    summary: 'MITM 管理、窗口操作和基于主页窗口的流程测试入口',
+    description: '诊断工具不是保存型配置，而是程序测试和排障入口。当前前端先固定入口样式，后端接口后续逐项接入。',
+    items: [
+      { key: 'mitm-diagnostics', label: 'MITM 管理', summary: 'CA 证书检测、安装、清除、HTTPS 校验、系统代理和 MITM 代理切换', icon: 'fa-solid fa-certificate' },
+      { key: 'window-diagnostics', label: '窗口操作', summary: '微信主页激活、文章点击、滚动、回滚滚动和文章标签关闭', icon: 'fa-solid fa-window-restore' },
+      { key: 'flow-diagnostics', label: '流程测试', summary: '基于主页窗口测试窗口点击、详情、内容存储和评论采集', icon: 'fa-solid fa-code-branch' },
+    ],
+  },
+  {
     key: 'basic',
     label: '基础设置',
     icon: 'fa-solid fa-gear',
@@ -421,18 +451,6 @@ const settingsCategories: SettingsCategory[] = [
       { key: 'offline-cache', label: '离线缓存', summary: 'Playwright 打开文章后的滚动加载和离线资源下载超时', icon: 'fa-solid fa-file-shield' },
     ],
   },
-  {
-    key: 'diagnostics',
-    label: '诊断工具',
-    icon: 'fa-solid fa-list-check',
-    summary: 'MITM 管理、窗口操作和基于主页窗口的流程测试入口',
-    description: '诊断工具不是保存型配置，而是程序测试和排障入口。当前前端先固定入口样式，后端接口后续逐项接入。',
-    items: [
-      { key: 'mitm-diagnostics', label: 'MITM 管理', summary: 'CA 证书检测、安装、清除、HTTPS 校验、系统代理和 MITM 代理切换', icon: 'fa-solid fa-certificate' },
-      { key: 'window-diagnostics', label: '窗口操作', summary: '微信主页激活、文章点击、滚动、回滚滚动和文章标签关闭', icon: 'fa-solid fa-window-restore' },
-      { key: 'flow-diagnostics', label: '流程测试', summary: '基于主页窗口测试窗口点击、详情、内容存储和评论采集', icon: 'fa-solid fa-code-branch' },
-    ],
-  },
 ]
 
 const cacheCleaned = ref(false)
@@ -446,17 +464,34 @@ const diagnosticResultTitle = ref('')
 const diagnosticResultMessage = ref('')
 const diagnosticResultTone = ref<DiagnosticResultTone>('info')
 const diagnosticResultItems = ref<DiagnosticResultItem[]>([])
+const diagnosticResultListRef = ref<HTMLElement | null>(null)
+const shouldAutoFollowDiagnosticResult = ref(true)
 const isSyncingProxyState = ref(false)
 const isHydratingConfig = ref(false)
 const isApplyingDefaults = ref(false)
 const resetDefaultsDialogVisible = ref(false)
 const isTestingProxyConnection = ref(false)
 const isWindowDiagnosticRunning = ref(false)
+const windowDiagnosticScrollSteps = ref(3)
 const isWindowClickFlowDiagnosticRunning = ref(false)
 const isArticleDetailDiagnosticRunning = ref(false)
 const isInitialContentStorageDiagnosticRunning = ref(false)
 const isArticleDetailCommentsDiagnosticRunning = ref(false)
 const activeWindowClickFlowJobId = ref('')
+const windowClickFlowMaxRecords = ref(20)
+const windowClickFlowDateFilterMode = ref<WindowClickFlowDiagnosticOptions['dateFilterMode']>('all')
+const windowClickFlowStartDate = ref('')
+const windowClickFlowEndDate = ref('')
+const windowClickFlowDateFilterOptions = [
+  { label: '不限日期', value: 'all' },
+  { label: '日期范围', value: 'range' },
+  { label: '截止日期', value: 'before' },
+  { label: '起始日期', value: 'after' },
+]
+const windowClickFlowUsesUnlimitedRecords = computed(() => (
+  windowClickFlowDateFilterMode.value === 'range'
+  || windowClickFlowDateFilterMode.value === 'before'
+))
 const isRunningStartupSelfCheck = ref(false)
 const isSavingConfig = ref(false)
 const runtimeStatus = ref<TaskStatus | null>(null)
@@ -479,7 +514,7 @@ const isRuntimeCacheBusy = computed(() => (
   || isInitialContentStorageDiagnosticRunning.value
   || isArticleDetailCommentsDiagnosticRunning.value
 ))
-const selectedSettingsCategoryKey = ref<SettingsCategoryKey>('basic')
+const selectedSettingsCategoryKey = ref<SettingsCategoryKey>(settingsCategories[0]!.key)
 const selectedSettingsItemKey = ref<SettingsItemKey | null>(null)
 const selectedSettingsCategory = computed<SettingsCategory>(() => (
   settingsCategories.find((category) => category.key === selectedSettingsCategoryKey.value) ?? settingsCategories[0]!
@@ -673,7 +708,8 @@ const selectedSettingsDetail = computed<SettingsDetailContent | null>(() => {
         note: '主页滚动操作用于查找下一篇候选文章、判断页面变化、等待懒加载，并在必要时执行回弹滚动。',
         fields: [
           { label: '最多向下滚动轮次', configKey: 'windows_command.home_scroll.max_scroll_attempts', value: '6', description: '找下一篇文章时最多向下滚动的轮次；连续找不到新候选文章就停止。', inputType: 'number-stepper', unit: '次', min: 1, max: 100, step: 1 },
-          { label: '普通向下滚动步长', configKey: 'windows_command.home_scroll.scroll_wheel_steps', value: '5', description: '普通向下滚动时发送的滚轮消息步数，不是像素或文章数量。', inputType: 'number-stepper', unit: '步', min: 1, max: 50, step: 1 },
+          { label: '普通向下滚动步长', configKey: 'windows_command.home_scroll.scroll_wheel_steps', value: '3', description: '普通向下滚动时发送的滚轮消息步数；保留相邻视口重叠，减少越过文章卡片。', inputType: 'number-stepper', unit: '步', min: 1, max: 50, step: 1 },
+          { label: '日期定位最大步长', configKey: 'windows_command.home_scroll.date_seek_max_steps', value: '18', description: '仅用于起始日期和日期范围定位；距离较远时最多滚动 18 步，正常文章收录仍使用普通步长。', inputType: 'number-stepper', unit: '步', min: 1, max: 50, step: 1 },
           { label: '滚动后读取等待', configKey: 'windows_command.home_scroll.scroll_initial_delay_seconds', value: '0.05', description: '每次滚动后先等待，再开始读取主页可见文章。', inputType: 'number-stepper', unit: '秒', min: 0, max: 5, step: 0.05 },
           { label: '变化检测初始间隔', configKey: 'windows_command.home_scroll.scroll_probe_interval_seconds', value: '0.1', description: '滚动后检查页面变化的初始轮询间隔。', inputType: 'number-stepper', unit: '秒', min: 0.05, max: 5, step: 0.05 },
           { label: '变化检测最大间隔', configKey: 'windows_command.home_scroll.scroll_probe_max_interval_seconds', value: '0.4', description: '滚动后检查页面变化允许增长到的最大轮询间隔。', inputType: 'number-stepper', unit: '秒', min: 0.05, max: 10, step: 0.05 },
@@ -738,7 +774,7 @@ const selectedSettingsDetail = computed<SettingsDetailContent | null>(() => {
           { label: '读取主页', description: '查找已打开的微信主页窗口，只读取并展示公众号名称。', icon: 'fa-regular fa-address-card', tone: 'blue', disabled: () => isWindowDiagnosticRunning.value || isWindowClickFlowDiagnosticRunning.value, run: () => handleWindowDiagnosticAction('read-home') },
           { label: '激活主页', description: '立刻聚焦到微信主页窗口；未找到主页时提示先打开公众号主页。', icon: 'fa-solid fa-window-restore', tone: 'primary', disabled: () => isWindowDiagnosticRunning.value || isWindowClickFlowDiagnosticRunning.value, run: () => handleWindowDiagnosticAction('activate-home') },
           { label: '首篇点击', description: '立刻聚焦主页窗口，找到首篇候选文章并点击打开；不等待标题确认，也不关闭文章标签。', icon: 'fa-solid fa-play', tone: 'success', disabled: () => isWindowDiagnosticRunning.value || isWindowClickFlowDiagnosticRunning.value, run: () => handleWindowDiagnosticAction('first-article-click') },
-          { label: '滚动页面', description: '立刻聚焦主页窗口，并执行正常主页滚动/候选查找流程。', icon: 'fa-solid fa-download', tone: 'purple', disabled: () => isWindowDiagnosticRunning.value || isWindowClickFlowDiagnosticRunning.value, run: () => handleWindowDiagnosticAction('scroll-page') },
+          { label: '滚动页面', description: '立刻聚焦主页窗口，并按左侧临时步长执行一次向下滚动；该值不会写入 YAML。', icon: 'fa-solid fa-download', tone: 'purple', showScrollStepInput: true, disabled: () => isWindowDiagnosticRunning.value || isWindowClickFlowDiagnosticRunning.value, run: () => handleWindowDiagnosticAction('scroll-page') },
           { label: '回弹滚动', description: '立刻聚焦主页窗口，并执行一次先上滚后下滚的回弹操作。', icon: 'fa-solid fa-rotate-right', tone: 'orange', disabled: () => isWindowDiagnosticRunning.value || isWindowClickFlowDiagnosticRunning.value, run: () => handleWindowDiagnosticAction('bounce-scroll') },
           { label: '关闭标签', description: '立刻打开记录弹窗，查找第一个文章标签并通过 Ctrl+W 关闭。', icon: 'fa-solid fa-xmark', tone: 'orange', disabled: () => isWindowDiagnosticRunning.value || isWindowClickFlowDiagnosticRunning.value, run: () => handleWindowDiagnosticAction('close-tab') },
         ],
@@ -747,7 +783,7 @@ const selectedSettingsDetail = computed<SettingsDetailContent | null>(() => {
       return {
         note: '流程测试均基于当前微信主页窗口。已接入窗口测试、详情获取、初始内容存储和详情评论。',
         actions: [
-          { label: '窗口点击流程', buttonLabel: '窗口测试', description: '最多连续测试 20 条文章的窗口识别、点击、详情页打开、标签关闭和主页恢复，不启动 MITM。', icon: 'fa-solid fa-window-restore', tone: 'blue', disabled: () => isWindowClickFlowDiagnosticRunning.value || isWindowDiagnosticRunning.value, run: handleWindowClickFlowDiagnosticAction },
+          { label: '窗口点击流程', buttonLabel: '窗口测试', description: '首次立即激活公众号主页，按 UIA 日期组和文章卡片读取当前可视内容；滚动后重新读取并用日期加标题衔接，不点击文章、不启动 MITM。', icon: 'fa-solid fa-window-restore', tone: 'blue', showWindowClickFlowOptions: true, disabled: () => isWindowClickFlowDiagnosticRunning.value || isWindowDiagnosticRunning.value, run: handleWindowClickFlowDiagnosticAction },
           { label: '单篇文章详情流程', buttonLabel: '详情获取', description: '单篇文章详情获取（包含 MITM 子进程）', icon: 'fa-regular fa-file-lines', tone: 'purple', disabled: () => isArticleDetailDiagnosticRunning.value || isInitialContentStorageDiagnosticRunning.value || isArticleDetailCommentsDiagnosticRunning.value || isWindowClickFlowDiagnosticRunning.value, run: handleArticleDetailDiagnosticAction },
           { label: '初始内容存储测试', buttonLabel: '初始内容存储', description: '复用单篇文章详情流程，解析 HTML 并存储初始文章内容', icon: 'fa-solid fa-box-archive', tone: 'primary', disabled: () => isInitialContentStorageDiagnosticRunning.value || isArticleDetailDiagnosticRunning.value || isArticleDetailCommentsDiagnosticRunning.value || isWindowClickFlowDiagnosticRunning.value, run: handleInitialContentStorageDiagnosticAction },
           { label: '单篇文章全内容', buttonLabel: '详情评论', description: '复用初始内容存储，随后启动独立评论子进程采集评论', icon: 'fa-regular fa-clipboard', tone: 'primary', disabled: () => isArticleDetailCommentsDiagnosticRunning.value || isArticleDetailDiagnosticRunning.value || isInitialContentStorageDiagnosticRunning.value || isWindowClickFlowDiagnosticRunning.value, run: handleArticleDetailCommentsDiagnosticAction },
@@ -919,6 +955,7 @@ function openDiagnosticResultDialog(options: {
   status?: string
   action?: string
 }) {
+  const isNewDialog = !diagnosticResultDialogVisible.value
   const items = options.items ?? []
   diagnosticResultTitle.value = options.title
   diagnosticResultMessage.value = resolveDiagnosticProgressMessage({
@@ -930,7 +967,34 @@ function openDiagnosticResultDialog(options: {
   })
   diagnosticResultTone.value = options.tone ?? 'info'
   diagnosticResultItems.value = items
+  if (isNewDialog) {
+    shouldAutoFollowDiagnosticResult.value = true
+  }
   diagnosticResultDialogVisible.value = true
+  scrollDiagnosticResultListToEnd()
+}
+
+function handleDiagnosticResultListScroll() {
+  const list = diagnosticResultListRef.value
+  if (!list) {
+    return
+  }
+  const { scrollHeight, scrollTop, clientHeight } = list
+  shouldAutoFollowDiagnosticResult.value = (
+    scrollHeight - scrollTop - clientHeight <= 24
+  )
+}
+
+function scrollDiagnosticResultListToEnd() {
+  if (!shouldAutoFollowDiagnosticResult.value) {
+    return
+  }
+  void nextTick(() => {
+    const list = diagnosticResultListRef.value
+    if (list && shouldAutoFollowDiagnosticResult.value) {
+      list.scrollTop = list.scrollHeight
+    }
+  })
 }
 
 const caCertificateDialogTitle = computed(() => {
@@ -1098,6 +1162,8 @@ function getDiagnosticResultCells(item: DiagnosticResultItem): DiagnosticResultC
 function getDiagnosticResultItemClass(item: DiagnosticResultItem) {
   return [
     'diagnostic-result-item',
+    item.kind ? `diagnostic-result-item--${item.kind}` : '',
+    item.tone ? `diagnostic-result-item--${item.tone}` : '',
     { 'diagnostic-result-item--split': getDiagnosticResultMetaCells(item).length > 0 },
   ]
 }
@@ -1237,24 +1303,25 @@ async function handleWindowClickFlowDiagnosticAction() {
     return
   }
 
+  const options = buildWindowClickFlowDiagnosticOptions()
+  if (!options) {
+    return
+  }
+
   isWindowClickFlowDiagnosticRunning.value = true
   activeWindowClickFlowJobId.value = ''
   openDiagnosticResultDialog({
-    title: '窗口点击流程结果',
-    message: '正在启动窗口点击流程测试...',
+    title: '主页内容读取结果',
+    message: '正在启动主页内容读取测试...',
     tone: 'info',
-    items: [
-      { label: '流程', value: '窗口点击流程' },
-      { label: '测试上限', value: '20 条' },
-      { label: '状态', value: '执行中' },
-    ],
+    items: [],
   })
 
   let pollTimer: number | undefined
   try {
-    const started = await startWindowClickFlowDiagnostic()
+    const started = await startWindowClickFlowDiagnostic(options)
     activeWindowClickFlowJobId.value = started.jobId
-    applyArticleDetailDiagnosticResult(started)
+    applyWindowClickFlowDiagnosticResult(started)
 
     let latest: ArticleDetailDiagnosticResult = started
     while (isRealtimeDiagnosticRunning(latest.status)) {
@@ -1262,23 +1329,20 @@ async function handleWindowClickFlowDiagnosticAction() {
         pollTimer = window.setTimeout(resolve, 500)
       })
       latest = await getWindowClickFlowDiagnostic(started.jobId)
-      applyArticleDetailDiagnosticResult(latest)
+      applyWindowClickFlowDiagnosticResult(latest)
     }
 
     showConfigNotice(
-      latest.message ?? '窗口点击流程测试已结束。',
+      latest.message ?? '主页内容读取测试已结束。',
       latest.ok ? 'success' : 'warning',
     )
   } catch (error) {
-    const message = error instanceof Error ? error.message : '窗口点击流程测试失败。'
+    const message = error instanceof Error ? error.message : '主页内容读取测试失败。'
     openDiagnosticResultDialog({
-      title: '窗口点击流程结果',
+      title: '主页内容读取结果',
       message,
       tone: 'error',
-      items: [
-        { label: '流程', value: '窗口点击流程' },
-        { label: '失败原因', value: message },
-      ],
+      items: [],
     })
     showConfigNotice(message, 'error')
   } finally {
@@ -1290,6 +1354,49 @@ async function handleWindowClickFlowDiagnosticAction() {
   }
 }
 
+function buildWindowClickFlowDiagnosticOptions(): WindowClickFlowDiagnosticOptions | null {
+  const maxRecords = windowClickFlowUsesUnlimitedRecords.value
+    ? 0
+    : Math.max(1, Math.min(20, Math.trunc(Number(windowClickFlowMaxRecords.value) || 1)))
+  windowClickFlowMaxRecords.value = maxRecords
+  const mode = windowClickFlowDateFilterMode.value
+  const startDate = windowClickFlowStartDate.value
+  const endDate = windowClickFlowEndDate.value
+  if ((mode === 'range' || mode === 'after') && !startDate) {
+    showConfigNotice('请填写起始日期。', 'warning')
+    return null
+  }
+  if ((mode === 'range' || mode === 'before') && !endDate) {
+    showConfigNotice('请填写截止日期。', 'warning')
+    return null
+  }
+  if (mode === 'range' && startDate > endDate) {
+    showConfigNotice('起始日期不能晚于截止日期。', 'warning')
+    return null
+  }
+  return {
+    maxRecords,
+    dateFilterMode: mode,
+    startDate: mode === 'range' || mode === 'after' ? startDate : undefined,
+    endDate: mode === 'range' || mode === 'before' ? endDate : undefined,
+  }
+}
+
+function adjustWindowClickFlowMaxRecords(direction: -1 | 1) {
+  if (isWindowClickFlowDiagnosticRunning.value || windowClickFlowUsesUnlimitedRecords.value) {
+    return
+  }
+  windowClickFlowMaxRecords.value = Math.max(
+    1,
+    Math.min(20, windowClickFlowMaxRecords.value + direction),
+  )
+}
+
+watch(windowClickFlowDateFilterMode, () => {
+  // 范围和截止模式由日期边界结束；其他模式恢复默认的 20 篇上限。
+  windowClickFlowMaxRecords.value = windowClickFlowUsesUnlimitedRecords.value ? 0 : 20
+})
+
 async function stopActiveWindowClickFlowDiagnostic() {
   const jobId = activeWindowClickFlowJobId.value
   if (!jobId) {
@@ -1297,10 +1404,10 @@ async function stopActiveWindowClickFlowDiagnostic() {
   }
   try {
     const result = await stopWindowClickFlowDiagnostic(jobId)
-    applyArticleDetailDiagnosticResult(result)
-    showConfigNotice(result.message ?? '已请求停止窗口点击流程。', 'warning')
+    applyWindowClickFlowDiagnosticResult(result)
+    showConfigNotice(result.message ?? '已请求停止主页内容读取。', 'warning')
   } catch (error) {
-    const message = error instanceof Error ? error.message : '停止窗口点击流程失败。'
+    const message = error instanceof Error ? error.message : '停止主页内容读取失败。'
     diagnosticResultMessage.value = message
     diagnosticResultTone.value = 'error'
     showConfigNotice(message, 'error')
@@ -1469,10 +1576,36 @@ function applyArticleDetailDiagnosticResult(result: ArticleDetailDiagnosticResul
   })
 }
 
+function applyWindowClickFlowDiagnosticResult(result: ArticleDetailDiagnosticResult) {
+  // 窗口测试的操作和丢弃原因只写入诊断文件，弹窗保持为文章结果列表。
+  const articleItems = (result.items ?? []).filter((item) => item.kind === 'article')
+  openDiagnosticResultDialog({
+    title: result.title ?? '主页内容读取结果',
+    message: result.message ?? '主页内容读取正在执行...',
+    tone: result.tone ?? (result.ok ? 'success' : 'info'),
+    items: articleItems,
+    status: result.status,
+    action: result.action,
+  })
+}
+
 function delay(milliseconds: number) {
   return new Promise<void>((resolve) => {
     window.setTimeout(resolve, milliseconds)
   })
+}
+
+function normalizeWindowDiagnosticScrollSteps(value = windowDiagnosticScrollSteps.value) {
+  const parsedValue = Number(value)
+  const safeValue = Number.isFinite(parsedValue) ? Math.trunc(parsedValue) : 1
+  const normalizedValue = Math.min(200, Math.max(1, safeValue))
+  windowDiagnosticScrollSteps.value = normalizedValue
+  return normalizedValue
+}
+
+function handleWindowDiagnosticScrollStepsInput(event: Event) {
+  const input = event.target as HTMLInputElement
+  input.value = String(normalizeWindowDiagnosticScrollSteps(input.valueAsNumber))
 }
 
 async function handleWindowDiagnosticAction(action: WindowDiagnosticAction) {
@@ -1492,7 +1625,10 @@ async function handleWindowDiagnosticAction(action: WindowDiagnosticAction) {
   })
 
   try {
-    const result = await runWindowDiagnosticAction(action)
+    const options: WindowDiagnosticOptions = action === 'scroll-page'
+      ? { scrollSteps: normalizeWindowDiagnosticScrollSteps() }
+      : {}
+    const result = await runWindowDiagnosticAction(action, options)
     applyWindowDiagnosticResult(result)
     showConfigNotice(result.message ?? '窗口诊断已完成。', result.ok ? 'success' : 'warning')
   } catch (error) {
@@ -2561,14 +2697,160 @@ onMounted(() => {
                 <article
                   v-for="action in selectedSettingsDetail.actions"
                   :key="action.label"
-                  class="settings-config-row compact-control"
+                  :class="[
+                    'settings-config-row',
+                    'compact-control',
+                    { 'window-click-flow-row': action.showWindowClickFlowOptions },
+                  ]"
                 >
-                  <div class="settings-config-copy">
+                  <div
+                    v-if="action.showWindowClickFlowOptions"
+                    class="window-click-flow-layout"
+                  >
+                    <div class="window-click-flow-title">
+                      <strong>{{ action.label }}</strong>
+                    </div>
+                    <div class="window-click-flow-description-line">
+                      <div class="window-click-flow-description">
+                        <small>{{ action.description }}</small>
+                        <span v-if="action.detail" class="diagnostic-action-detail">{{ action.detail }}</span>
+                      </div>
+                      <VxeButton
+                        :class="['settings-vxe-button', 'settings-row-button', 'diagnostic-action-button', action.tone ?? 'ghost']"
+                        type="button"
+                        :disabled="action.disabled?.() ?? false"
+                        @click="action.run()"
+                      >
+                        <AppIcon class="diagnostic-action-icon" :icon="action.icon" />
+                        {{ action.buttonLabel ?? action.label }}
+                      </VxeButton>
+                    </div>
+                    <div class="window-click-flow-fields">
+                      <label class="window-click-flow-field window-click-flow-field--mode">
+                        <span>日期筛选</span>
+                        <VxeSelect
+                          v-model="windowClickFlowDateFilterMode"
+                          class="settings-vxe-control window-click-flow-select"
+                          :options="windowClickFlowDateFilterOptions"
+                          :popup-config="selectPopupConfig"
+                          :disabled="isWindowClickFlowDiagnosticRunning"
+                        />
+                      </label>
+                      <label class="window-click-flow-field window-click-flow-field--count">
+                        <span>任务数量</span>
+                        <div class="settings-number-stepper window-click-flow-stepper">
+                          <button
+                            type="button"
+                            aria-label="减少窗口测试任务数量"
+                            :disabled="isWindowClickFlowDiagnosticRunning || windowClickFlowUsesUnlimitedRecords"
+                            @click="adjustWindowClickFlowMaxRecords(-1)"
+                          >−</button>
+                          <input
+                            v-model.number="windowClickFlowMaxRecords"
+                            type="number"
+                            :min="windowClickFlowUsesUnlimitedRecords ? 0 : 1"
+                            max="20"
+                            :disabled="isWindowClickFlowDiagnosticRunning || windowClickFlowUsesUnlimitedRecords"
+                            aria-label="窗口测试任务数量"
+                          >
+                          <button
+                            type="button"
+                            aria-label="增加窗口测试任务数量"
+                            :disabled="isWindowClickFlowDiagnosticRunning || windowClickFlowUsesUnlimitedRecords"
+                            @click="adjustWindowClickFlowMaxRecords(1)"
+                          >+</button>
+                        </div>
+                      </label>
+                      <label
+                        v-if="windowClickFlowDateFilterMode === 'range' || windowClickFlowDateFilterMode === 'after'"
+                        :class="[
+                          'window-click-flow-field',
+                          'window-click-flow-field--date',
+                          { 'window-click-flow-field--range': windowClickFlowDateFilterMode === 'range' },
+                        ]"
+                      >
+                        <span v-if="windowClickFlowDateFilterMode === 'range'">日期范围</span>
+                        <span v-else>起始日期</span>
+                        <VxeDateRangePicker
+                          v-if="windowClickFlowDateFilterMode === 'range'"
+                          v-model:start-value="windowClickFlowStartDate"
+                          v-model:end-value="windowClickFlowEndDate"
+                          class="settings-vxe-control window-click-flow-date-range-picker"
+                          type="date"
+                          clearable
+                          auto-close
+                          placeholder="选择起始 ~ 截止日期"
+                          separator=" ~ "
+                          value-format="yyyy-MM-dd"
+                          label-format="yyyy-MM-dd"
+                          :popup-config="windowClickFlowDateRangePopupConfig"
+                          :disabled="isWindowClickFlowDiagnosticRunning"
+                          aria-label="窗口测试起始日期和截止日期"
+                        />
+                        <VxeDatePicker
+                          v-else
+                          v-model="windowClickFlowStartDate"
+                          class="settings-vxe-control window-click-flow-date-picker"
+                          type="date"
+                          clearable
+                          auto-close
+                          placeholder="选择起始日期"
+                          value-format="yyyy-MM-dd"
+                          label-format="yyyy-MM-dd"
+                          :popup-config="windowClickFlowDatePopupConfig"
+                          :disabled="isWindowClickFlowDiagnosticRunning"
+                          aria-label="窗口测试起始日期"
+                        />
+                      </label>
+                      <label
+                        v-if="windowClickFlowDateFilterMode === 'before'"
+                        class="window-click-flow-field window-click-flow-field--date"
+                      >
+                        <span>截止日期</span>
+                        <VxeDatePicker
+                          v-model="windowClickFlowEndDate"
+                          class="settings-vxe-control window-click-flow-date-picker"
+                          type="date"
+                          clearable
+                          auto-close
+                          placeholder="选择截止日期"
+                          value-format="yyyy-MM-dd"
+                          label-format="yyyy-MM-dd"
+                          :popup-config="windowClickFlowDatePopupConfig"
+                          :disabled="isWindowClickFlowDiagnosticRunning"
+                          aria-label="窗口测试截止日期"
+                        />
+                      </label>
+                    </div>
+                  </div>
+                  <div v-else class="settings-config-copy">
                     <strong>{{ action.label }}</strong>
                     <small>{{ action.description }}</small>
                     <span v-if="action.detail" class="diagnostic-action-detail">{{ action.detail }}</span>
                   </div>
-                  <div class="settings-config-control action-control compact-control">
+                  <div
+                    v-if="!action.showWindowClickFlowOptions"
+                    :class="[
+                      'settings-config-control',
+                      'action-control',
+                      'compact-control',
+                      { 'scroll-step-action-control': action.showScrollStepInput },
+                    ]"
+                  >
+                    <label v-if="action.showScrollStepInput" class="window-diagnostic-scroll-step">
+                      <span>滚动步长</span>
+                      <input
+                        type="number"
+                        :value="windowDiagnosticScrollSteps"
+                        min="1"
+                        max="200"
+                        step="1"
+                        :disabled="action.disabled?.() ?? false"
+                        aria-label="滚动页面步长"
+                        @input="handleWindowDiagnosticScrollStepsInput"
+                        @blur="handleWindowDiagnosticScrollStepsInput"
+                      >
+                    </label>
                     <VxeButton
                       :class="['settings-vxe-button', 'settings-row-button', 'diagnostic-action-button', action.tone ?? 'ghost']"
                       type="button"
@@ -3046,7 +3328,12 @@ onMounted(() => {
               </div>
             </header>
 
-            <dl v-if="diagnosticResultItems.length" class="diagnostic-result-list">
+            <dl
+              v-if="diagnosticResultItems.length"
+              ref="diagnosticResultListRef"
+              class="diagnostic-result-list"
+              @scroll="handleDiagnosticResultListScroll"
+            >
               <div
                 v-for="(item, itemIndex) in diagnosticResultItems"
                 :key="item.label + '-' + itemIndex"
@@ -3807,6 +4094,166 @@ onMounted(() => {
   min-width: 0;
 }
 
+.settings-config-control.compact-control.scroll-step-action-control {
+  grid-template-columns: max-content max-content;
+  gap: 12px;
+}
+
+.window-diagnostic-scroll-step {
+  display: grid;
+  grid-template-columns: auto 76px;
+  align-items: center;
+  gap: 8px;
+  color: var(--settings-muted);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.window-diagnostic-scroll-step input {
+  width: 76px;
+  height: 34px;
+  padding: 0 9px;
+  color: var(--settings-ink);
+  border: 1px solid rgba(104, 141, 181, 0.32);
+  border-radius: 6px;
+  outline: none;
+  background: var(--settings-surface, #fff);
+  font: inherit;
+  text-align: center;
+}
+
+.window-diagnostic-scroll-step input:focus {
+  border-color: var(--settings-brand);
+  box-shadow: 0 0 0 2px rgba(47, 110, 189, 0.12);
+}
+
+.window-diagnostic-scroll-step input:disabled {
+  cursor: not-allowed;
+  opacity: 0.56;
+}
+
+.settings-config-row.window-click-flow-row {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.window-click-flow-layout {
+  display: grid;
+  grid-template-rows: auto auto auto;
+  gap: 8px;
+  min-width: 0;
+}
+
+.window-click-flow-title {
+  min-width: 0;
+}
+
+.window-click-flow-title strong {
+  color: var(--settings-ink);
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.25;
+}
+
+.window-click-flow-description-line {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+  grid-row: 3;
+}
+
+.window-click-flow-description {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.window-click-flow-description small {
+  color: var(--settings-muted);
+  font-size: 12.5px;
+  font-weight: 500;
+  line-height: 1.45;
+}
+
+.window-click-flow-fields {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: end;
+  gap: 6px;
+  min-width: 0;
+  overflow-x: auto;
+  grid-row: 2;
+}
+
+.window-click-flow-field {
+  display: grid;
+  align-content: end;
+  gap: 4px;
+  min-width: 0;
+}
+
+.window-click-flow-field > span {
+  color: var(--settings-muted);
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.window-click-flow-stepper {
+  min-width: 116px;
+  width: 116px;
+  height: 38px;
+  flex: 0 0 116px;
+}
+
+.window-click-flow-select {
+  width: 100%;
+  min-width: 0;
+  flex: 0 0 116px;
+}
+
+.window-click-flow-field--mode {
+  width: 116px;
+  flex: 0 0 116px;
+}
+
+.window-click-flow-field--date {
+  width: 142px;
+  flex: 0 0 142px;
+}
+
+.window-click-flow-field--range {
+  width: 248px;
+  flex: 0 0 248px;
+}
+
+.window-click-flow-date-picker {
+  width: 100%;
+  height: 38px;
+}
+
+.window-click-flow-date-range-picker {
+  width: 100%;
+  height: 38px;
+}
+
+.window-click-flow-description-line > .settings-vxe-button {
+  flex: 0 0 168px;
+}
+
+@media (max-width: 1100px) {
+  .window-click-flow-fields {
+    justify-content: flex-start;
+    overflow-x: auto;
+  }
+
+  .window-click-flow-description-line {
+    align-items: flex-start;
+  }
+}
+
 .diagnostic-action-grid :deep(.diagnostic-action-button) {
   --diagnostic-action-color: #2F6F66;
   --diagnostic-action-border: rgba(74, 174, 159, 0.3);
@@ -4158,7 +4605,9 @@ onMounted(() => {
 
 .settings-page :deep(.settings-vxe-control.vxe-input),
 .settings-page :deep(.settings-vxe-control.vxe-input--readonly),
-.settings-page :deep(.settings-vxe-control.vxe-select) {
+.settings-page :deep(.settings-vxe-control.vxe-select),
+.settings-page :deep(.settings-vxe-control.vxe-date-picker),
+.settings-page :deep(.settings-vxe-control.vxe-date-range-picker) {
   width: 100%;
   height: 38px !important;
   color: var(--settings-ink);
@@ -4181,16 +4630,43 @@ onMounted(() => {
 }
 
 .settings-page :deep(.settings-vxe-control .vxe-input--wrapper),
-.settings-page :deep(.settings-vxe-control.vxe-select) {
+.settings-page :deep(.settings-vxe-control.vxe-select),
+.settings-page :deep(.settings-vxe-control.vxe-date-picker),
+.settings-page :deep(.settings-vxe-control.vxe-date-range-picker) {
   border-color: var(--settings-line);
   border-radius: 8px;
   background: #ffffff;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.6);
 }
 
-.settings-page :deep(.settings-vxe-control .vxe-input--inner) {
+.settings-page :deep(.settings-vxe-control .vxe-input--inner),
+.settings-page :deep(.settings-vxe-control .vxe-date-picker--inner),
+.settings-page :deep(.settings-vxe-control .vxe-date-range-picker--inner) {
   color: var(--settings-ink);
   font-weight: 600;
+}
+
+.settings-page :deep(.window-click-flow-date-picker .vxe-date-picker--prefix),
+.settings-page :deep(.window-click-flow-date-picker .vxe-date-picker--suffix),
+.settings-page :deep(.window-click-flow-date-picker .vxe-date-picker--inner) {
+  background: transparent;
+}
+
+.settings-page :deep(.window-click-flow-date-range-picker .vxe-date-range-picker--prefix),
+.settings-page :deep(.window-click-flow-date-range-picker .vxe-date-range-picker--suffix),
+.settings-page :deep(.window-click-flow-date-range-picker .vxe-date-range-picker--inner) {
+  background: transparent;
+}
+
+.settings-page :deep(.window-click-flow-date-range-picker .vxe-date-range-picker--inner) {
+  text-align: center;
+}
+
+:global(.window-click-flow-date-picker-panel.vxe-date-picker--panel),
+:global(.window-click-flow-date-range-picker-panel.vxe-date-range-picker--panel) {
+  color: var(--ink);
+  font-family: 'Microsoft YaHei', 'PingFang SC', 'Segoe UI', system-ui, sans-serif;
+  font-size: 14px;
 }
 
 .settings-config-control.compact-control :deep(.settings-vxe-control.vxe-input),
@@ -5352,6 +5828,37 @@ onMounted(() => {
   background: #F1F6FC;
 }
 
+.diagnostic-result-item--operation {
+  gap: 6px;
+  padding: 9px 11px;
+  border-color: #C6D8EA;
+  background: #EDF4FB;
+}
+
+.diagnostic-result-item--discarded,
+.diagnostic-result-item--warning.diagnostic-result-item--discarded {
+  border-color: #E6C47D;
+  background: #FFF7E8;
+}
+
+.diagnostic-result-item--discarded dt {
+  color: #78551D;
+}
+
+.diagnostic-result-item--discarded dd {
+  color: #5E431A;
+}
+
+.diagnostic-result-item--article {
+  border-color: #B8D5C8;
+  background: #F0F8F4;
+}
+
+.diagnostic-result-item--error {
+  border-color: #E5B0B6;
+  background: #FDEFF1;
+}
+
 .diagnostic-result-item.diagnostic-result-item--split {
   grid-template-columns: 116px minmax(0, 1fr) 92px minmax(0, 0.75fr);
   gap: 8px 12px;
@@ -5579,6 +6086,8 @@ onMounted(() => {
 :global(.collector-app.dark) .settings-page :deep(.settings-vxe-control.vxe-input--readonly),
 :global(.collector-app.dark) .settings-page :deep(.settings-vxe-control .vxe-input--wrapper),
 :global(.collector-app.dark) .settings-page :deep(.settings-vxe-control.vxe-select),
+:global(.collector-app.dark) .settings-page :deep(.settings-vxe-control.vxe-date-picker),
+:global(.collector-app.dark) .settings-page :deep(.settings-vxe-control.vxe-date-range-picker),
 :global(.collector-app.dark) .settings-number-stepper {
   color: #cbd8ea;
   border-color: rgba(128, 153, 188, 0.2);
@@ -5587,6 +6096,12 @@ onMounted(() => {
 }
 
 :global(.collector-app.dark) .settings-page :deep(.settings-vxe-control .vxe-input--inner),
+:global(.collector-app.dark) .settings-page :deep(.settings-vxe-control .vxe-date-picker--inner),
+:global(.collector-app.dark) .settings-page :deep(.settings-vxe-control .vxe-date-picker--prefix),
+:global(.collector-app.dark) .settings-page :deep(.settings-vxe-control .vxe-date-picker--suffix),
+:global(.collector-app.dark) .settings-page :deep(.settings-vxe-control .vxe-date-range-picker--inner),
+:global(.collector-app.dark) .settings-page :deep(.settings-vxe-control .vxe-date-range-picker--prefix),
+:global(.collector-app.dark) .settings-page :deep(.settings-vxe-control .vxe-date-range-picker--suffix),
 :global(.collector-app.dark) .settings-number-stepper input,
 :global(.collector-app.dark) .settings-inline-input[readonly] {
   color: #dce7f5;
@@ -5897,6 +6412,32 @@ onMounted(() => {
 
 :global(.collector-app.dark) .diagnostic-result-cells {
   border-top-color: rgba(128, 153, 188, 0.14);
+}
+
+:global(.collector-app.dark) .diagnostic-result-item--operation {
+  border-color: rgba(105, 157, 219, 0.28);
+  background: #1A304B;
+}
+
+:global(.collector-app.dark) .diagnostic-result-item--discarded,
+:global(.collector-app.dark) .diagnostic-result-item--warning.diagnostic-result-item--discarded {
+  border-color: rgba(218, 172, 87, 0.36);
+  background: #3A3020;
+}
+
+:global(.collector-app.dark) .diagnostic-result-item--discarded dt,
+:global(.collector-app.dark) .diagnostic-result-item--discarded dd {
+  color: #F1CF88;
+}
+
+:global(.collector-app.dark) .diagnostic-result-item--article {
+  border-color: rgba(87, 174, 139, 0.32);
+  background: #1D352F;
+}
+
+:global(.collector-app.dark) .diagnostic-result-item--error {
+  border-color: rgba(207, 91, 102, 0.36);
+  background: #3B252D;
 }
 
 :global(.collector-app.dark) .mitm-cert-source-icon,

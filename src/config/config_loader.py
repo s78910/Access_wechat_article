@@ -147,6 +147,7 @@ def build_app_config(mapping: Mapping[str, Any], *, project_root: str | Path) ->
                 window, "visible_snapshot_max_age_seconds"
             ),
             scroll_wheel_steps=_as_int(window, "scroll_wheel_steps"),
+            date_seek_max_steps=_as_int(window, "date_seek_max_steps"),
             max_scroll_attempts=_as_int(window, "max_scroll_attempts"),
             scroll_initial_delay_seconds=_as_float(
                 window, "scroll_initial_delay_seconds"
@@ -313,6 +314,7 @@ def _latest_menu_mapping(mapping: Mapping[str, Any]) -> dict[str, Any]:
         (
             "max_scroll_attempts",
             "scroll_wheel_steps",
+            "date_seek_max_steps",
             "scroll_initial_delay_seconds",
             "scroll_probe_interval_seconds",
             "scroll_probe_max_interval_seconds",

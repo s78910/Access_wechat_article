@@ -74,7 +74,8 @@ windows_command:
   # 主页滚动操作：找下一篇文章、检测页面变化、懒加载等待和回弹滚动。
   home_scroll:
     max_scroll_attempts: 6  # 找下一篇文章时最多向下滚动 6 轮；原 window.max_scroll_attempts。
-    scroll_wheel_steps: 5  # 普通向下滚动步长；这是滚轮消息步数，不是像素或文章数量；原 window.scroll_wheel_steps。
+    scroll_wheel_steps: 3  # 普通向下滚动步长；降低单次跨度以保留相邻视口文章重叠，避免越过整张卡片。
+    date_seek_max_steps: 18  # 日期定位阶段的最大向下滚动步长；正常文章收录仍使用 scroll_wheel_steps。
     scroll_initial_delay_seconds: 0.05  # 每次滚动后先等待 0.05 秒，再开始读取页面；原 window.scroll_initial_delay_seconds。
     scroll_probe_interval_seconds: 0.1  # 滚动后检查页面变化的初始轮询间隔；原 window.scroll_probe_interval_seconds。
     scroll_probe_max_interval_seconds: 0.4  # 滚动后检查页面变化的最大轮询间隔；原 window.scroll_probe_max_interval_seconds。

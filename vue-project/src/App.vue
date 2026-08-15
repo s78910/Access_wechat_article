@@ -1,5 +1,8 @@
 ﻿<script setup lang="ts">
 import AppIcon from './components/AppIcon.vue'
+import { theme } from 'ant-design-vue'
+import type { ThemeConfig } from 'ant-design-vue/es/config-provider/context'
+import zhCN from 'ant-design-vue/es/locale/zh_CN'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { DynamicScroller, DynamicScrollerItem, type DynamicScrollerExposed } from 'vue-virtual-scroller'
 import 'vue-virtual-scroller/dist/vue-virtual-scroller.css'
@@ -68,6 +71,8 @@ type NavItem = {
 }
 type RuntimeLogLevel = 'INFO' | 'SUCCESS' | 'WARN' | 'ERROR'
 type LogFilterLevel = 'ALL' | RuntimeLogLevel
+type TaskDateFilterMode = 'all' | 'range' | 'before' | 'after'
+type TaskDateRangeValue = [string, string] | null
 type LogDisplayRow = {
   id: string
   time: string
@@ -80,6 +85,15 @@ type LogDisplayRow = {
 }
 
 const isDark = ref(false)
+const antThemeConfig = computed<ThemeConfig>(() => ({
+  algorithm: isDark.value ? theme.darkAlgorithm : theme.defaultAlgorithm,
+  token: {
+    colorPrimary: '#357fd9',
+    borderRadius: 8,
+    controlHeight: 32,
+    fontFamily: "'HarmonyOS Sans SC', 'Microsoft YaHei', sans-serif",
+  },
+}))
 const activePage = ref<PageKey>('home')
 const logScrollerRef = ref<DynamicScrollerExposed<LogDisplayRow> | null>(null)
 const shouldStickLogToBottom = ref(true)
@@ -90,6 +104,31 @@ const MAX_PYWEBVIEW_STATUS_RETRIES = 12
 const PYWEBVIEW_STATUS_RETRY_DELAY_MS = 400
 const LOG_POLL_LIMIT = 100
 const pageCount = ref(1)
+const taskDateFilterMode = ref<TaskDateFilterMode>('all')
+const taskStartDate = ref('')
+const taskEndDate = ref('')
+const taskDateRangeValue = computed<TaskDateRangeValue>({
+  get: () => {
+    if (!taskStartDate.value || !taskEndDate.value) {
+      return null
+    }
+    return [taskStartDate.value, taskEndDate.value] as [string, string]
+  },
+  set: (value: TaskDateRangeValue) => {
+    // Ant Design 范围选择器使用数组，页面内部继续保留独立的起止日期字符串。
+    taskStartDate.value = value?.[0] ?? ''
+    taskEndDate.value = value?.[1] ?? ''
+  },
+})
+const taskDateFilterOptions: { label: string; value: TaskDateFilterMode }[] = [
+  { label: '不限日期', value: 'all' },
+  { label: '日期范围', value: 'range' },
+  { label: '截止日期', value: 'before' },
+  { label: '起始日期', value: 'after' },
+]
+const taskDateFilterLabel = computed(() =>
+  taskDateFilterOptions.find((option) => option.value === taskDateFilterMode.value)?.label ?? '不限日期',
+)
 const pywebviewStatusLabel = ref('检测中')
 const environmentStatus = ref({ ...INITIAL_ENVIRONMENT_STATUS })
 const defaultTrafficStatus: TrafficStatus = {
@@ -197,6 +236,21 @@ const normalizedPageCount = computed(() => {
   const count = Number(pageCount.value)
   return Number.isFinite(count) ? Math.max(0, Math.floor(count)) : 1
 })
+
+const taskDateFieldLabel = computed(() => {
+  const labels: Record<TaskDateFilterMode, string> = {
+    all: '日期范围',
+    range: '日期范围',
+    before: '截止日期',
+    after: '起始日期',
+  }
+
+  return labels[taskDateFilterMode.value]
+})
+
+function selectTaskDateFilterMode(mode: TaskDateFilterMode) {
+  taskDateFilterMode.value = mode
+}
 
 const taskSettingsLocked = computed(() =>
   ['starting', 'running', 'stopping', 'cancelling'].includes(taskStatus.value.status),
@@ -654,6 +708,17 @@ function isStatusValueOverflowing(event: MouseEvent | FocusEvent) {
   }
 
   return target.scrollWidth > target.clientWidth
+}
+
+function showDescriptionTooltip(event: MouseEvent | FocusEvent, text: string) {
+  const value = String(text || '').trim()
+  if (!value) {
+    return
+  }
+
+  descriptionTooltip.value.visible = true
+  descriptionTooltip.value.text = value
+  updateDescriptionTooltipPosition(event)
 }
 
 function showStatusValueTooltip(event: MouseEvent | FocusEvent, text: string) {
@@ -1142,7 +1207,8 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <main :class="['collector-app', { dark: isDark }]">
+  <AConfigProvider :locale="zhCN" :theme="antThemeConfig">
+    <main :class="['collector-app', { dark: isDark }]">
     <section class="workspace">
       <AppTopbar
         :is-dark="isDark"
@@ -1194,48 +1260,145 @@ onBeforeUnmount(() => {
 
         <template v-if="activePage === 'home'">
         <section class="task-column" aria-label="采集任务设置">
-          <article class="task-card panel">
+          <article class="task-card task-card-volume panel">
             <span class="step-badge">01</span>
             <img class="task-art task-art-list" src="/assets/watercolor-task-list.png" alt="" />
-            <div class="task-body">
+            <div class="task-volume-body">
               <h2>指定记录总量</h2>
-              <div class="field-row">
-                <label for="page-count">设定任务(个)：</label>
-                <div class="number-stepper" :style="{ width: pageStepperWidth }">
-                  <button
-                    type="button"
-                    aria-label="减少任务数量，长按连续减少"
+              <div class="task-volume-row task-date-filter-row">
+                <span class="task-control-label">日期筛选</span>
+                <ADropdown
+                  :trigger="['click']"
+                  :disabled="taskSettingsLocked"
+                  placement="bottomLeft"
+                  overlay-class-name="task-date-filter-dropdown"
+                >
+                  <AButton
+                    class="task-date-filter-trigger"
                     :disabled="taskSettingsLocked"
-                    @click="handlePageStep(-1)"
-                    @pointerdown="startPageCountHold(-1)"
-                    @pointerup="stopPageCountHold"
-                    @pointerleave="cancelPageCountHold"
-                    @pointercancel="cancelPageCountHold"
+                    aria-label="日期筛选方式"
                   >
-                    −
-                  </button>
-                  <input
-                    id="page-count"
-                    v-model.number="pageCount"
-                    type="number"
-                    min="0"
-                    :disabled="taskSettingsLocked"
-                  />
+                    <span>{{ taskDateFilterLabel }}</span>
+                    <AppIcon class="task-date-filter-chevron" icon="fa-solid fa-chevron-down" />
+                  </AButton>
+                  <template #overlay>
+                    <AMenu :selected-keys="[taskDateFilterMode]">
+                      <AMenuItem
+                        v-for="option in taskDateFilterOptions"
+                        :key="option.value"
+                        @click="selectTaskDateFilterMode(option.value)"
+                      >
+                        {{ option.label }}
+                      </AMenuItem>
+                    </AMenu>
+                  </template>
+                </ADropdown>
+              </div>
+
+              <div class="task-volume-row task-count-row">
+                <label class="task-control-label" for="page-count">任务数量</label>
+                <div class="task-count-control">
+                  <div class="number-stepper" :style="{ width: pageStepperWidth }">
+                    <button
+                      type="button"
+                      aria-label="减少任务数量，长按连续减少"
+                      :disabled="taskSettingsLocked"
+                      @click="handlePageStep(-1)"
+                      @pointerdown="startPageCountHold(-1)"
+                      @pointerup="stopPageCountHold"
+                      @pointerleave="cancelPageCountHold"
+                      @pointercancel="cancelPageCountHold"
+                    >
+                      −
+                    </button>
+                    <input
+                      id="page-count"
+                      v-model.number="pageCount"
+                      type="number"
+                      min="0"
+                      :disabled="taskSettingsLocked"
+                    />
+                    <button
+                      type="button"
+                      aria-label="增加任务数量，长按连续增加"
+                      :disabled="taskSettingsLocked"
+                      @click="handlePageStep(1)"
+                      @pointerdown="startPageCountHold(1)"
+                      @pointerup="stopPageCountHold"
+                      @pointerleave="cancelPageCountHold"
+                      @pointercancel="cancelPageCountHold"
+                    >
+                      +
+                    </button>
+                  </div>
                   <button
+                    class="task-count-hint"
                     type="button"
-                    aria-label="增加任务数量，长按连续增加"
-                    :disabled="taskSettingsLocked"
-                    @click="handlePageStep(1)"
-                    @pointerdown="startPageCountHold(1)"
-                    @pointerup="stopPageCountHold"
-                    @pointerleave="cancelPageCountHold"
-                    @pointercancel="cancelPageCountHold"
+                    aria-label="查看任务数量说明"
+                    aria-describedby="description-tooltip"
+                    @mouseenter="showDescriptionTooltip($event, '设为0时遍历日期范围内全部内容')"
+                    @mousemove="moveDescriptionTooltip"
+                    @mouseleave="hideDescriptionTooltip"
+                    @focus="showDescriptionTooltip($event, '设为0时遍历日期范围内全部内容')"
+                    @blur="hideDescriptionTooltip"
                   >
-                    +
+                    <AppIcon icon="fa-regular fa-circle-question" />
                   </button>
                 </div>
               </div>
-              <p>默认为 1，设为 0 时遍历全部内容</p>
+
+              <label class="task-volume-row task-date-row">
+                <span class="task-control-label task-date-label download-option selected locked">
+                  <ASpin class="task-date-label-spin" size="small" :spinning="true" />
+                  {{ taskDateFieldLabel }}
+                </span>
+                <span class="task-date-control">
+                  <ARangePicker
+                    v-if="taskDateFilterMode === 'range'"
+                    v-model:value="taskDateRangeValue"
+                    class="task-date-picker task-date-range-picker"
+                    :allow-clear="true"
+                    :placeholder="['选择起始日期', '选择截止日期']"
+                    format="YYYY-MM-DD"
+                    value-format="YYYY-MM-DD"
+                    popup-class-name="task-date-picker-panel"
+                    :disabled="taskSettingsLocked"
+                    aria-label="任务日期范围"
+                  />
+                  <ADatePicker
+                    v-else-if="taskDateFilterMode === 'before'"
+                    v-model:value="taskEndDate"
+                    class="task-date-picker"
+                    :allow-clear="true"
+                    placeholder="选择截止日期"
+                    format="YYYY-MM-DD  dddd"
+                    value-format="YYYY-MM-DD"
+                    popup-class-name="task-date-picker-panel"
+                    :disabled="taskSettingsLocked"
+                    aria-label="任务截止日期"
+                  />
+                  <ADatePicker
+                    v-else-if="taskDateFilterMode === 'after'"
+                    v-model:value="taskStartDate"
+                    class="task-date-picker"
+                    :allow-clear="true"
+                    placeholder="选择起始日期"
+                    format="YYYY-MM-DD  dddd"
+                    value-format="YYYY-MM-DD"
+                    popup-class-name="task-date-picker-panel"
+                    :disabled="taskSettingsLocked"
+                    aria-label="任务起始日期"
+                  />
+                  <ADatePicker
+                    v-else-if="taskDateFilterMode === 'all'"
+                    class="task-date-picker"
+                    :value="null"
+                    placeholder="不限日期，无需选择"
+                    :disabled="true"
+                    aria-label="不限日期"
+                  />
+                </span>
+              </label>
             </div>
           </article>
 
@@ -1556,7 +1719,8 @@ onBeforeUnmount(() => {
     >
       {{ descriptionTooltip.text }}
     </div>
-  </main>
+    </main>
+  </AConfigProvider>
 </template>
 
 <style scoped>
@@ -1928,6 +2092,175 @@ input:focus-visible {
   gap: 16px;
 }
 
+.task-volume-body {
+  align-self: stretch;
+  display: grid;
+  grid-template-rows: auto auto auto auto;
+  align-content: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.task-volume-row {
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.task-control-label {
+  color: var(--ink-strong);
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1.25;
+  white-space: nowrap;
+}
+
+.task-date-filter-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  min-width: 0;
+  height: 34px;
+  padding: 0 10px;
+  border-color: var(--paper-edge);
+  border-radius: 6px;
+  color: var(--ink-strong);
+  background: var(--frost-bg-strong);
+  box-shadow: var(--paper-shadow-sm);
+  font-size: 14px;
+  font-weight: 400;
+  text-align: left;
+}
+
+.task-date-filter-chevron {
+  flex: 0 0 auto;
+  color: var(--ink-muted);
+  font-size: 10px;
+}
+
+.task-count-control {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 7px;
+  min-width: 0;
+}
+
+.task-card-volume .number-stepper {
+  flex: 1 1 148px;
+  min-width: 0;
+  max-width: 148px;
+  height: 34px;
+  grid-template-columns: 32px minmax(0, 1fr) 32px;
+}
+
+.task-card-volume .number-stepper button {
+  width: 32px;
+  font-size: 18px;
+}
+
+.task-count-hint {
+  display: grid;
+  place-items: center;
+  flex: 0 0 27px;
+  width: 27px;
+  height: 27px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  color: #397fa8;
+  background: rgba(80, 143, 180, 0.1);
+  font-size: 14px;
+  cursor: help;
+}
+
+.task-count-hint:hover,
+.task-count-hint:focus-visible {
+  color: #286b94;
+  background: rgba(80, 143, 180, 0.17);
+}
+
+.task-count-hint:focus-visible {
+  outline: 2px solid rgba(57, 127, 168, 0.24);
+  outline-offset: 2px;
+}
+
+.task-date-row {
+  position: relative;
+  grid-template-columns: minmax(0, 1fr);
+  width: 100%;
+  transform: translateY(4px);
+}
+
+.task-date-row > .task-control-label {
+  position: absolute;
+  top: 50%;
+  right: calc(100% + 12px);
+  transform: translateY(-50%);
+}
+
+.task-date-control {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  height: 34px;
+}
+
+.task-date-picker {
+  width: 100%;
+  height: 34px;
+}
+
+.task-date-control :deep(.ant-picker) {
+  width: 100%;
+  height: 34px;
+  border-color: var(--paper-edge);
+  border-radius: 6px;
+  background: var(--frost-bg-strong);
+  box-shadow: var(--paper-shadow-sm);
+}
+
+.task-date-control :deep(.ant-picker-input > input) {
+  color: var(--ink-strong);
+  font-size: 14px;
+}
+
+.task-date-control :deep(.ant-picker-input > input::placeholder) {
+  color: var(--ink-muted);
+  opacity: 1;
+}
+
+.task-date-control :deep(.ant-picker-range .ant-picker-input) {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.task-date-control :deep(.ant-picker-range-separator) {
+  display: grid;
+  place-items: center;
+  flex: 0 0 28px;
+  padding: 0;
+}
+
+.dark .task-count-hint {
+  color: #9bbbd7;
+  background: rgba(105, 153, 197, 0.12);
+}
+
+:global(.task-date-filter-dropdown .ant-dropdown-menu) {
+  min-width: 180px;
+  padding: 4px;
+  border-radius: 6px;
+}
+
+:global(.task-date-filter-dropdown .ant-dropdown-menu-item) {
+  min-height: 32px;
+  font-size: 14px;
+}
+
 .step-badge {
   position: absolute;
   top: 16px;
@@ -1967,7 +2300,7 @@ input:focus-visible {
 }
 
 .task-art-list {
-  transform: translateX(20px);
+  transform: translate(20px, -5px);
 }
 
 .dark .task-art {
@@ -2009,6 +2342,7 @@ input:focus-visible {
 }
 
 .task-body h2,
+.task-volume-body h2,
 .section-title h2 {
   margin: 0;
   color: var(--ink-strong);
@@ -2155,6 +2489,30 @@ input:focus-visible {
   width: 184px;
   min-height: 32px;
   padding-inline: 10px;
+}
+
+.task-date-label {
+  justify-content: flex-start;
+  gap: 8px;
+  width: 120px;
+  height: 34px;
+  min-height: 34px;
+  padding-inline: 10px;
+  border-radius: 6px;
+  cursor: default;
+  pointer-events: none;
+}
+
+.task-date-label-spin {
+  flex: 0 0 14px;
+  width: 14px;
+  height: 14px;
+  color: rgba(77, 108, 159, 0.82);
+  line-height: 1;
+}
+
+.dark .task-date-label-spin {
+  color: rgba(153, 183, 219, 0.86);
 }
 
 .download-option.locked:hover {

@@ -36,7 +36,12 @@ class WindowDiagnosticService:
         self._window_factory = window_factory
         self._monotonic = monotonic
 
-    def run(self, action: str) -> dict[str, Any]:
+    def run(
+        self,
+        action: str,
+        *,
+        scroll_steps: int | None = None,
+    ) -> dict[str, Any]:
         normalized_action = str(action).strip()
         try:
             if normalized_action == "read-home":
@@ -46,7 +51,7 @@ class WindowDiagnosticService:
             if normalized_action == "first-article-click":
                 return self._first_article_click()
             if normalized_action == "scroll-page":
-                return self._scroll_page()
+                return self._scroll_page(wheel_steps=scroll_steps)
             if normalized_action == "bounce-scroll":
                 return self._bounce_scroll()
             if normalized_action == "close-tab":
@@ -315,7 +320,13 @@ class WindowDiagnosticService:
             items=step_items,
         )
 
-    def _scroll_page(self) -> dict[str, Any]:
+    def _scroll_page(self, *, wheel_steps: int | None = None) -> dict[str, Any]:
+        if wheel_steps is None:
+            raise ValueError("滚动页面诊断必须提供滚动步长")
+        actual_steps = int(wheel_steps)
+        if not 1 <= actual_steps <= 200:
+            raise ValueError("滚动页面诊断步长必须在 1～200 之间")
+
         reader, home_window, home_info, activation_seconds = self._home_context(
             activate=True
         )
@@ -328,7 +339,7 @@ class WindowDiagnosticService:
             cursor._send_scroll(
                 home_window,
                 direction="down",
-                wheel_steps=self._config.window.scroll_wheel_steps,
+                wheel_steps=actual_steps,
             )
         )
         if scroll_ok:
@@ -358,6 +369,7 @@ class WindowDiagnosticService:
                 ),
                 _item("滚动派发", "成功" if scroll_ok else "失败"),
                 _item("滚动方向", "down"),
+                _item("输入滚动步长", actual_steps),
                 _item("滚动前可见文章数", len(visible_before)),
                 _item("滚动后可见文章数", len(visible_after)),
                 _item("实际耗时", _seconds(elapsed)),
@@ -367,7 +379,7 @@ class WindowDiagnosticService:
                 _item(
                     "对应设置",
                     (
-                        f"scroll_wheel_steps={self._config.window.scroll_wheel_steps}; "
+                        f"diagnostic_scroll_steps={actual_steps}; "
                         "scroll_initial_delay_seconds="
                         f"{self._config.window.scroll_initial_delay_seconds}; "
                         "scroll_probe_interval_seconds="

@@ -21,7 +21,8 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+from pydantic import model_validator
 from ruamel.yaml import YAML
 import uvicorn
 
@@ -34,11 +35,15 @@ from src.app.main_orchestrator import (
 from src.config.config_loader import build_app_config, load_config_mapping
 from src.domain.enums import TaskStatus
 from src.domain.models import TaskCommand
+from src.modules.window.article_date_filter import ArticleDateFilter
 from src.modules.proxy.capture_buffer import CaptureBuffer
 from src.modules.proxy.mitmproxy_listener import MitmproxyListener, MitmproxyListenerError
 from src.modules.proxy.proxy_state import ProxySnapshot, proxy_points_to
 from src.modules.request.chrome_headers import build_chrome_document_headers
 from src.modules.system.windows_system_proxy import WindowsSystemProxy
+from src.modules.system.window_diagnostic_trace_store import (
+    WindowDiagnosticTraceStore,
+)
 from src.services.archive.archive_delete_service import ArchiveDeleteService
 from src.services.archive.archive_excel_export_service import ArchiveExcelExportService
 from src.services.archive.offline_cache_job_service import (
@@ -209,6 +214,41 @@ class HealthCheckPayload(BaseModel):
 
 class WindowDiagnosticPayload(BaseModel):
     action: str
+    # 仅覆盖本次“滚动页面”诊断，不写回运行配置或 YAML。
+    scrollSteps: int | None = Field(default=None, ge=1, le=200)
+
+    @model_validator(mode="after")
+    def validate_scroll_steps(self) -> WindowDiagnosticPayload:
+        if self.action.strip() == "scroll-page" and self.scrollSteps is None:
+            raise ValueError("滚动页面诊断必须提供滚动步长")
+        return self
+
+
+class WindowClickFlowDiagnosticPayload(BaseModel):
+    """窗口点击流程诊断条件；数量为零表示由日期边界结束。"""
+
+    maxRecords: int = 20
+    dateFilterMode: str = "all"
+    startDate: str | None = None
+    endDate: str | None = None
+
+    @model_validator(mode="after")
+    def validate_options(self) -> WindowClickFlowDiagnosticPayload:
+        date_filter = ArticleDateFilter.create(
+            mode=self.dateFilterMode,
+            start_date=self.startDate,
+            end_date=self.endDate,
+        )
+        self.dateFilterMode = date_filter.mode
+        self.startDate = date_filter.start_date.isoformat() if date_filter.start_date else None
+        self.endDate = date_filter.end_date.isoformat() if date_filter.end_date else None
+        # 范围和截止模式由日期边界停止；其他模式最多读取 20 条。
+        self.maxRecords = (
+            0
+            if date_filter.mode in {"range", "before"}
+            else max(1, min(int(self.maxRecords), 20))
+        )
+        return self
 
 
 def create_dev_backend(
@@ -663,7 +703,11 @@ def create_backend_app(backend: DevBackendContext) -> FastAPI:
                 status_code=400,
             )
         try:
-            return _window_diagnostic_payload(backend, action)
+            return _window_diagnostic_payload(
+                backend,
+                action,
+                scroll_steps=payload.scrollSteps,
+            )
         except Exception as exc:
             backend.append_log("ERROR", f"窗口诊断失败：{exc}")
             return JSONResponse(
@@ -680,8 +724,8 @@ def create_backend_app(backend: DevBackendContext) -> FastAPI:
             )
 
     @app.post("/api/diagnostics/window-click-flow")
-    def start_window_click_flow_diagnostic(_payload: UnsupportedPayload | None = None):
-        return _start_window_click_flow_diagnostic_job(backend)
+    def start_window_click_flow_diagnostic(payload: WindowClickFlowDiagnosticPayload):
+        return _start_window_click_flow_diagnostic_job(backend, payload)
 
     @app.get("/api/diagnostics/window-click-flow/{job_id}")
     def get_window_click_flow_diagnostic(job_id: str):
@@ -1967,6 +2011,7 @@ def _integer_config_keys() -> set[str]:
         "runtime.temp_retention_days",
         "runtime.log_retention_days",
         "window.scroll_wheel_steps",
+        "window.date_seek_max_steps",
         "window.max_scroll_attempts",
         "window.bounce_attempts",
         "window.bounce_up_steps",
@@ -2661,7 +2706,12 @@ def _diagnostic_managed_result(backend: DevBackendContext, *, action: str, messa
     }
 
 
-def _window_diagnostic_payload(backend: DevBackendContext, action: str) -> dict[str, Any]:
+def _window_diagnostic_payload(
+    backend: DevBackendContext,
+    action: str,
+    *,
+    scroll_steps: int | None = None,
+) -> dict[str, Any]:
     if callable(backend.window_diagnostic_runner):
         result = backend.window_diagnostic_runner(action, backend)
     else:
@@ -2671,7 +2721,7 @@ def _window_diagnostic_payload(backend: DevBackendContext, action: str) -> dict[
         result = WindowDiagnosticService(
             config=backend.runtime.config,
             window_factory=window_factory,
-        ).run(action)
+        ).run(action, scroll_steps=scroll_steps)
     if not isinstance(result, dict):
         raise RuntimeError("窗口诊断返回了无法识别的结果")
     result.setdefault("action", action)
@@ -2682,27 +2732,40 @@ def _window_diagnostic_payload(backend: DevBackendContext, action: str) -> dict[
     return result
 
 
-def _start_window_click_flow_diagnostic_job(backend: DevBackendContext) -> dict[str, Any]:
+def _start_window_click_flow_diagnostic_job(
+    backend: DevBackendContext,
+    options: WindowClickFlowDiagnosticPayload | None = None,
+) -> dict[str, Any]:
+    options = options or WindowClickFlowDiagnosticPayload()
     job_id = f"window-click-flow-{uuid4().hex[:12]}"
     stop_event = Event()
+    trace_store = WindowDiagnosticTraceStore(
+        temp_root=Path(backend.runtime.config.storage.temp_dir),
+        job_id=job_id,
+    )
+    trace_store.append_event(
+        {
+            "event": "diagnostic-start",
+            "status": "running",
+            "message": "窗口读取诊断已启动",
+            "details": {"options": options.model_dump()},
+        }
+    )
     initial = {
         "ok": False,
         "status": "running",
         "jobId": job_id,
         "action": "window-click-flow",
-        "title": "窗口点击流程结果",
-        "message": "正在启动窗口点击流程测试...",
+        "title": "主页内容读取结果",
+        "message": "正在启动主页内容读取测试...",
         "tone": "info",
-        "items": [
-            {"label": "流程", "value": "窗口点击流程"},
-            {"label": "测试上限", "value": "20 条"},
-            {"label": "状态", "value": "执行中"},
-        ],
-        "clickedCount": 0,
-        "openedCount": 0,
-        "closedCount": 0,
+        "items": [],
+        "recognizedCount": 0,
+        "skippedCount": 0,
         "stoppedByUser": False,
         "startedAt": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "options": options.model_dump(),
+        **trace_store.path_fields(),
     }
     with backend.window_click_flow_diagnostic_lock:
         backend.window_click_flow_diagnostic_jobs[job_id] = initial
@@ -2711,7 +2774,7 @@ def _start_window_click_flow_diagnostic_job(backend: DevBackendContext) -> dict[
 
     worker = Thread(
         target=_run_window_click_flow_diagnostic_job,
-        args=(backend, job_id),
+        args=(backend, job_id, options),
         name=f"awa-window-click-flow-{job_id}",
         daemon=True,
     )
@@ -2732,8 +2795,8 @@ def _window_click_flow_diagnostic_job_payload(
                     "status": "missing",
                     "jobId": job_id,
                     "action": "window-click-flow",
-                    "title": "窗口点击流程结果",
-                    "message": "未找到该窗口点击流程诊断记录。",
+                    "title": "主页内容读取结果",
+                    "message": "未找到该主页内容读取诊断记录。",
                     "tone": "warning",
                     "items": [{"label": "任务ID", "value": job_id}],
                 },
@@ -2755,8 +2818,8 @@ def _stop_window_click_flow_diagnostic_job(
                     "status": "missing",
                     "jobId": job_id,
                     "action": "window-click-flow",
-                    "title": "窗口点击流程结果",
-                    "message": "未找到该窗口点击流程诊断记录，无法停止。",
+                    "title": "主页内容读取结果",
+                    "message": "未找到该主页内容读取诊断记录，无法停止。",
                     "tone": "warning",
                     "items": [{"label": "任务ID", "value": job_id}],
                 },
@@ -2770,7 +2833,7 @@ def _stop_window_click_flow_diagnostic_job(
             **job,
             "ok": False,
             "status": "stop-requested",
-            "message": "已请求停止窗口点击流程，等待当前点击记录收尾...",
+            "message": "已请求停止主页内容读取，等待当前读取收尾...",
             "tone": "warning",
             "stoppedByUser": True,
         }
@@ -2781,12 +2844,20 @@ def _stop_window_click_flow_diagnostic_job(
 def _run_window_click_flow_diagnostic_job(
     backend: DevBackendContext,
     job_id: str,
+    options: WindowClickFlowDiagnosticPayload,
 ) -> None:
+    trace_store = WindowDiagnosticTraceStore(
+        temp_root=Path(backend.runtime.config.storage.temp_dir),
+        job_id=job_id,
+    )
+    trace_paths = trace_store.path_fields()
+
     def update(payload: dict[str, Any]) -> None:
         payload = {
             "jobId": job_id,
             "action": "window-click-flow",
-            "title": "窗口点击流程结果",
+            "title": "主页内容读取结果",
+            **trace_paths,
             **payload,
         }
         with backend.window_click_flow_diagnostic_lock:
@@ -2803,6 +2874,7 @@ def _run_window_click_flow_diagnostic_job(
                 backend,
                 update,
                 stop_requested,
+                options,
             )
         else:
             runtime = backend.runtime
@@ -2814,35 +2886,57 @@ def _run_window_click_flow_diagnostic_job(
                 window_factory=window_factory,
             )
             result = service.run(
-                max_records=20,
+                max_records=options.maxRecords,
+                date_filter_mode=options.dateFilterMode,
+                start_date=options.startDate,
+                end_date=options.endDate,
                 stop_requested=stop_requested,
                 on_update=update,
+                trace_store=trace_store,
             )
         if not isinstance(result, dict):
-            raise RuntimeError("窗口点击流程诊断返回了无法识别的结果")
+            raise RuntimeError("主页内容读取诊断返回了无法识别的结果")
         result = {
             "jobId": job_id,
             "action": "window-click-flow",
-            "title": "窗口点击流程结果",
+            "title": "主页内容读取结果",
             **result,
             "finishedAt": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            **trace_paths,
         }
+        trace_store.write_result(result)
         update(result)
     except Exception as exc:
-        update(
-            {
-                "ok": False,
-                "status": "failed",
-                "message": f"窗口点击流程测试失败：{exc}",
-                "tone": "error",
-                "items": [{"label": "失败原因", "value": str(exc)}],
-                "clickedCount": 0,
-                "openedCount": 0,
-                "closedCount": 0,
-                "stoppedByUser": stop_requested(),
-                "finishedAt": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            }
-        )
+        failed_result = {
+            "jobId": job_id,
+            "action": "window-click-flow",
+            "title": "主页内容读取结果",
+            "ok": False,
+            "status": "failed",
+            "message": f"主页内容读取测试失败：{exc}",
+            "tone": "error",
+            "items": [],
+            "records": [],
+            "events": [],
+            "recognizedCount": 0,
+            "skippedCount": 0,
+            "stoppedByUser": stop_requested(),
+            "finishedAt": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            **trace_paths,
+        }
+        try:
+            trace_store.append_event(
+                {
+                    "event": "diagnostic-failed",
+                    "status": "failed",
+                    "message": str(exc),
+                    "details": {"exceptionType": type(exc).__name__},
+                }
+            )
+            trace_store.write_result(failed_result)
+        except OSError as trace_exc:
+            failed_result["traceError"] = str(trace_exc)
+        update(failed_result)
     finally:
         with backend.window_click_flow_diagnostic_lock:
             if job_id in backend.window_click_flow_diagnostic_jobs:

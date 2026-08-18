@@ -48,7 +48,7 @@ test('实际代理状态同步不覆盖系统代理接管配置', () => {
 })
 
 test('任务状态和日志只在任务启动中或运行中轮询', () => {
-  const mountedBlock = requireSourceBlock(appSource, /onMounted\(\(\) => \{[\s\S]*?\n\}\)/, 'App onMounted')
+  const mountedBlock = requireSourceBlock(appSource, /onMounted\((?:async )?\(\) => \{[\s\S]*?\n\}\)/, 'App onMounted')
   const refreshBlock = requireSourceBlock(
     appSource,
     /async function refreshTaskRuntime\(\) \{[\s\S]*?\n\}/,

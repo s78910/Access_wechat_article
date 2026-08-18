@@ -23,14 +23,11 @@ import {
   openRuntimePath,
   runStartupHealthChecks,
   runStartupSelfCheck,
-  startTask,
-  stopTask,
   type ArchiveSummary,
   type HealthCheckResult,
   type StartupSelfCheckResult,
   type TaskLogItem,
   type TaskRuntimeState,
-  type TaskRunOptions,
   type TaskStatus,
   type TrafficStatus,
 } from './bridge/pythonApi'
@@ -216,7 +213,6 @@ let pywebviewStatusRetryCount = 0
 let taskPollingTimer: number | undefined
 let uptimeTimer: number | undefined
 let logAutoFollowTimer: number | undefined
-let taskActionVersion = 0
 let startupHealthCheckRequested = false
 let startupSelfCheckRequested = false
 
@@ -627,28 +623,7 @@ function handleDownloadSelectionChange() {
   mainTaskSelectionDefaultsApplied.value = true
 }
 
-function buildTaskRunOptions(): TaskRunOptions {
-  return {
-    recordLimit: normalizedPageCount.value,
-    selections: {
-      articleDetail: true,
-      offlineArchive: downloadSelections.value.offlineArchive,
-      commentInfo: downloadSelections.value.commentInfo,
-      skipCollectedRecords: downloadSelections.value.skipCollectedRecords,
-    },
-  }
-}
-
 function markHomeDetectionStarting() {
-  homeRuntimeState.value = 'detecting'
-}
-
-function markTaskStarting() {
-  taskStatus.value = {
-    ...taskStatus.value,
-    ok: true,
-    status: 'starting',
-  }
   homeRuntimeState.value = 'detecting'
 }
 
@@ -1057,56 +1032,6 @@ function startUptimeTimer() {
   }, 1000)
 }
 
-async function handleStartTask() {
-  const actionVersion = ++taskActionVersion
-  markHomeDetectionStarting()
-  markTaskStarting()
-  shouldStickLogToBottom.value = true
-  stopLogAutoFollowTimer()
-  try {
-    const startedStatus = await startTask(buildTaskRunOptions())
-    if (actionVersion !== taskActionVersion) {
-      return
-    }
-    taskStatus.value = startedStatus
-    homeRuntimeState.value = taskStatus.value.status === 'running' ? 'running' : 'idle'
-    syncTaskPolling(startedStatus)
-    await refreshTaskRuntime()
-    if (actionVersion !== taskActionVersion) {
-      return
-    }
-    await refreshArchiveSummary()
-    homeRuntimeState.value = taskStatus.value.status === 'running' ? 'running' : 'idle'
-    startTaskPolling()
-  } catch (error) {
-    if (actionVersion !== taskActionVersion) {
-      return
-    }
-    if (taskStatus.value.status === 'starting') {
-      taskStatus.value = {
-        ...taskStatus.value,
-        ok: false,
-        status: 'error',
-      }
-    }
-    homeRuntimeState.value = 'idle'
-    appendFrontendRuntimeError(`启动采集任务失败：${formatErrorMessage(error)}`)
-  }
-}
-
-async function handleStopTask() {
-  taskActionVersion += 1
-  homeRuntimeState.value = 'idle'
-  try {
-    taskStatus.value = await stopTask()
-    await refreshTaskRuntime()
-    await refreshArchiveSummary()
-    stopTaskPolling()
-  } catch (error) {
-    appendFrontendRuntimeError(`停止采集任务失败：${formatErrorMessage(error)}`)
-  }
-}
-
 async function handleOpenLogFolder() {
   try {
     const result = await openRuntimePath('logDir')
@@ -1377,7 +1302,6 @@ onBeforeUnmount(() => {
               size="large"
               :loading="taskStatus.status === 'starting'"
               :disabled="taskStatus.status === 'running' || taskStatus.status === 'starting'"
-              @click="handleStartTask"
             >
               <AppIcon icon="fa-solid fa-play" />
               <span class="button-label">开始运行</span>
@@ -1388,7 +1312,6 @@ onBeforeUnmount(() => {
               size="large"
               danger
               :disabled="taskStatus.status !== 'running' && taskStatus.status !== 'starting' && taskStatus.status !== 'error'"
-              @click="handleStopTask"
             >
               <AppIcon icon="fa-solid fa-stop" />
               <span class="button-label">停止</span>

@@ -371,10 +371,10 @@ const recordStateCellAttrs = makeStateCellAttrs('selection', 5)
 
 const accountTableColumns: ArchiveTableColumn[] = [
   { title: '序号', key: 'index', width: 46, align: 'center', customCell: accountStateCellAttrs('index') },
-  { title: '公众号', key: 'account', dataIndex: 'account', width: '22%', align: 'center', className: 'account-name-col', customCell: accountStateCellAttrs('account') },
-  { title: '采集时间', key: 'createdAt', dataIndex: 'createdAt', width: '26%', align: 'center', className: 'account-time-col', customCell: accountStateCellAttrs('createdAt') },
-  { title: '数量', key: 'articleCount', dataIndex: 'articleCount', width: '9%', align: 'center', className: 'account-size-col', customCell: accountStateCellAttrs('articleCount') },
-  { title: '操作', key: 'actions', width: 220, align: 'center', className: 'action-cell account-action-col', customCell: accountStateCellAttrs('actions') },
+  { title: '公众号', key: 'account', dataIndex: 'account', align: 'center', className: 'account-name-col', customCell: accountStateCellAttrs('account') },
+  { title: '采集时间', key: 'createdAt', dataIndex: 'createdAt', width: 104, align: 'center', className: 'account-time-col', customCell: accountStateCellAttrs('createdAt') },
+  { title: '数量', key: 'articleCount', dataIndex: 'articleCount', width: 60, align: 'center', className: 'account-size-col', customCell: accountStateCellAttrs('articleCount') },
+  { title: '操作', key: 'actions', width: 184, align: 'center', className: 'action-cell account-action-col', customCell: accountStateCellAttrs('actions') },
 ]
 
 const recordTableColumns: ArchiveTableColumn[] = [
@@ -1964,19 +1964,19 @@ onBeforeUnmount(() => {
 }
 
 .account-name-col {
-  width: 22%;
+  width: auto;
 }
 
 .account-time-col {
-  width: 26%;
+  width: 104px;
 }
 
 .account-size-col {
-  width: 9%;
+  width: 60px;
 }
 
 .account-action-col {
-  width: 220px;
+  width: 184px;
 }
 
 .file-list .data-table th {

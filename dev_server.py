@@ -112,7 +112,6 @@ class DevBackendContext:
     diagnostic_mitm_listener: Any | None = None
     diagnostic_mitm_started_at: float = 0.0
     diagnostic_system_proxy_snapshot: ProxySnapshot | None = None
-    article_detail_diagnostic_runner: Any | None = None
     initial_content_storage_huey_service: Any | None = None
     article_detail_comments_huey_service: Any | None = None
     article_detail_offline_cache_huey_service: Any | None = None

@@ -396,6 +396,32 @@ test('MITM 管理证书和测试动作会打开统一结果弹窗展示后端返
   assert.match(settingsPageSource, /handleTestProxyConnection[\s\S]*?openDiagnosticResultDialog/)
 })
 
+test('MITM 管理 CA 证书弹窗使用不透明纸面并限制标题行溢出', () => {
+  assert.match(settingsPageSource, /class="mitm-cert-dialog-copy"/)
+  assert.match(
+    settingsPageSource,
+    /\.mitm-cert-dialog \{[\s\S]*?background:\s*#FBFDFF;[\s\S]*?isolation:\s*isolate;/,
+  )
+  assert.match(settingsPageSource, /\.mitm-cert-dialog-copy \{[\s\S]*?min-width:\s*0;/)
+  assert.match(settingsPageSource, /\.mitm-cert-dialog p \{[\s\S]*?overflow-wrap:\s*anywhere;/)
+  assert.match(
+    settingsPageSource,
+    /\.mitm-cert-source-heading \{[\s\S]*?grid-template-columns:\s*36px minmax\(0, 1fr\) max-content;/,
+  )
+  assert.match(settingsPageSource, /\.mitm-cert-badge \{[\s\S]*?justify-self:\s*end;[\s\S]*?max-width:\s*100%;/)
+})
+
+test('MITM 管理 CA 证书弹窗底部取消和知道了按钮有明确可见配色', () => {
+  assert.match(
+    settingsPageSource,
+    /\.mitm-cert-dialog-actions :deep\(\.ant-btn\.config-action-button\.ghost\) \{[\s\S]*?color:\s*#15386F;[\s\S]*?border-color:\s*rgba\(53, 127, 217, 0\.32\);[\s\S]*?background:\s*#EAF4FF;/,
+  )
+  assert.match(
+    settingsPageSource,
+    /\.mitm-cert-dialog-actions :deep\(\.ant-btn\.config-action-button\.ghost:not\(:disabled\):hover\) \{[\s\S]*?color:\s*#0F2F61;[\s\S]*?border-color:\s*rgba\(53, 127, 217, 0\.48\);[\s\S]*?background:\s*#DDEEFF;/,
+  )
+})
+
 test('系统配置诊断结果弹窗使用清晰的状态色和可见操作按钮', () => {
   assert.match(
     settingsPageSource,

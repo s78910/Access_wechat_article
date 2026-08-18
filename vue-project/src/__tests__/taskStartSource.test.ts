@@ -4,7 +4,13 @@ import test from 'node:test'
 
 const appVue = readFileSync(new URL('../App.vue', import.meta.url), 'utf-8')
 
-test('点击开始运行后立即进入 starting 状态，让停止按钮无需等待后端响应即可可用', () => {
-  assert.match(appVue, /function markTaskStarting\(\)/)
-  assert.match(appVue, /async function handleStartTask\(\)[\s\S]*markTaskStarting\(\)[\s\S]*await startTask/)
+test('主服务开始和停止按钮暂不绑定任务启动停止逻辑', () => {
+  assert.match(appVue, /<span class="button-label">开始运行<\/span>/)
+  assert.match(appVue, /<span class="button-label">停止<\/span>/)
+  assert.doesNotMatch(appVue, /@click="handleStartTask"/)
+  assert.doesNotMatch(appVue, /@click="handleStopTask"/)
+  assert.doesNotMatch(appVue, /async function handleStartTask\(/)
+  assert.doesNotMatch(appVue, /async function handleStopTask\(/)
+  assert.doesNotMatch(appVue, /await startTask\(/)
+  assert.doesNotMatch(appVue, /await stopTask\(/)
 })

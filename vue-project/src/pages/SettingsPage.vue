@@ -3627,7 +3627,7 @@ onMounted(() => {
               <span class="mitm-cert-dialog-icon" aria-hidden="true">
                 <AppIcon :icon="caCertificateDialogIcon" />
               </span>
-              <div>
+              <div class="mitm-cert-dialog-copy">
                 <h3 id="mitm-cert-dialog-title">{{ caCertificateDialogTitle }}</h3>
                 <p>{{ caCertificateDialogMessage || '正在准备 CA 证书操作...' }}</p>
               </div>
@@ -5647,8 +5647,9 @@ onMounted(() => {
   padding: 20px;
   border: 1px solid rgba(104, 141, 181, 0.32);
   border-radius: 10px;
-  background: rgba(251, 253, 255, 0.98);
+  background: #FBFDFF;
   box-shadow: 0 18px 42px rgba(22, 45, 73, 0.28);
+  isolation: isolate;
   overflow: hidden;
 }
 
@@ -5657,6 +5658,10 @@ onMounted(() => {
   grid-template-columns: 42px minmax(0, 1fr);
   gap: 12px;
   align-items: start;
+}
+
+.mitm-cert-dialog-copy {
+  min-width: 0;
 }
 
 .mitm-cert-dialog-icon {
@@ -5682,6 +5687,7 @@ onMounted(() => {
   font-size: 13px;
   font-weight: 500;
   line-height: 1.5;
+  overflow-wrap: anywhere;
 }
 
 .mitm-cert-source-card {
@@ -5706,7 +5712,7 @@ onMounted(() => {
 
 .mitm-cert-source-heading {
   display: grid;
-  grid-template-columns: 36px minmax(0, 1fr) auto;
+  grid-template-columns: 36px minmax(0, 1fr) max-content;
   gap: 10px;
   align-items: center;
   min-width: 0;
@@ -5750,6 +5756,8 @@ onMounted(() => {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  justify-self: end;
+  max-width: 100%;
   min-height: 24px;
   padding: 0 9px;
   border: 1px solid rgba(104, 141, 181, 0.24);
@@ -5882,6 +5890,24 @@ onMounted(() => {
 .mitm-cert-dialog-actions .config-action-button {
   width: auto;
   min-width: 112px;
+}
+
+.mitm-cert-dialog-actions :deep(.ant-btn.config-action-button.ghost) {
+  --config-action-color: #15386F;
+  --config-action-border: rgba(53, 127, 217, 0.32);
+  --config-action-bg: #EAF4FF;
+  --config-action-hover-color: #0F2F61;
+  --config-action-hover-border: rgba(53, 127, 217, 0.48);
+  --config-action-hover-bg: #DDEEFF;
+  color: #15386F;
+  border-color: rgba(53, 127, 217, 0.32);
+  background: #EAF4FF;
+}
+
+.mitm-cert-dialog-actions :deep(.ant-btn.config-action-button.ghost:not(:disabled):hover) {
+  color: #0F2F61;
+  border-color: rgba(53, 127, 217, 0.48);
+  background: #DDEEFF;
 }
 
 .diagnostic-result-dialog {

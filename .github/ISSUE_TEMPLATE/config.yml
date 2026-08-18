@@ -1,5 +1,0 @@
-blank_issues_enabled: false
-contact_links:
-  - name: 安全问题反馈
-    url: https://github.com/yeximm/Access_wechat_article/security/advisories
-    about: 请不要在公开 Issue 中粘贴 Cookie、证书、数据库、日志全文或带临时参数的 URL；公开说明见 doc/security_zh.md。

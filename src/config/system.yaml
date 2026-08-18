@@ -49,8 +49,7 @@ windows_command:
   single_article_tab:
     article_title_stable_delay_seconds: 0.1  # 检测到目标文章标签标题后，再等待 0.1 秒确认标题稳定；等待结束后立即关闭文章标签。
     article_open_timeout_seconds: 12.0  # 点击文章后等待详情页打开的最大时长；超过仍未识别到目标标题则认为打开失败。
-    article_title_poll_initial_interval_seconds: 0.05  # 等待文章标题时的初始轮询间隔；当前由源码固定为 0.05 秒。
-    article_title_poll_interval_seconds: 0.15  # 等待文章标题时的最大轮询间隔；原 window.article_title_poll_interval_seconds。
+    article_title_poll_interval_seconds_range: [0.05, 0.15]  # [起始值, 最大值]；等待文章标题时从 0.05 秒开始轮询，并按增长规则放大到最多 0.15 秒。
     article_title_poll_growth_factor: 1.5  # 标题轮询间隔按 1.5 倍逐步放大，不是每次固定增加 0.05 秒。
     article_close_confirm_timeout_seconds: 3.0  # 关闭文章标签后，最多等待 3 秒确认窗口标题变化或标签消失。
     article_close_title_poll_interval_seconds: 0.05  # 关闭文章标签后检测标题变化的轮询间隔；当前由源码固定为 0.05 秒。
@@ -60,7 +59,6 @@ windows_command:
   home_window:
     activation_wait_seconds: 0.05  # 激活公众号主页窗口后的等待时间，避免窗口尚未稳定就执行点击；原 window.activation_wait_seconds。
     home_find_timeout_seconds: 3.0  # 诊断工具定位微信主页窗口的最大时长；超过后直接提示用户打开公众号主页。
-    home_find_use_article_probe: false  # 激活主页诊断是否读取文章卡片辅助识别；关闭后优先快速按窗口特征定位。
     mitm_ready_timeout_seconds: 10.0  # 点击文章前等待 MITM 进入 READY 状态的最大时长；对应 mitm_capture.ready_timeout_seconds。
     mitm_capture_timeout_seconds: 20.0  # MITM 捕获文章请求的最大时长；对应 mitm_capture.capture_timeout_seconds。
     mitm_result_timeout_seconds: 11.0  # 停止 MITM 后等待结果的参考值；实际运行以 proxy_settings.process_control.result_timeout_seconds 为准。
@@ -68,22 +66,15 @@ windows_command:
     click_mouse_move_wait_seconds: 0.02  # 发送鼠标移动消息后的短暂停顿；当前由源码固定。
     click_mouse_down_wait_seconds: 0.04  # 发送鼠标按下消息后的短暂停顿；当前由源码固定。
     click_mouse_up_wait_seconds: 0.25  # 发送鼠标释放消息后等待 Chromium 开始处理导航；当前由源码固定。
-    screen_click_wait_seconds: 0.3  # 走 uiautomation 坐标点击时的等待时间；当前由源码固定。
     uia_control_click_wait_seconds: 0.0  # 走 UIA 控件 Click 时不额外等待；当前 waitTime=0。
 
   # 主页滚动操作：找下一篇文章、检测页面变化、懒加载等待和回弹滚动。
   home_scroll:
-    max_scroll_attempts: 6  # 找下一篇文章时最多向下滚动 6 轮；原 window.max_scroll_attempts。
-    scroll_wheel_steps: 3  # 普通向下滚动步长；降低单次跨度以保留相邻视口文章重叠，避免越过整张卡片。
-    date_seek_max_steps: 18  # 日期定位阶段的最大向下滚动步长；正常文章收录仍使用 scroll_wheel_steps。
+    date_seek_scroll_steps_range: [3, 18]  # [普通收录步长, 日期定位最大步长]；普通收录使用 3 步，日期定位按距离放大但最多 18 步。
     scroll_initial_delay_seconds: 0.05  # 每次滚动后先等待 0.05 秒，再开始读取页面；原 window.scroll_initial_delay_seconds。
-    scroll_probe_interval_seconds: 0.1  # 滚动后检查页面变化的初始轮询间隔；原 window.scroll_probe_interval_seconds。
-    scroll_probe_max_interval_seconds: 0.4  # 滚动后检查页面变化的最大轮询间隔；原 window.scroll_probe_max_interval_seconds。
-    scroll_probe_growth_factor: 1.5  # 滚动轮询间隔按 1.5 倍逐步放大，不是每次固定增加 0.05 秒。
-    scroll_settle_timeout_seconds: 1.2  # 页面稳定判断的保守上限；当前普通无变化场景会被 0.6 秒提前截断；原 window.scroll_settle_timeout_seconds。
+    scroll_probe_interval_seconds_range: [0.1, 0.4]  # [起始值, 最大值]；滚动后从 0.1 秒开始检测页面变化，未变化时逐步放大到最多 0.4 秒。
     unchanged_before_bounce_seconds: 0.6  # 滚动后 0.6 秒内页面无变化，则认为本次滚动无效并准备触发回弹；原 window.unchanged_before_bounce_seconds。
     lazy_load_timeout_seconds: 3.0  # 如果检测到页面处于“正在加载/加载中”状态，最多等待 3 秒；原 window.lazy_load_timeout_seconds。
-    visible_snapshot_max_age_seconds: 60.0  # 当前可见文章快照最多缓存 60 秒；这是缓存有效期，不是主动等待时间；原 window.visible_snapshot_max_age_seconds。
     bounce_enabled: true  # 是否启用回弹滚动；原 window.bounce_enabled。
     bounce_up_steps: 2  # 回弹时先向上滚动 2 步；原 window.bounce_up_steps。
     bounce_pause_seconds: 0.2  # 回弹上滚后等待 0.2 秒，再向下滚动；原 window.bounce_pause_seconds。
@@ -107,6 +98,5 @@ data_acquisition:
   offline_cache:
     enabled_by_default: false  # 默认离线归档开关；开启后主服务页默认勾选离线归档，具体任务仍以前端当前开关为准。
     max_scroll_seconds: 30.0  # 离线缓存时最长滚动加载时间。
-    max_scroll_count: 30  # 离线缓存时最大滚动次数。
     resource_timeout_seconds: 10.0  # 单个资源下载超时。
     max_concurrent_processes: 3  # 同时运行的 Playwright 离线缓存子进程上限。

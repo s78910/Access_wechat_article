@@ -1,8 +1,10 @@
 <script setup lang="ts">
+import { DownOutlined, ReloadOutlined, SearchOutlined } from '@ant-design/icons-vue'
 import AppIcon from '../components/AppIcon.vue'
-import type { VxeGridPropTypes } from 'vxe-table'
+import { notification } from 'ant-design-vue'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import {
+  clearHistoryRecords,
   getHistoryRecords,
   getHistorySuggestions,
   getHistorySummary,
@@ -12,25 +14,62 @@ import {
 import type { MetricCard } from '../data/mockData'
 import {
   buildHistorySuggestionOptions,
-  createHistorySuggestionRemoteConfig,
   type HistorySuggestionQuery,
 } from '../utils/historySuggestions'
 
 type HistoryRecord = HistoryRecordItem
+type HistoryDateRangeValue = [string, string] | null
+
+type HistoryTableStateRow = {
+  rowKind: 'state'
+  tableKey: string
+  stateText: string
+  stateTone: 'default' | 'error'
+}
+
+type HistoryTablePlaceholderRow = {
+  rowKind: 'placeholder'
+  tableKey: string
+}
+
+type HistoryTableDataRow = HistoryRecord & {
+  rowKind: 'data'
+  tableKey: string
+  displayIndex: number
+}
+
+type HistoryTableRow = HistoryTableDataRow | HistoryTableStateRow | HistoryTablePlaceholderRow
+
+type HistoryTableColumn = {
+  title: string
+  key: string
+  dataIndex?: string
+  width?: number | string
+  align?: 'left' | 'center' | 'right'
+  className?: string
+  customCell?: (record: HistoryTableRow) => { colSpan?: number }
+}
 
 const HISTORY_VISIBLE_ROWS = 15
 const HISTORY_TABLE_HEADER_HEIGHT = 32
 const DEFAULT_HISTORY_TABLE_BODY_HEIGHT = 480
 const HISTORY_QUERY_DEBOUNCE_MS = 250
+const HISTORY_TABLE_COLUMN_COUNT = 7
+const HISTORY_FILTER_TYPE_DETAIL_KEY = 'history-filter:type:detail'
+const HISTORY_FILTER_TYPE_COMMENTS_KEY = 'history-filter:type:comments'
+const HISTORY_FILTER_STATUS_SUCCESS_KEY = 'history-filter:status:success'
+const HISTORY_FILTER_STATUS_FAILED_KEY = 'history-filter:status:failed'
+const HISTORY_FILTER_COLLECT_TYPE_KEYS = ['history-filter:type:detail', 'history-filter:type:comments']
+const HISTORY_FILTER_STATUS_KEYS = ['history-filter:status:success', 'history-filter:status:failed']
 
-const keyword = ref('')
+// Ant Design Vue Select 的空字符串会被当成已选值，未输入时保持 undefined 才会显示 placeholder。
+const keyword = ref<string | undefined>(undefined)
 const selectedCollectType = ref('')
 const selectedStatus = ref('')
 const selectedCollectStartDate = ref('')
 const selectedCollectEndDate = ref('')
 const historyCurrentPage = ref(1)
 const historyPageSize = ref(HISTORY_VISIBLE_ROWS)
-const historyPagerLayouts: Array<'PrevPage' | 'JumpNumber' | 'NextPage'> = ['PrevPage', 'JumpNumber', 'NextPage']
 const selectedHistoryId = ref<number | null>(null)
 const historyRecords = ref<HistoryRecord[]>([])
 const historyTotal = ref(0)
@@ -38,6 +77,9 @@ const historyLoading = ref(false)
 const historyError = ref('')
 const historySummary = ref<HistorySummary | null>(null)
 const summaryLoading = ref(false)
+const historyClearing = ref(false)
+const clearHistoryDialogOpen = ref(false)
+const clearHistoryError = ref('')
 const historySuggestions = ref<string[]>([])
 const historyTableWrapRef = ref<HTMLElement | null>(null)
 const historyTableBodyHeight = ref(DEFAULT_HISTORY_TABLE_BODY_HEIGHT)
@@ -54,22 +96,53 @@ const historyGridStyle = computed<Record<string, string>>(() => ({
   '--history-body-height': `${historyTableBodyHeight.value}px`,
 }))
 
-type PagerChangeParams = {
-  currentPage: number
-  pageSize: number
+const historyFilterTreeData = [
+  {
+    title: '采集类型',
+    value: 'history-filter:type',
+    selectable: false,
+    disableCheckbox: true,
+    children: [
+      { title: '文章详情', value: HISTORY_FILTER_TYPE_DETAIL_KEY },
+      { title: '评论信息', value: HISTORY_FILTER_TYPE_COMMENTS_KEY },
+    ],
+  },
+  {
+    title: '任务状态',
+    value: 'history-filter:status',
+    selectable: false,
+    disableCheckbox: true,
+    children: [
+      { title: '成功', value: HISTORY_FILTER_STATUS_SUCCESS_KEY },
+      { title: '失败', value: HISTORY_FILTER_STATUS_FAILED_KEY },
+    ],
+  },
+]
+
+const collectTypeValueByFilterKey: Record<string, string> = {
+  [HISTORY_FILTER_TYPE_DETAIL_KEY]: '文章详情',
+  [HISTORY_FILTER_TYPE_COMMENTS_KEY]: '评论信息',
 }
 
-const collectTypeOptions = [
-  { label: '全部类型', value: '' },
-  { label: '文章详情', value: '文章详情' },
-  { label: '评论信息', value: '评论信息' },
-]
+const collectTypeFilterKeyByValue: Record<string, string> = {
+  文章详情: HISTORY_FILTER_TYPE_DETAIL_KEY,
+  评论信息: HISTORY_FILTER_TYPE_COMMENTS_KEY,
+}
 
-const statusOptions = [
-  { label: '全部状态', value: '' },
-  { label: '成功', value: 'success' },
-  { label: '失败', value: 'failed' },
-]
+const statusValueByFilterKey: Record<string, string> = {
+  [HISTORY_FILTER_STATUS_SUCCESS_KEY]: 'success',
+  [HISTORY_FILTER_STATUS_FAILED_KEY]: 'failed',
+}
+
+const statusFilterKeyByValue: Record<string, string> = {
+  success: HISTORY_FILTER_STATUS_SUCCESS_KEY,
+  failed: HISTORY_FILTER_STATUS_FAILED_KEY,
+}
+
+const statusLabelByValue: Record<string, string> = {
+  success: '成功',
+  failed: '失败',
+}
 
 const historyMetrics = computed<MetricCard[]>(() => {
   const summary = historySummary.value
@@ -108,6 +181,9 @@ const historyMetrics = computed<MetricCard[]>(() => {
 const chartBars = computed(() => historySummary.value?.trend.map((item) => item.count) ?? [])
 const chartLabels = computed(() => historySummary.value?.trend.map((item) => item.label) ?? [])
 const chartMaxValue = computed(() => Math.max(1, ...chartBars.value))
+const canClearHistoryRecords = computed(() => {
+  return !historyClearing.value && (historySummary.value?.totalRecords ?? historyTotal.value) > 0
+})
 
 // 根据采集结果文本统一映射状态色，避免表格和详情里的状态样式各写一套判断。
 function getStatusTone(status: string) {
@@ -131,57 +207,178 @@ const historyNameOptions = computed(() => {
   return buildHistorySuggestionOptions(historySuggestions.value)
 })
 
+const selectedHistoryFilterKeys = computed<string[]>({
+  get: () => {
+    const selectedKeys: string[] = []
+    const collectTypeKey = collectTypeFilterKeyByValue[selectedCollectType.value]
+    const statusKey = statusFilterKeyByValue[selectedStatus.value]
+
+    if (collectTypeKey) {
+      selectedKeys.push(collectTypeKey)
+    }
+    if (statusKey) {
+      selectedKeys.push(statusKey)
+    }
+
+    return selectedKeys
+  },
+  set: (value: string[]) => applyHistoryFilterKeys(value),
+})
+
+const historyFilterSelectionLabel = computed(() => {
+  const selectedLabels = [
+    selectedCollectType.value,
+    statusLabelByValue[selectedStatus.value],
+  ].filter(Boolean)
+
+  return selectedLabels.length > 0 ? `筛选：${selectedLabels.join(' · ')}` : '筛选：全部'
+})
+
+function normalizeHistoryKeyword(value: string | undefined) {
+  const normalizedValue = value?.trim()
+  return normalizedValue ? normalizedValue : undefined
+}
+
+function getLastHistoryFilterKey(value: string[], allowedKeys: string[]) {
+  const matchedKeys = value.filter((key) => allowedKeys.includes(key))
+  return matchedKeys.at(-1) ?? ''
+}
+
+function applyHistoryFilterKeys(value: string[]) {
+  const checkedKeys = Array.isArray(value) ? value : []
+  const collectTypeKey = getLastHistoryFilterKey(checkedKeys, HISTORY_FILTER_COLLECT_TYPE_KEYS)
+  const statusKey = getLastHistoryFilterKey(checkedKeys, HISTORY_FILTER_STATUS_KEYS)
+
+  selectedCollectType.value = collectTypeValueByFilterKey[collectTypeKey] ?? ''
+  selectedStatus.value = statusValueByFilterKey[statusKey] ?? ''
+}
+
+function renderHistoryFilterTagPlaceholder() {
+  return historyFilterSelectionLabel.value
+}
+
 function truncateAccountName(account: string) {
   const chars = Array.from(account || '')
   return chars.length > 10 ? `${chars.slice(0, 9).join('')}...` : account
 }
 
-const pagedHistoryRecords = computed(() => historyRecords.value)
-
-const historySeqConfig = computed(() => {
-  return {
-    startIndex: (historyCurrentPage.value - 1) * historyPageSize.value,
-  }
+const selectedCollectDateRange = computed<HistoryDateRangeValue>({
+  get: (): HistoryDateRangeValue => {
+    if (!selectedCollectStartDate.value || !selectedCollectEndDate.value) {
+      return null
+    }
+    return [selectedCollectStartDate.value, selectedCollectEndDate.value]
+  },
+  set: (value: HistoryDateRangeValue) => {
+    selectedCollectStartDate.value = value?.[0] ?? ''
+    selectedCollectEndDate.value = value?.[1] ?? ''
+  },
 })
 
-const historyColumns: VxeGridPropTypes.Columns<HistoryRecord> = [
-  { type: 'seq', title: '序号', width: 48, align: 'center', headerAlign: 'center' },
+function makeHistoryStateCellAttrs(stateColumnKey: string) {
+  return (columnKey: string) => (record: HistoryTableRow) => {
+    if (record.rowKind !== 'state') {
+      return {}
+    }
+
+    return columnKey === stateColumnKey ? { colSpan: HISTORY_TABLE_COLUMN_COUNT } : { colSpan: 0 }
+  }
+}
+
+const historyStateCellAttrs = makeHistoryStateCellAttrs('seq')
+
+const historyTableColumns: HistoryTableColumn[] = [
+  { title: '序号', key: 'seq', width: 48, align: 'center', customCell: historyStateCellAttrs('seq') },
   {
-    field: 'name',
     title: '记录名称',
+    key: 'name',
+    dataIndex: 'name',
     width: 200,
     align: 'left',
-    headerAlign: 'center',
-    showOverflow: 'ellipsis',
-    slots: { default: 'name' },
+    customCell: historyStateCellAttrs('name'),
   },
   {
-    field: 'account',
     title: '公众号',
+    key: 'account',
+    dataIndex: 'account',
     width: 128,
     align: 'center',
-    headerAlign: 'center',
-    slots: { default: 'account' },
+    customCell: historyStateCellAttrs('account'),
   },
-  { field: 'collectType', title: '采集类型', width: 72, align: 'center', headerAlign: 'center' },
-  { field: 'collectTime', title: '记录时间', width: 168, align: 'center', headerAlign: 'center' },
   {
-    field: 'status',
-    title: '状态',
+    title: '采集类型',
+    key: 'collectType',
+    dataIndex: 'collectType',
     width: 82,
     align: 'center',
-    headerAlign: 'center',
-    className: 'history-status-column',
-    slots: { default: 'status' },
+    customCell: historyStateCellAttrs('collectType'),
   },
   {
-    title: '操作',
-    width: 52,
+    title: '记录时间',
+    key: 'collectTime',
+    dataIndex: 'collectTime',
+    width: 168,
     align: 'center',
-    headerAlign: 'center',
-    slots: { default: 'action' },
+    customCell: historyStateCellAttrs('collectTime'),
   },
+  {
+    title: '状态',
+    key: 'status',
+    dataIndex: 'status',
+    width: 86,
+    align: 'center',
+    className: 'history-status-column',
+    customCell: historyStateCellAttrs('status'),
+  },
+  { title: '操作', key: 'action', width: 60, align: 'center', customCell: historyStateCellAttrs('action') },
 ]
+
+const historyPlaceholderRowCount = computed(() => {
+  if (historyLoading.value || historyError.value || historyRecords.value.length === 0) {
+    return 0
+  }
+  return Math.max(HISTORY_VISIBLE_ROWS - historyRecords.value.length, 0)
+})
+
+const historyTableRows = computed<HistoryTableRow[]>(() => {
+  if (historyLoading.value) {
+    return [{ rowKind: 'state', tableKey: 'history-loading', stateText: '正在读取采集记录...', stateTone: 'default' }]
+  }
+  if (historyError.value) {
+    return [{ rowKind: 'state', tableKey: 'history-error', stateText: historyError.value, stateTone: 'error' }]
+  }
+  if (historyRecords.value.length === 0) {
+    return [{ rowKind: 'state', tableKey: 'history-empty', stateText: '暂无采集记录', stateTone: 'default' }]
+  }
+
+  const pageStart = (historyCurrentPage.value - 1) * historyPageSize.value
+  const rows: HistoryTableRow[] = historyRecords.value.map((record, index) => ({
+    ...record,
+    rowKind: 'data',
+    tableKey: `history-${record.id}`,
+    displayIndex: pageStart + index + 1,
+  }))
+
+  for (let index = 0; index < historyPlaceholderRowCount.value; index += 1) {
+    rows.push({ rowKind: 'placeholder', tableKey: `history-placeholder-${index + 1}` })
+  }
+
+  return rows
+})
+
+function getHistoryTableRowKey(record: HistoryTableRow) {
+  return record.tableKey
+}
+
+function getHistoryTableCustomRow(record: HistoryTableRow) {
+  if (record.rowKind === 'placeholder') {
+    return { class: 'history-placeholder-row', 'aria-hidden': 'true' }
+  }
+  if (record.rowKind === 'state') {
+    return { class: 'history-state-row' }
+  }
+  return {}
+}
 
 const selectedHistoryRecord = computed(() => {
   if (!selectedHistoryId.value) {
@@ -232,7 +429,7 @@ async function loadHistorySuggestions(query: Partial<HistorySuggestionQuery> = {
   const requestId = ++historySuggestionsRequestId
   try {
     const result = await getHistorySuggestions({
-      keyword: query.keyword ?? keyword.value,
+      keyword: query.keyword ?? keyword.value ?? '',
       limit: query.limit ?? 30,
     })
     if (requestId !== historySuggestionsRequestId) {
@@ -258,8 +455,6 @@ function scheduleHistorySuggestionsLoad(query: Partial<HistorySuggestionQuery> =
   }, HISTORY_QUERY_DEBOUNCE_MS)
 }
 
-const historySuggestionRemoteConfig = createHistorySuggestionRemoteConfig(scheduleHistorySuggestionsLoad)
-
 function updateHistoryTableMetrics() {
   const tableWrap = historyTableWrapRef.value
 
@@ -284,7 +479,7 @@ async function loadHistoryRecords(page = historyCurrentPage.value, pageSize = hi
     const result = await getHistoryRecords({
       page,
       pageSize,
-      keyword: keyword.value,
+      keyword: keyword.value ?? '',
       collectType: selectedCollectType.value,
       status: selectedStatus.value,
       collectStartDate: selectedCollectStartDate.value,
@@ -337,7 +532,7 @@ function clearHistoryQueryTimers() {
 
 async function resetHistoryFilters() {
   clearHistoryQueryTimers()
-  keyword.value = ''
+  keyword.value = undefined
   selectedCollectType.value = ''
   selectedStatus.value = ''
   selectedCollectStartDate.value = ''
@@ -346,14 +541,69 @@ async function resetHistoryFilters() {
   await Promise.all([loadHistorySummary(), loadHistorySuggestions(), loadHistoryRecords(1, historyPageSize.value)])
 }
 
+function openClearHistoryDialog() {
+  if (!canClearHistoryRecords.value) {
+    return
+  }
+  clearHistoryError.value = ''
+  clearHistoryDialogOpen.value = true
+}
+
+function closeClearHistoryDialog() {
+  if (historyClearing.value) {
+    return
+  }
+  clearHistoryDialogOpen.value = false
+}
+
+async function confirmClearHistory() {
+  if (historyClearing.value) {
+    return
+  }
+
+  historyClearing.value = true
+  clearHistoryError.value = ''
+  try {
+    const result = await clearHistoryRecords()
+    selectedHistoryId.value = null
+    historyCurrentPage.value = 1
+    clearHistoryDialogOpen.value = false
+    notification.success({
+      message: '采集历史已清空',
+      description: result.message ?? `已清空 ${result.deletedCount} 条采集历史记录。`,
+      placement: 'bottomRight',
+    })
+    await Promise.all([loadHistorySummary(), loadHistorySuggestions(), loadHistoryRecords(1, historyPageSize.value)])
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '清空采集历史失败'
+    clearHistoryError.value = message
+    notification.error({
+      message: '清空失败',
+      description: message,
+      placement: 'bottomRight',
+    })
+  } finally {
+    historyClearing.value = false
+  }
+}
+
 function selectHistoryRecord(row: HistoryRecord) {
   selectedHistoryId.value = row.id
 }
 
-async function handleHistoryPageChange({ currentPage, pageSize }: PagerChangeParams) {
-  historyCurrentPage.value = currentPage
+function handleHistoryKeywordSearch(value: string) {
+  keyword.value = normalizeHistoryKeyword(value)
+  scheduleHistorySuggestionsLoad({ keyword: keyword.value ?? '' })
+}
+
+function handleHistoryKeywordChange(value: string | undefined) {
+  keyword.value = normalizeHistoryKeyword(value)
+}
+
+async function handleAntHistoryPageChange(page: number, pageSize: number) {
+  historyCurrentPage.value = page
   historyPageSize.value = pageSize
-  await loadHistoryRecords(currentPage, pageSize)
+  await loadHistoryRecords(page, pageSize)
 }
 
 watch(keyword, () => {
@@ -408,121 +658,133 @@ onBeforeUnmount(() => {
         </h2>
 
         <div class="filters-row history-filters">
-          <VxeSelect
-            v-model="keyword"
-            class="history-vxe-control history-keyword"
-            clearable
-            filterable
-            remote
-            placeholder="搜索记录"
+          <AButton class="history-refresh-button" html-type="button" :loading="historyLoading" @click="resetHistoryFilters">
+            <ReloadOutlined />
+            刷新
+          </AButton>
+          <ASelect
+            v-model:value="keyword"
+            class="history-ant-control history-ant-select history-keyword"
+            show-search
+            allow-clear
+            placeholder="搜索公众号或文章标题"
             :options="historyNameOptions"
-            :option-props="{ label: 'label', value: 'value' }"
-            :remote-config="historySuggestionRemoteConfig"
-            :popup-config="{ transfer: true, zIndex: 3000, className: 'history-keyword-panel' }"
-            aria-label="搜索记录"
-          />
-          <VxeSelect
-            v-model="selectedCollectType"
-            class="history-vxe-control"
-            :options="collectTypeOptions"
-            :popup-config="{ transfer: true, zIndex: 3000, className: 'history-filter-select-panel' }"
-            aria-label="采集类型"
-          />
-          <VxeSelect
-            v-model="selectedStatus"
-            class="history-vxe-control"
-            :options="statusOptions"
-            :popup-config="{ transfer: true, zIndex: 3000, className: 'history-filter-select-panel' }"
-            aria-label="任务状态"
-          />
-          <VxeDateRangePicker
-            v-model:start-value="selectedCollectStartDate"
-            v-model:end-value="selectedCollectEndDate"
-            class="history-vxe-control history-date-range-picker"
-            type="date"
-            clearable
-            auto-close
-            placeholder="采集起始 ~ 结束日期"
+            :filter-option="false"
+            popup-class-name="history-keyword-panel"
+            aria-label="搜索公众号或文章标题"
+            @search="handleHistoryKeywordSearch"
+            @change="handleHistoryKeywordChange"
+          >
+            <template #suffixIcon>
+              <SearchOutlined class="history-search-icon" />
+            </template>
+          </ASelect>
+          <ATreeSelect
+            v-model:value="selectedHistoryFilterKeys"
+            class="history-ant-control history-ant-select history-filter-tree"
+            :tree-data="historyFilterTreeData"
+            tree-checkable
+            tree-default-expand-all
+            :show-search="false"
+            allow-clear
+            :max-tag-count="0"
+            :max-tag-placeholder="renderHistoryFilterTagPlaceholder"
+            placeholder="筛选：全部"
+            popup-class-name="history-filter-select-panel"
+            aria-label="采集筛选"
+          >
+            <template #suffixIcon>
+              <DownOutlined class="history-select-chevron" />
+            </template>
+          </ATreeSelect>
+          <ARangePicker
+            v-model:value="selectedCollectDateRange"
+            class="history-date-picker history-date-range-picker"
+            :allow-clear="true"
+            format="YYYY-MM-DD"
+            value-format="YYYY-MM-DD"
             separator=" ~ "
-            value-format="yyyy-MM-dd"
-            label-format="yyyy-MM-dd"
-            :popup-config="{ transfer: true, zIndex: 3000, className: 'history-date-range-picker-panel' }"
+            popup-class-name="history-date-range-picker-panel"
+            :placeholder="['采集起始日期', '采集结束日期']"
             aria-label="采集起始日期和采集结束日期"
           />
-          <VxeButton class="history-vxe-button ghost" type="button" @click="resetHistoryFilters">
-            <AppIcon icon="fa-solid fa-rotate-right" />
-            刷新
-          </VxeButton>
         </div>
       </div>
 
-      <div ref="historyTableWrapRef" class="history-vxe-table-wrap">
-        <VxeGrid
-          class="history-vxe-grid"
+      <div ref="historyTableWrapRef" class="history-table-wrap">
+        <ATable
+          class="history-ant-table"
           :style="historyGridStyle"
-          :columns="historyColumns"
-          :data="pagedHistoryRecords"
-          height="100%"
-          :row-config="{ keyField: 'id' }"
-          :seq-config="historySeqConfig"
-          :cell-config="{ height: historyRowHeight }"
-          :fit="false"
-          :scroll-x="{ enabled: false }"
-          :scroll-y="{ enabled: false }"
-          :show-overflow="true"
-          :show-header-overflow="true"
-          border="inner"
-          size="mini"
+          :columns="historyTableColumns"
+          :data-source="historyTableRows"
+          :pagination="false"
+          :row-key="getHistoryTableRowKey"
+          :custom-row="getHistoryTableCustomRow"
+          :locale="{ emptyText: null }"
+          size="small"
+          table-layout="fixed"
         >
-          <template #name="{ row }: { row: HistoryRecord }">
-            <span class="history-title-cell" :title="row.name">{{ row.name }}</span>
-          </template>
-          <template #account="{ row }: { row: HistoryRecord }">
-            <span class="history-account-cell" :title="row.account">{{ truncateAccountName(row.account) }}</span>
-          </template>
-          <template #status="{ row }: { row: HistoryRecord }">
+          <template #bodyCell="{ column, record }">
             <span
-              :class="[
-                'status-badge',
-                `status-${getStatusTone(row.status)}`,
-              ]"
+              v-if="record.rowKind === 'state' && column.key === 'seq'"
+              :class="['history-table-state', { error: record.stateTone === 'error' }]"
             >
-              {{ row.status }}
+              {{ record.stateText }}
             </span>
+            <template v-else-if="record.rowKind === 'data'">
+              <template v-if="column.key === 'seq'">
+                {{ record.displayIndex }}
+              </template>
+              <span v-else-if="column.key === 'name'" class="history-title-cell" :title="record.name">
+                {{ record.name }}
+              </span>
+              <span v-else-if="column.key === 'account'" class="history-account-cell" :title="record.account">
+                {{ truncateAccountName(record.account) }}
+              </span>
+              <template v-else-if="column.key === 'collectType'">
+                {{ record.collectType }}
+              </template>
+              <template v-else-if="column.key === 'collectTime'">
+                {{ record.collectTime }}
+              </template>
+              <ATag
+                v-else-if="column.key === 'status'"
+                class="history-status-tag"
+                :class="'status-' + getStatusTone(record.status)"
+                :bordered="false"
+              >
+                {{ record.status }}
+              </ATag>
+              <AButton
+                v-else-if="column.key === 'action'"
+                class="history-view-link"
+                type="link"
+                html-type="button"
+                @click="selectHistoryRecord(record)"
+              >
+                查看
+              </AButton>
+            </template>
           </template>
-          <template #action="{ row }: { row: HistoryRecord }">
-            <VxeButton class="history-view-link" mode="text" status="primary" @click="selectHistoryRecord(row)">
-              查看
-            </VxeButton>
-          </template>
-          <template #empty>
-            <div :class="['history-table-state', { error: Boolean(historyError) }]">
-              <span v-if="historyLoading">正在读取采集记录...</span>
-              <span v-else-if="historyError">{{ historyError }}</span>
-              <span v-else>暂无采集记录</span>
-            </div>
-          </template>
-        </VxeGrid>
+        </ATable>
       </div>
 
-      <div class="history-vxe-pagination" aria-label="采集历史分页">
+      <div class="history-ant-pagination" aria-label="采集历史分页">
         <span class="history-total">共 {{ historyTotal }} 条</span>
-        <VxePager
-          v-model:current-page="historyCurrentPage"
-          v-model:page-size="historyPageSize"
-          class-name="history-vxe-pager"
-          size="mini"
-          align="right"
-          :layouts="historyPagerLayouts"
-          :pager-count="7"
-          :page-sizes="[15]"
-          :total="historyTotal"
-          @page-change="handleHistoryPageChange"
-        >
-          <template #right>
-            <span class="history-page-size">{{ historyPageSize }}条/页</span>
-          </template>
-        </VxePager>
+        <div class="history-pagination-controls">
+          <APagination
+            v-model:current="historyCurrentPage"
+            v-model:page-size="historyPageSize"
+            class="history-ant-pager"
+            size="small"
+            :total="historyTotal"
+            :page-size-options="[HISTORY_VISIBLE_ROWS]"
+            :show-size-changer="false"
+            :show-less-items="false"
+            @change="handleAntHistoryPageChange"
+          />
+          <span class="history-page-size">{{ historyPageSize }} 条/页</span>
+        </div>
       </div>
     </section>
 
@@ -571,14 +833,13 @@ onBeforeUnmount(() => {
           <div class="detail-row">
             <span>运行结果</span>
             <strong>
-              <span
-                :class="[
-                  'status-badge',
-                  `status-${getStatusTone(recordDetail.status)}`,
-                ]"
+              <ATag
+                class="history-status-tag"
+                :class="'status-' + getStatusTone(recordDetail.status)"
+                :bordered="false"
               >
                 {{ recordDetail.status }}
-              </span>
+              </ATag>
             </strong>
           </div>
           <template v-if="recordDetail.collectStatus === 'failed'">
@@ -614,24 +875,35 @@ onBeforeUnmount(() => {
       </section>
 
       <section class="history-stats page-panel">
-        <h2 class="section-heading">
-          <AppIcon icon="fa-solid fa-chart-column" />
-          历史统计
-        </h2>
+        <div class="history-stats-header">
+          <h2 class="section-heading">
+            <AppIcon icon="fa-solid fa-chart-column" />
+            历史统计
+          </h2>
+          <AButton
+            class="history-clear-button"
+            danger
+            html-type="button"
+            :disabled="!canClearHistoryRecords"
+            :loading="historyClearing"
+            @click="openClearHistoryDialog"
+          >
+            <AppIcon v-if="!historyClearing" icon="fa-regular fa-trash-can" />
+            {{ historyClearing ? '清空中' : '清空记录' }}
+          </AButton>
+        </div>
         <p class="chart-caption">近日采集趋势</p>
         <div class="trend-chart" aria-label="近日采集趋势">
           <div v-for="(bar, index) in chartBars" :key="chartLabels[index]" class="trend-item">
-            <VxeTooltip
-              :content="`${chartLabels[index]}：${bar} 条`"
+            <ATooltip
+              :title="chartLabels[index] + '：' + bar + ' 条'"
               placement="top"
-              theme="light"
-              :enter-delay="80"
             >
               <span
                 class="trend-bar"
-                :style="{ height: `${Math.round((bar / chartMaxValue) * 92)}px` }"
+                :style="{ height: Math.round((bar / chartMaxValue) * 92) + 'px' }"
               ></span>
-            </VxeTooltip>
+            </ATooltip>
             <small>{{ chartLabels[index] }}</small>
           </div>
         </div>
@@ -654,6 +926,54 @@ onBeforeUnmount(() => {
         </div>
       </section>
     </aside>
+
+    <AModal
+      v-model:open="clearHistoryDialogOpen"
+      class="history-clear-modal"
+      title="清空采集历史"
+      :closable="!historyClearing"
+      :keyboard="!historyClearing"
+      :mask-closable="!historyClearing"
+      :confirm-loading="historyClearing"
+      :ok-button-props="{ danger: true }"
+      ok-text="确认清空"
+      cancel-text="取消"
+      centered
+      @cancel="closeClearHistoryDialog"
+      @ok="confirmClearHistory"
+    >
+      <div class="history-clear-content">
+        <div class="history-clear-intro">
+          <span class="history-clear-icon" aria-hidden="true">
+            <AppIcon icon="fa-regular fa-trash-can" />
+          </span>
+          <p>将清空全部采集历史流水记录，历史统计和采集记录列表会同步刷新。</p>
+        </div>
+        <dl class="history-clear-summary">
+          <div>
+            <dt>影响数据表</dt>
+            <dd>awa_fetch_history</dd>
+          </div>
+          <div>
+            <dt>当前记录数</dt>
+            <dd>{{ historySummary?.totalRecords ?? historyTotal }} 条</dd>
+          </div>
+        </dl>
+        <AAlert
+          class="history-clear-alert"
+          type="warning"
+          show-icon
+          message="不会删除文章归档和公众号数据。"
+        />
+        <AAlert
+          v-if="clearHistoryError"
+          class="history-clear-alert"
+          type="error"
+          show-icon
+          :message="clearHistoryError"
+        />
+      </div>
+    </AModal>
   </section>
 </template>
 
@@ -709,12 +1029,109 @@ onBeforeUnmount(() => {
   padding: 18px 24px;
 }
 
+.history-stats-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.history-clear-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-width: 94px;
+  height: 32px;
+  padding: 0 11px;
+  border-color: rgba(217, 65, 63, 0.24);
+  border-radius: 6px;
+  color: #b84242;
+  background: rgba(255, 255, 255, 0.56);
+  box-shadow: var(--paper-shadow-sm);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.history-clear-button:hover,
+.history-clear-button:focus-visible {
+  border-color: rgba(217, 65, 63, 0.42);
+  color: #a83636;
+  background: rgba(255, 241, 240, 0.92);
+}
+
+.history-clear-button:disabled {
+  color: rgba(77, 108, 159, 0.42);
+  border-color: rgba(104, 141, 181, 0.14);
+  background: rgba(255, 255, 255, 0.4);
+}
+
+.history-clear-content {
+  display: grid;
+  gap: 14px;
+}
+
+.history-clear-intro {
+  display: grid;
+  grid-template-columns: 38px minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+}
+
+.history-clear-icon {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  color: #d9413f;
+  background: rgba(255, 241, 240, 0.92);
+}
+
+.history-clear-intro p {
+  margin: 0;
+  color: var(--ink);
+  font-size: 14px;
+  line-height: 1.7;
+}
+
+.history-clear-summary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin: 0;
+}
+
+.history-clear-summary div {
+  padding: 10px 12px;
+  border: 1px solid var(--line-soft);
+  border-radius: 7px;
+  background: rgba(234, 244, 251, 0.38);
+}
+
+.history-clear-summary dt {
+  margin-bottom: 4px;
+  color: var(--ink-muted);
+  font-size: 12px;
+}
+
+.history-clear-summary dd {
+  margin: 0;
+  color: var(--ink-strong);
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.history-clear-alert {
+  border-radius: 7px;
+}
+
 .history-filters {
-  grid-template-columns: minmax(136px, 156px) minmax(92px, 104px) minmax(92px, 104px) minmax(188px, 1fr) 76px;
+  grid-template-columns: 76px minmax(154px, 176px) minmax(132px, 152px) minmax(250px, 1fr);
   justify-self: end;
   position: relative;
   z-index: 8;
-  width: min(100%, 660px);
+  width: min(100%, 696px);
   gap: 10px;
   margin-top: 0;
   padding: 0;
@@ -724,158 +1141,231 @@ onBeforeUnmount(() => {
   box-shadow: none;
 }
 
-.history-vxe-control {
+.history-ant-control,
+.history-date-picker,
+.history-refresh-button {
   width: 100%;
   min-width: 0;
+  height: 38px;
+  font-size: 14px;
+  font-weight: 400;
 }
 
-.history-keyword {
-  min-width: 0;
-}
-
-.history-list :deep(.history-keyword .vxe-input--suffix) {
-  width: 28px;
-  flex-basis: 28px;
-  padding-right: 6px;
-  box-sizing: border-box;
-}
-
-.history-list :deep(.history-keyword .vxe-input--inner) {
-  padding-right: 8px;
-}
-
+.history-keyword,
+.history-filter-tree,
 .history-date-range-picker {
   min-width: 0;
 }
 
-.history-list :deep(.history-vxe-control.vxe-input),
-.history-list :deep(.history-vxe-control.vxe-select),
-.history-list :deep(.history-vxe-control.vxe-date-range-picker) {
+.history-list :deep(.history-ant-select.ant-select) {
+  width: 100%;
+}
+
+.history-list :deep(.history-ant-select.ant-select .ant-select-selector) {
+  height: 38px;
+  padding: 0 11px;
+  border-color: var(--line);
+  border-radius: 6px;
+  color: var(--ink);
+  background: rgba(255, 255, 255, 0.48);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.6);
+  font-size: 14px;
+  font-weight: 400;
+}
+
+.history-list :deep(.history-ant-select.ant-select .ant-select-selection-item),
+.history-list :deep(.history-ant-select.ant-select .ant-select-selection-placeholder),
+.history-list :deep(.history-ant-select.ant-select .ant-select-selection-search-input) {
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 36px;
+}
+
+.history-list :deep(.history-ant-select.ant-select .ant-select-selection-placeholder) {
+  color: rgba(77, 108, 159, 0.72);
+}
+
+.history-search-icon {
+  color: rgba(77, 108, 159, 0.78);
+  font-size: 14px;
+}
+
+.history-select-chevron {
+  color: rgba(77, 108, 159, 0.84);
+  font-size: 10px;
+  pointer-events: none;
+  transform: rotate(0deg);
+  transition: transform 160ms ease;
+}
+
+.history-select-chevron.is-open {
+  transform: rotate(180deg);
+}
+
+.history-list :deep(.history-filter-tree.ant-select-open .history-select-chevron) {
+  transform: rotate(180deg);
+}
+
+.history-list :deep(.history-ant-select.ant-select .ant-select-arrow),
+.history-list :deep(.history-date-picker.ant-picker .ant-picker-suffix),
+.history-list :deep(.history-date-picker.ant-picker .ant-picker-clear) {
+  color: rgba(77, 108, 159, 0.72);
+}
+
+.history-list :deep(.history-date-picker.ant-picker) {
   width: 100%;
   height: 38px;
-  color: var(--ink);
-  font-size: 14px;
-  font-weight: 400;
-}
-
-.history-list :deep(.history-vxe-control .vxe-input--wrapper),
-.history-list :deep(.history-vxe-control.vxe-select),
-.history-list :deep(.history-vxe-control.vxe-date-range-picker) {
+  padding: 0 11px;
   border-color: var(--line);
   border-radius: 6px;
+  color: var(--ink);
   background: rgba(255, 255, 255, 0.48);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.6);
+  font-size: 14px;
+  font-weight: 400;
 }
 
-.history-list :deep(.history-vxe-control .vxe-input--inner),
-.history-list :deep(.history-vxe-control .vxe-date-range-picker--inner),
-.history-list :deep(.history-vxe-control .vxe-date-range-picker--prefix),
-.history-list :deep(.history-vxe-control .vxe-date-range-picker--suffix) {
+.history-list :deep(.history-date-picker.ant-picker input),
+.history-list :deep(.history-date-picker.ant-picker .ant-picker-input > input) {
   color: var(--ink);
   font-size: 14px;
   font-weight: 400;
 }
 
-.history-list :deep(.history-vxe-control .vxe-input--inner::placeholder),
-.history-list :deep(.history-vxe-control .vxe-date-range-picker--inner::placeholder) {
+.history-list :deep(.history-date-picker.ant-picker input::placeholder) {
   color: rgba(77, 108, 159, 0.72);
-  font-weight: 400;
 }
 
-.history-list :deep(.history-date-range-picker.vxe-date-range-picker) {
-  height: 38px;
-  border-color: var(--line);
-  border-radius: 6px;
-  background: rgba(255, 255, 255, 0.48);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.6);
-}
-
-.history-list :deep(.history-date-range-picker .vxe-date-range-picker--prefix),
-.history-list :deep(.history-date-range-picker .vxe-date-range-picker--suffix),
-.history-list :deep(.history-date-range-picker .vxe-date-range-picker--inner) {
-  background: transparent;
-  text-align: center;
-}
-
-.history-list :deep(.history-date-range-picker .vxe-date-range-picker--inner) {
-  text-align: center;
-}
-
-.history-list :deep(.history-date-range-picker .vxe-date-range-picker--inner::placeholder) {
-  text-align: center;
-}
-
-:global(.history-keyword-panel.vxe-select--panel),
-:global(.history-filter-select-panel.vxe-select--panel),
-:global(.history-date-range-picker-panel.vxe-date-range-picker--panel) {
-  color: var(--ink);
-  font-size: 14px;
-  font-weight: 400;
-}
-
-:global(.history-keyword-panel .vxe-select--panel-wrapper),
-:global(.history-filter-select-panel .vxe-select--panel-wrapper) {
-  border-color: var(--line);
-  border-radius: 7px;
-  background: #fbfdff;
-  box-shadow: 0 12px 22px rgba(35, 69, 111, 0.14);
-}
-
-:global(.history-keyword-panel .vxe-select-option),
-:global(.history-keyword-panel .vxe-select--empty-placeholder),
-:global(.history-filter-select-panel .vxe-select-option),
-:global(.history-filter-select-panel .vxe-select--empty-placeholder),
-:global(.history-date-range-picker-panel .vxe-date-panel--picker-label),
-:global(.history-date-range-picker-panel .vxe-date-panel--picker-btn),
-:global(.history-date-range-picker-panel .vxe-date-panel--view-header),
-:global(.history-date-range-picker-panel .vxe-date-panel--view-item-inner),
-:global(.history-date-range-picker-panel .vxe-date-panel--label) {
-  color: var(--ink);
-  font-weight: 400;
-}
-
-:global(.history-keyword-panel .vxe-select-option.is--selected),
-:global(.history-filter-select-panel .vxe-select-option.is--selected),
-:global(.history-date-range-picker-panel .vxe-date-panel--picker-type-wrapper),
-:global(.history-date-range-picker-panel .vxe-date-panel--picker-label) {
-  color: var(--ink-strong);
-  font-weight: 500;
-}
-
-.history-vxe-button {
+.history-refresh-button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
-  width: 76px;
-  height: 38px;
-  border: 1px solid var(--line);
+  gap: 6px;
+  padding: 0 10px;
+  border-color: rgba(45, 117, 214, 0.24);
   border-radius: 6px;
-  color: var(--ink);
-  background: rgba(255, 255, 255, 0.5);
+  color: var(--blue);
+  background: rgba(255, 255, 255, 0.54);
   box-shadow: var(--paper-shadow-sm);
   font-size: 14px;
   font-weight: 500;
 }
 
-.history-vxe-button.primary {
-  color: #ffffff;
-  border-color: rgba(45, 117, 214, 0.32);
+.history-refresh-button:hover,
+.history-refresh-button:focus-visible {
+  border-color: rgba(45, 117, 214, 0.42);
+  color: var(--blue);
+  background: rgba(238, 247, 255, 0.9);
+}
+
+:global(.history-date-range-picker-panel.ant-picker-dropdown) {
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 400;
+}
+
+:global(.history-keyword-panel.ant-select-dropdown) {
+  min-width: calc(180px * var(--app-scale));
+  padding: calc(4px * var(--app-scale));
+  border: 1px solid var(--line);
+  border-radius: calc(7px * var(--app-scale));
+  color: var(--ink);
+  background: #fbfdff;
+  box-shadow: 0 12px 22px rgba(35, 69, 111, 0.14);
+  font-size: calc(14px * var(--app-scale));
+  font-weight: 400;
+}
+
+:global(.history-filter-select-panel.ant-select-dropdown) {
+  min-width: calc(152px * var(--app-scale));
+  max-width: calc(176px * var(--app-scale));
+  padding: calc(4px * var(--app-scale));
+  border: 1px solid var(--line);
+  border-radius: calc(7px * var(--app-scale));
+  color: var(--ink);
+  background: #fbfdff;
+  box-shadow: 0 12px 22px rgba(35, 69, 111, 0.14);
+  font-size: calc(14px * var(--app-scale));
+  font-weight: 400;
+}
+
+:global(.history-keyword-panel .ant-select-item),
+:global(.history-filter-select-panel .ant-select-item) {
+  min-height: calc(32px * var(--app-scale));
+  padding: calc(5px * var(--app-scale)) calc(12px * var(--app-scale));
+  border-radius: calc(4px * var(--app-scale));
+  color: var(--ink);
+  font-size: calc(14px * var(--app-scale));
+  font-weight: 400;
+  line-height: 1.25;
+}
+
+:global(.history-keyword-panel .ant-select-item-option-selected),
+:global(.history-filter-select-panel .ant-select-item-option-selected) {
+  color: var(--ink-strong);
+  background: rgba(45, 117, 214, 0.1);
+  font-weight: 500;
+}
+
+:global(.history-filter-select-panel .ant-select-tree) {
+  color: var(--ink);
+  background: transparent;
+  font-size: calc(14px * var(--app-scale));
+  line-height: 1.25;
+}
+
+:global(.history-filter-select-panel .ant-select-tree-treenode) {
+  align-items: center;
+  min-height: calc(26px * var(--app-scale));
+  padding: calc(1px * var(--app-scale)) 0;
+}
+
+:global(.history-filter-select-panel .ant-select-tree-node-content-wrapper) {
+  min-height: calc(26px * var(--app-scale));
+  padding-inline: calc(4px * var(--app-scale));
+  border-radius: calc(4px * var(--app-scale));
+  color: var(--ink);
+  line-height: calc(26px * var(--app-scale));
+}
+
+:global(.history-filter-select-panel .ant-select-tree-node-content-wrapper:hover) {
+  background: rgba(45, 117, 214, 0.08);
+}
+
+:global(.history-filter-select-panel .ant-select-tree-switcher) {
+  width: calc(18px * var(--app-scale));
+  line-height: calc(26px * var(--app-scale));
+}
+
+:global(.history-filter-select-panel .ant-select-tree-indent-unit) {
+  width: calc(14px * var(--app-scale));
+}
+
+:global(.history-filter-select-panel .ant-select-tree-checkbox) {
+  margin-inline-end: calc(6px * var(--app-scale));
+}
+
+:global(.history-filter-select-panel .ant-select-tree-checkbox-inner) {
+  width: calc(15px * var(--app-scale));
+  height: calc(15px * var(--app-scale));
+}
+
+:global(.history-filter-select-panel .ant-select-tree-checkbox-checked .ant-select-tree-checkbox-inner) {
+  border-color: #2d75d6;
   background: #2d75d6;
 }
 
-.history-vxe-button.ghost {
-  color: var(--blue);
-  background: rgba(255, 255, 255, 0.5);
+:global(.history-date-range-picker-panel .ant-picker-panel-container) {
+  zoom: var(--app-scale);
 }
 
-.history-vxe-table-wrap {
+.history-table-wrap {
   position: relative;
   --history-header-height: 32px;
   --history-body-height: 480px;
   flex: 1 1 0;
   height: auto;
-  box-sizing: content-box;
   min-height: 0;
   margin-top: 6px;
   border: 1px solid rgba(104, 141, 181, 0.18);
@@ -885,161 +1375,140 @@ onBeforeUnmount(() => {
   overflow: hidden;
 }
 
-.history-vxe-grid {
-  --vxe-ui-font-color: var(--ink);
-  --vxe-ui-font-primary-color: var(--blue);
-  --vxe-ui-layout-background-color: rgba(255, 255, 255, 0.34);
-  --vxe-ui-table-header-background-color: rgba(234, 244, 251, 0.54);
-  --vxe-ui-table-border-color: var(--line-soft);
-  --vxe-ui-table-row-hover-background-color: rgba(74, 129, 183, 0.08);
-  --vxe-ui-table-row-height-mini: var(--history-row-height, 32px);
-  --vxe-ui-table-cell-padding-mini: 4px;
-  height: 100%;
-  overflow: hidden;
-}
-
-.history-list :deep(.history-vxe-grid.vxe-grid) {
+.history-list :deep(.history-ant-table) {
+  height: calc(var(--history-header-height) + var(--history-body-height));
   color: var(--ink);
   background: transparent;
   font-size: 14px;
   font-weight: 400;
 }
 
-.history-list :deep(.history-vxe-grid .vxe-table) {
+.history-list :deep(.history-ant-table .ant-table) {
+  width: 100%;
   color: var(--ink);
   background: transparent;
-  overflow: hidden;
+  font-size: 14px;
+  font-weight: 400;
 }
 
-.history-list :deep(.history-vxe-grid .vxe-table--main-wrapper),
-.history-list :deep(.history-vxe-grid .vxe-table--header-wrapper),
-.history-list :deep(.history-vxe-grid .vxe-table--body-wrapper) {
-  width: 100% !important;
+.history-list :deep(.history-ant-table .ant-table-container),
+.history-list :deep(.history-ant-table .ant-table-content),
+.history-list :deep(.history-ant-table table) {
+  width: 100%;
+  background: transparent;
 }
 
-.history-list :deep(.history-vxe-grid .vxe-table--main-wrapper) {
-  height: 100% !important;
-}
-
-.history-list :deep(.history-vxe-grid .vxe-table--header-wrapper) {
-  height: var(--history-header-height) !important;
-  overflow: hidden !important;
-}
-
-.history-list :deep(.history-vxe-grid .vxe-table--body-wrapper) {
-  height: var(--history-body-height) !important;
-}
-
-.history-list :deep(.history-vxe-grid .vxe-table--header),
-.history-list :deep(.history-vxe-grid .vxe-table--body) {
-  width: 100% !important;
-}
-
-.history-list :deep(.history-vxe-grid .vxe-table--header-border-line) {
-  display: none;
-}
-
-.history-list :deep(.history-vxe-grid .vxe-table--body-wrapper) {
-  overflow: hidden !important;
-  scrollbar-width: none;
-  -ms-overflow-style: none;
-}
-
-.history-list :deep(.history-vxe-grid .vxe-table--body-wrapper::-webkit-scrollbar) {
-  width: 0;
-  height: 0;
-}
-
-.history-list :deep(.history-vxe-grid .vxe-table--scroll-y-wrapper),
-.history-list :deep(.history-vxe-grid .vxe-table--scroll-y-virtual-wrapper),
-.history-list :deep(.history-vxe-grid .vxe-table--scroll-x-wrapper),
-.history-list :deep(.history-vxe-grid .vxe-table--scroll-x-virtual-wrapper) {
-  width: 0 !important;
-  height: 0 !important;
-  opacity: 0;
-  pointer-events: none;
-}
-
-.history-list :deep(.history-vxe-grid .vxe-header--column) {
-  height: var(--history-header-height) !important;
+.history-list :deep(.history-ant-table .ant-table-thead > tr > th) {
+  height: var(--history-header-height);
+  padding: 0 8px;
+  border-color: var(--line-soft);
   color: var(--ink-strong);
-  background: rgba(234, 244, 251, 0.48);
+  background: rgba(234, 244, 251, 0.54);
   font-size: 14px;
   font-weight: 500;
+  line-height: var(--history-header-height);
 }
 
-.history-list :deep(.history-vxe-grid .vxe-body--column) {
-  height: var(--history-row-height, 32px) !important;
+.history-list :deep(.history-ant-table .ant-table-tbody > tr) {
+  height: var(--history-row-height, 32px);
+}
+
+.history-list :deep(.history-ant-table .ant-table-tbody > tr > td) {
+  height: var(--history-row-height, 32px);
+  padding: 0 8px;
+  border-color: var(--line-soft);
   color: var(--ink);
+  background: transparent;
   font-size: 14px;
   font-weight: 400;
-}
-
-.history-list :deep(.history-vxe-grid .vxe-cell) {
-  display: flex;
-  align-items: center;
-  min-height: var(--history-row-height, 32px);
-  height: var(--history-row-height, 32px);
-  padding: 0 4px !important;
   line-height: 1.2;
 }
 
-.history-list :deep(.history-vxe-grid .vxe-header--column .vxe-cell),
-.history-list :deep(.history-vxe-grid .vxe-body--column.col--center .vxe-cell) {
-  justify-content: center;
+.history-list :deep(.history-ant-table .ant-table-tbody > tr:hover > td) {
+  background: rgba(74, 129, 183, 0.08);
 }
 
-.history-list :deep(.history-vxe-grid .history-status-column .vxe-cell) {
-  align-items: center;
-  justify-content: center;
+.history-list :deep(.history-ant-table .history-placeholder-row > td) {
+  color: transparent;
+  background: transparent;
+  pointer-events: none;
 }
 
-.history-list :deep(.history-vxe-grid .status-badge) {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
+.history-list :deep(.history-ant-table .history-state-row > td) {
+  height: var(--history-body-height);
+  padding: 0 8px;
+  border-color: transparent;
+  background: transparent;
+}
+
+.history-list :deep(.history-ant-table .ant-table-tbody > tr > td.ant-table-cell-ellipsis) {
+  overflow: hidden;
+}
+
+.history-list :deep(.history-ant-table .history-status-tag) {
   min-width: 70px;
-  height: 24px;
-  gap: 4px;
-  padding: 0 7px;
+  margin: 0;
   border: 1px solid transparent;
+  border-radius: 999px;
   font-size: 12px;
-  line-height: 24px;
+  font-weight: 500;
+  line-height: 22px;
 }
 
-.history-list :deep(.history-vxe-grid .status-badge::before) {
-  width: 5px;
-  height: 5px;
-}
-
-.history-list :deep(.history-vxe-grid .status-badge.status-success),
-.detail-row .status-badge.status-success {
+.history-list :deep(.history-ant-table .history-status-tag.status-success) {
   border-color: rgba(31, 143, 105, 0.16);
   color: var(--green);
   background: rgba(31, 143, 105, 0.14);
 }
 
-.history-list :deep(.history-vxe-grid .status-badge.status-warning),
-.detail-row .status-badge.status-warning {
+.history-list :deep(.history-ant-table .history-status-tag.status-warning) {
   border-color: rgba(223, 122, 53, 0.18);
   color: var(--orange);
   background: rgba(223, 122, 53, 0.15);
 }
 
-.history-list :deep(.history-vxe-grid .status-badge.status-danger),
-.detail-row .status-badge.status-danger {
+.history-list :deep(.history-ant-table .history-status-tag.status-danger) {
   border-color: rgba(217, 65, 63, 0.16);
   color: var(--red);
   background: rgba(217, 65, 63, 0.13);
 }
 
-.history-list :deep(.history-vxe-grid .status-badge.status-neutral),
-.detail-row .status-badge.status-neutral {
+.history-list :deep(.history-ant-table .history-status-tag.status-neutral) {
   border-color: rgba(104, 141, 181, 0.18);
   color: var(--ink-muted);
   background: rgba(104, 141, 181, 0.12);
 }
 
+.history-title-cell {
+  display: block;
+  width: 100%;
+  overflow: hidden;
+  color: var(--ink-strong);
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.history-account-cell {
+  display: block;
+  max-width: 10em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.history-table-state {
+  display: grid;
+  place-items: center;
+  min-height: 120px;
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.history-table-state.error {
+  color: var(--red);
+}
 .history-title-cell {
   display: block;
   width: 100%;
@@ -1126,19 +1595,20 @@ onBeforeUnmount(() => {
   line-height: 1.2;
 }
 
-.history-list :deep(.history-view-link.vxe-button.type--text.size--mini) {
-  min-height: auto;
+.history-view-link {
   padding: 0 1px;
+  color: var(--blue);
   font-size: 13px;
+  font-weight: 500;
   line-height: 1.2;
 }
 
-.history-list :deep(.history-view-link .vxe-button--content) {
-  font-size: inherit;
-  line-height: inherit;
+.history-view-link:hover,
+.history-view-link:focus-visible {
+  color: #245eaf;
 }
 
-.history-vxe-pagination {
+.history-ant-pagination {
   display: flex;
   flex: 0 0 auto;
   align-items: center;
@@ -1157,95 +1627,57 @@ onBeforeUnmount(() => {
   white-space: nowrap;
 }
 
-.history-list :deep(.history-vxe-pager.vxe-pager) {
-  flex: 1 1 auto;
-  min-width: 0;
-  margin-left: auto;
-  padding: 0;
-  color: var(--ink);
-  background: transparent;
-  font-size: 13px;
-  font-weight: 900;
-}
-
-.history-list :deep(.history-vxe-pager .vxe-pager--wrapper) {
+.history-pagination-controls {
   display: inline-flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 6px;
-  width: 100%;
-  min-height: 32px;
+  gap: 10px;
+  min-width: 0;
 }
 
-.history-list :deep(.history-vxe-pager .vxe-pager--prev-btn),
-.history-list :deep(.history-vxe-pager .vxe-pager--next-btn),
-.history-list :deep(.history-vxe-pager .vxe-pager--num-btn),
-.history-list :deep(.history-vxe-pager .vxe-pager--jump-prev),
-.history-list :deep(.history-vxe-pager .vxe-pager--jump-next) {
-  display: inline-grid;
-  place-items: center;
-  min-width: 32px;
-  height: 32px;
-  padding: 0 9px;
-  border: 1px solid transparent;
+.history-list :deep(.history-ant-pager.ant-pagination) {
+  margin: 0;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 400;
+}
+
+.history-list :deep(.history-ant-pager .ant-pagination-item),
+.history-list :deep(.history-ant-pager .ant-pagination-prev),
+.history-list :deep(.history-ant-pager .ant-pagination-next) {
+  min-width: 28px;
+  height: 28px;
+  line-height: 26px;
+}
+
+.history-list :deep(.history-ant-pager .ant-pagination-item),
+.history-list :deep(.history-ant-pager .ant-pagination-prev .ant-pagination-item-link),
+.history-list :deep(.history-ant-pager .ant-pagination-next .ant-pagination-item-link) {
+  border-color: transparent;
   border-radius: 6px;
   color: var(--blue);
   background: rgba(255, 255, 255, 0.64);
-  box-shadow: none;
-  font: inherit;
-  line-height: 1;
-  cursor: pointer;
-  transition:
-    border-color 150ms ease,
-    background 150ms ease,
-    color 150ms ease;
 }
 
-.history-list :deep(.history-vxe-pager .vxe-pager--prev-btn),
-.history-list :deep(.history-vxe-pager .vxe-pager--next-btn) {
-  width: 32px;
-  padding: 0;
-  color: rgba(77, 108, 159, 0.78);
-}
-
-.history-list :deep(.history-vxe-pager .vxe-pager--jump-prev),
-.history-list :deep(.history-vxe-pager .vxe-pager--jump-next) {
-  min-width: 24px;
-  padding: 0 6px;
-  color: rgba(77, 108, 159, 0.72);
-}
-
-.history-list :deep(.history-vxe-pager .vxe-pager--prev-btn:hover:not(.is--disabled)),
-.history-list :deep(.history-vxe-pager .vxe-pager--next-btn:hover:not(.is--disabled)),
-.history-list :deep(.history-vxe-pager .vxe-pager--num-btn:hover:not(.is--active)),
-.history-list :deep(.history-vxe-pager .vxe-pager--jump-prev:hover:not(.is--disabled)),
-.history-list :deep(.history-vxe-pager .vxe-pager--jump-next:hover:not(.is--disabled)) {
+.history-list :deep(.history-ant-pager .ant-pagination-item:hover),
+.history-list :deep(.history-ant-pager .ant-pagination-prev:hover .ant-pagination-item-link),
+.history-list :deep(.history-ant-pager .ant-pagination-next:hover .ant-pagination-item-link) {
   border-color: rgba(45, 117, 214, 0.24);
-  background: rgba(255, 255, 255, 0.86);
+  background: rgba(238, 247, 255, 0.9);
 }
 
-.history-list :deep(.history-vxe-pager .vxe-pager--num-btn.is--active) {
-  color: #ffffff;
+.history-list :deep(.history-ant-pager .ant-pagination-item-active) {
   border-color: rgba(45, 117, 214, 0.32);
   background: linear-gradient(135deg, #4d85dc, #2d70cc);
 }
 
-.history-list :deep(.history-vxe-pager .is--disabled) {
-  cursor: not-allowed;
+.history-list :deep(.history-ant-pager .ant-pagination-item-active a) {
+  color: #ffffff;
+}
+
+.history-list :deep(.history-ant-pager .ant-pagination-disabled .ant-pagination-item-link) {
   color: rgba(77, 108, 159, 0.36);
   background: rgba(255, 255, 255, 0.46);
-}
-
-.history-list :deep(.history-vxe-pager .vxe-pager--btn-icon),
-.history-list :deep(.history-vxe-pager .vxe-pager--jump-icon),
-.history-list :deep(.history-vxe-pager .vxe-pager--jump-more-icon) {
-  line-height: 1;
-}
-
-.history-list :deep(.history-vxe-pager .vxe-pager--right-wrapper) {
-  display: inline-flex;
-  align-items: center;
-  margin-left: 2px;
 }
 
 .history-page-size {
@@ -1264,7 +1696,6 @@ onBeforeUnmount(() => {
   font-weight: 400;
   white-space: nowrap;
 }
-
 .detail-art {
   top: 0;
   right: 0;
@@ -1468,77 +1899,77 @@ onBeforeUnmount(() => {
   height: 32px;
 }
 
-:global(.collector-app.dark) .history-list :deep(.history-vxe-control .vxe-input--wrapper),
-:global(.collector-app.dark) .history-list :deep(.history-vxe-control.vxe-select),
-:global(.collector-app.dark) .history-list :deep(.history-vxe-control.vxe-date-range-picker) {
+:global(.collector-app.dark) .history-list :deep(.history-ant-control),
+:global(.collector-app.dark) .history-list :deep(.history-date-picker.ant-picker),
+:global(.collector-app.dark) .history-refresh-button {
   border-color: rgba(128, 153, 188, 0.2);
+  color: #cbd8ea;
   background: rgba(15, 24, 39, 0.62);
   box-shadow: inset 0 1px 0 rgba(214, 226, 244, 0.045);
 }
 
-:global(.collector-app.dark) .history-list :deep(.history-vxe-control .vxe-input--inner),
-:global(.collector-app.dark) .history-list :deep(.history-vxe-control .vxe-date-range-picker--inner),
-:global(.collector-app.dark) .history-list :deep(.history-vxe-control .vxe-date-range-picker--prefix),
-:global(.collector-app.dark) .history-list :deep(.history-vxe-control .vxe-date-range-picker--suffix) {
+:global(.collector-app.dark) .history-list :deep(.history-ant-select.ant-select .ant-select-selector) {
+  border-color: rgba(128, 153, 188, 0.2);
+  color: #cbd8ea;
+  background: rgba(15, 24, 39, 0.56);
+}
+
+:global(.collector-app.dark) .history-list :deep(.history-ant-select.ant-select .ant-select-selection-item),
+:global(.collector-app.dark) .history-list :deep(.history-ant-select.ant-select .ant-select-selection-placeholder),
+:global(.collector-app.dark) .history-list :deep(.history-date-picker.ant-picker input),
+:global(.collector-app.dark) .history-list :deep(.history-date-picker.ant-picker .ant-picker-input > input) {
   color: #cbd8ea;
 }
 
-:global(.collector-app.dark) .history-list :deep(.history-vxe-control .vxe-input--inner::placeholder),
-:global(.collector-app.dark) .history-list :deep(.history-vxe-control .vxe-date-range-picker--inner::placeholder) {
+:global(.collector-app.dark) .history-list :deep(.history-ant-select.ant-select .ant-select-selection-placeholder),
+:global(.collector-app.dark) .history-list :deep(.history-date-picker.ant-picker input::placeholder) {
   color: rgba(142, 162, 189, 0.72);
 }
 
-:global(.collector-app.dark) .history-list :deep(.history-date-range-picker.vxe-date-range-picker) {
+:global(.collector-app.dark) .history-search-icon,
+:global(.collector-app.dark) .history-select-chevron {
+  color: #9fc3ef;
+}
+
+:global(.collector-app.dark) .history-refresh-button {
   border-color: rgba(128, 153, 188, 0.2);
-  background: rgba(15, 24, 39, 0.62);
-  box-shadow: inset 0 1px 0 rgba(214, 226, 244, 0.045);
-}
-
-:global(.collector-app.dark) .history-vxe-button {
-  color: #cbd8ea;
-  border-color: rgba(128, 153, 188, 0.2);
-  background: rgba(17, 27, 44, 0.72);
-  box-shadow: inset 0 1px 0 rgba(214, 226, 244, 0.045);
-}
-
-:global(.collector-app.dark) .history-vxe-button.primary {
-  color: #f0f6ff;
-  border-color: rgba(111, 154, 211, 0.34);
-  background: #2f6fb5;
-}
-
-:global(.collector-app.dark) .history-vxe-button.ghost {
   color: #8fbded;
-  background: rgba(17, 27, 44, 0.62);
 }
 
-:global(.collector-app.dark) .history-vxe-table-wrap {
+:global(.collector-app.dark) .history-refresh-button:hover,
+:global(.collector-app.dark) .history-refresh-button:focus-visible {
+  border-color: rgba(111, 154, 211, 0.34);
+  color: #dceaff;
+  background: rgba(24, 38, 60, 0.86);
+}
+
+:global(.collector-app.dark) .history-table-wrap {
   border-color: rgba(128, 153, 188, 0.14);
   background: rgba(15, 24, 39, 0.52);
   box-shadow: inset 0 1px 0 rgba(214, 226, 244, 0.045);
 }
 
-:global(.collector-app.dark) .history-list :deep(.history-vxe-grid.vxe-grid),
-:global(.collector-app.dark) .history-list :deep(.history-vxe-grid .vxe-table),
-:global(.collector-app.dark) .history-list :deep(.history-vxe-grid .vxe-table--main-wrapper),
-:global(.collector-app.dark) .history-list :deep(.history-vxe-grid .vxe-table--header-wrapper),
-:global(.collector-app.dark) .history-list :deep(.history-vxe-grid .vxe-table--body-wrapper) {
+:global(.collector-app.dark) .history-list :deep(.history-ant-table .ant-table),
+:global(.collector-app.dark) .history-list :deep(.history-ant-table .ant-table-container),
+:global(.collector-app.dark) .history-list :deep(.history-ant-table .ant-table-content),
+:global(.collector-app.dark) .history-list :deep(.history-ant-table table) {
   color: #c5d3e6;
   background: transparent;
 }
 
-:global(.collector-app.dark) .history-list :deep(.history-vxe-grid .vxe-header--column) {
+:global(.collector-app.dark) .history-list :deep(.history-ant-table .ant-table-thead > tr > th) {
   color: #dce7f5;
+  border-color: rgba(128, 153, 188, 0.12);
   background: rgba(24, 37, 58, 0.86);
 }
 
-:global(.collector-app.dark) .history-list :deep(.history-vxe-grid .vxe-body--column) {
+:global(.collector-app.dark) .history-list :deep(.history-ant-table .ant-table-tbody > tr > td) {
   color: #c5d3e6;
   border-color: rgba(128, 153, 188, 0.1);
   background: transparent;
 }
 
-:global(.collector-app.dark) .history-list :deep(.history-vxe-grid .vxe-body--row:hover .vxe-body--column) {
+:global(.collector-app.dark) .history-list :deep(.history-ant-table .ant-table-tbody > tr:hover > td) {
   background: rgba(36, 56, 84, 0.32);
 }
 
@@ -1553,15 +1984,13 @@ onBeforeUnmount(() => {
   color: #8ea2bd;
 }
 
-:global(.collector-app.dark) .history-list :deep(.history-view-link.vxe-button.type--text.size--mini) {
+:global(.collector-app.dark) .history-list :deep(.history-view-link) {
   color: #8fbded;
 }
 
-:global(.collector-app.dark) .history-list :deep(.history-vxe-pager .vxe-pager--prev-btn),
-:global(.collector-app.dark) .history-list :deep(.history-vxe-pager .vxe-pager--next-btn),
-:global(.collector-app.dark) .history-list :deep(.history-vxe-pager .vxe-pager--num-btn),
-:global(.collector-app.dark) .history-list :deep(.history-vxe-pager .vxe-pager--jump-prev),
-:global(.collector-app.dark) .history-list :deep(.history-vxe-pager .vxe-pager--jump-next),
+:global(.collector-app.dark) .history-list :deep(.history-ant-pager .ant-pagination-item),
+:global(.collector-app.dark) .history-list :deep(.history-ant-pager .ant-pagination-prev .ant-pagination-item-link),
+:global(.collector-app.dark) .history-list :deep(.history-ant-pager .ant-pagination-next .ant-pagination-item-link),
 :global(.collector-app.dark) .history-page-size {
   color: #a9bfda;
   border-color: rgba(128, 153, 188, 0.16);
@@ -1569,27 +1998,27 @@ onBeforeUnmount(() => {
   box-shadow: inset 0 1px 0 rgba(214, 226, 244, 0.04);
 }
 
-:global(.collector-app.dark) .history-list :deep(.history-vxe-pager .vxe-pager--prev-btn:hover:not(.is--disabled)),
-:global(.collector-app.dark) .history-list :deep(.history-vxe-pager .vxe-pager--next-btn:hover:not(.is--disabled)),
-:global(.collector-app.dark) .history-list :deep(.history-vxe-pager .vxe-pager--num-btn:hover:not(.is--active)),
-:global(.collector-app.dark) .history-list :deep(.history-vxe-pager .vxe-pager--jump-prev:hover:not(.is--disabled)),
-:global(.collector-app.dark) .history-list :deep(.history-vxe-pager .vxe-pager--jump-next:hover:not(.is--disabled)) {
+:global(.collector-app.dark) .history-list :deep(.history-ant-pager .ant-pagination-item:hover),
+:global(.collector-app.dark) .history-list :deep(.history-ant-pager .ant-pagination-prev:hover .ant-pagination-item-link),
+:global(.collector-app.dark) .history-list :deep(.history-ant-pager .ant-pagination-next:hover .ant-pagination-item-link) {
   color: #dceaff;
   border-color: rgba(111, 154, 211, 0.34);
   background: rgba(24, 38, 60, 0.86);
 }
 
-:global(.collector-app.dark) .history-list :deep(.history-vxe-pager .vxe-pager--num-btn.is--active) {
-  color: #f0f6ff;
+:global(.collector-app.dark) .history-list :deep(.history-ant-pager .ant-pagination-item-active) {
   border-color: rgba(111, 154, 211, 0.36);
   background: #2f6fb5;
 }
 
-:global(.collector-app.dark) .history-list :deep(.history-vxe-pager .is--disabled) {
+:global(.collector-app.dark) .history-list :deep(.history-ant-pager .ant-pagination-item-active a) {
+  color: #f0f6ff;
+}
+
+:global(.collector-app.dark) .history-list :deep(.history-ant-pager .ant-pagination-disabled .ant-pagination-item-link) {
   color: rgba(142, 162, 189, 0.42);
   background: rgba(17, 27, 44, 0.42);
 }
-
 :global(.collector-app.dark) .task-detail .detail-row,
 :global(.collector-app.dark) .trend-item,
 :global(.collector-app.dark) .history-log-row {

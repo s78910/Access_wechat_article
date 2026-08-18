@@ -11,7 +11,11 @@ from uuid import uuid4
 from src.domain.enums import CaptureType, TaskStatus
 from src.domain.models import ArticleTarget, MitmCaptureResult, TaskContext
 from src.modules.window.window_models import BrowserTabInfo
+from src.services.capture.collected_article_lookup_service import (
+    CollectedArticleLookupService,
+)
 from src.services.capture.single_article_capture_service import SingleCaptureSettings
+from src.services.runtime.article_card_probe_service import ArticleCardProbeService
 
 
 DiagnosticUpdate = Callable[[dict[str, Any]], None]
@@ -50,6 +54,7 @@ class ArticleDetailDiagnosticService:
         window_factory: Any,
         capture_factory: Any,
         db_path: str | Path,
+        lookup_service: CollectedArticleLookupService | None = None,
         monotonic: Callable[[], float] = time.monotonic,
         now: Callable[[], datetime] = datetime.now,
     ) -> None:
@@ -57,23 +62,18 @@ class ArticleDetailDiagnosticService:
         self._window_factory = window_factory
         self._capture_factory = capture_factory
         self._db_path = Path(db_path)
+        self._lookup_service = lookup_service or CollectedArticleLookupService()
         self._monotonic = monotonic
         self._now = now
 
     def run(self, *, on_update: DiagnosticUpdate | None = None) -> dict[str, Any]:
-        capture = self.capture_detail(on_update=on_update)
-        result = _result(
-            ok=capture.ok,
-            status=capture.status,
-            message=capture.message,
-            tone=capture.tone,
-            items=capture.items,
-            capture_type=capture.capture_type,
-            total_seconds=capture.total_seconds,
-        )
-        if on_update is not None:
-            on_update(result)
-        return result
+        """兼容旧调用：只做同步首篇卡片探测，不启动 MITM 或点击文章。"""
+
+        return ArticleCardProbeService(
+            config=self._config,
+            window_factory=self._window_factory,
+            monotonic=self._monotonic,
+        ).read_first_visible_card(on_update=on_update)
 
     def capture_detail(
         self,
@@ -83,6 +83,7 @@ class ArticleDetailDiagnosticService:
         title: str = "详情获取结果",
         running_message: str = "单篇文章详情获取正在执行...",
         failed_prefix: str = "单篇文章详情获取失败",
+        skip_collected_records: bool = False,
     ) -> ArticleDetailCaptureRun:
         started_at = self._monotonic()
         items: list[dict[str, Any]] = []
@@ -131,7 +132,6 @@ class ArticleDetailDiagnosticService:
             home_window = self._window_factory.find_home_window(
                 reader=reader,
                 timeout_seconds=self._config.window.home_find_timeout_seconds,
-                use_article_probe=self._config.window.home_find_use_article_probe,
             )
             guard = self._window_factory.create_home_guard()
             guard.activate(home_window)
@@ -167,6 +167,57 @@ class ArticleDetailDiagnosticService:
                     _cell("候选文章", refreshed_target.title),
                 ],
             )
+
+            if skip_collected_records:
+                step_started = self._monotonic()
+                account_name = _safe_attr(home_info, "account_name", "")
+                title_fragment = refreshed_target.raw_title or refreshed_target.title
+                published_date = refreshed_target.published_date
+                if not account_name or not title_fragment:
+                    emit(
+                        "已采集记录校验",
+                        _seconds(_elapsed(self._monotonic, step_started)),
+                        [
+                            _cell("结果", "公众号或标题为空，默认继续捕获"),
+                            _cell("公众号", account_name),
+                            _cell("标题片段", title_fragment),
+                        ],
+                    )
+                else:
+                    matched = self._lookup_service.find_by_account_date_and_title_fragment(
+                        database_path=self._db_path,
+                        account_name=account_name,
+                        published_date=published_date or "",
+                        title_fragment=title_fragment,
+                    )
+                    if matched is not None:
+                        emit(
+                            "已采集记录校验",
+                            _seconds(_elapsed(self._monotonic, step_started)),
+                            [
+                                _cell("结果", "检测到本地已采集记录，停止后续捕获"),
+                                _cell("匹配标题", matched.article_title),
+                                _cell("发布时间", matched.published_article_time),
+                            ],
+                        )
+                        return ArticleDetailCaptureRun(
+                            ok=True,
+                            status="skipped-collected",
+                            message="检测到本地已采集记录，已跳过详情捕获和初始内容存储。",
+                            tone="warning",
+                            items=items,
+                            capture_type=CaptureType.NONE.value,
+                            total_seconds=_elapsed(self._monotonic, started_at),
+                        )
+                    emit(
+                        "已采集记录校验",
+                        _seconds(_elapsed(self._monotonic, step_started)),
+                        [
+                            _cell("结果", "未发现已采集记录，可以继续捕获"),
+                            _cell("标题片段", title_fragment),
+                            _cell("发布时间", published_date),
+                        ],
+                    )
 
             tabs = self._window_factory.create_tab_service()
             clicker = self._window_factory.create_clicker()

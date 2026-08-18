@@ -6,6 +6,9 @@ from typing import Any
 from src.config.app_config import AppConfig
 from src.modules.processes.process_launcher import MultiprocessingProcessLauncher
 from src.modules.system.windows_system_proxy import WindowsSystemProxy
+from src.services.capture.in_process_mitm_capture_service import (
+    InProcessMitmCaptureService,
+)
 from src.services.capture.mitm_process_control_service import MitmProcessControlService
 from src.services.capture.single_article_capture_service import SingleArticleCaptureService
 from src.services.capture.window_runtime_factory import WindowRuntimeFactory
@@ -22,6 +25,7 @@ class CaptureRuntimeFactory:
         launcher_factory: Callable[[], Any] = MultiprocessingProcessLauncher,
         system_proxy_factory: Callable[[], Any] = WindowsSystemProxy,
         process_control_factory: Callable[..., Any] = MitmProcessControlService,
+        in_process_control_factory: Callable[..., Any] = InProcessMitmCaptureService,
         single_capture_factory: Callable[..., Any] = SingleArticleCaptureService,
     ) -> None:
         self._config = config
@@ -29,6 +33,7 @@ class CaptureRuntimeFactory:
         self._launcher_factory = launcher_factory
         self._system_proxy_factory = system_proxy_factory
         self._process_control_factory = process_control_factory
+        self._in_process_control_factory = in_process_control_factory
         self._single_capture_factory = single_capture_factory
 
     @property
@@ -48,6 +53,16 @@ class CaptureRuntimeFactory:
         return self._process_control_factory(
             launcher=self._launcher_factory(),
             fallback_system_proxy=self._system_proxy_factory(),
+        )
+
+    def create_in_process_control(self) -> Any:
+        """创建 Huey 任务线程内使用的 MITM 控制器，不再额外启动捕获子进程。"""
+        if not self._config.proxy.enable_system_proxy:
+            raise RuntimeError(
+                "custom.yaml 已关闭 enable_system_proxy，不能创建真实 MITM 代理控制器"
+            )
+        return self._in_process_control_factory(
+            system_proxy_factory=self._system_proxy_factory,
         )
 
     def create_single_article_service(

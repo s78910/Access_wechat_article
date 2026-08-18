@@ -79,7 +79,6 @@ class WindowDiagnosticService:
             home_window = self._window_factory.find_home_window(
                 reader=reader,
                 timeout_seconds=self._config.window.home_find_timeout_seconds,
-                use_article_probe=self._config.window.home_find_use_article_probe,
             )
         except WechatHomeWindowFindTimeout:
             return _result(
@@ -129,7 +128,6 @@ class WindowDiagnosticService:
             home_window = self._window_factory.find_home_window(
                 reader=reader,
                 timeout_seconds=self._config.window.home_find_timeout_seconds,
-                use_article_probe=self._config.window.home_find_use_article_probe,
             )
         except WechatHomeWindowFindTimeout:
             find_seconds = _elapsed(self._monotonic, started_at)
@@ -146,10 +144,6 @@ class WindowDiagnosticService:
                         find_seconds,
                         "home_find_timeout_seconds",
                         self._config.window.home_find_timeout_seconds,
-                        extra_setting_key="home_find_use_article_probe",
-                        extra_setting_value=(
-                            self._config.window.home_find_use_article_probe
-                        ),
                     ),
                 ],
             )
@@ -177,10 +171,6 @@ class WindowDiagnosticService:
                         find_seconds,
                         "home_find_timeout_seconds",
                         self._config.window.home_find_timeout_seconds,
-                        extra_setting_key="home_find_use_article_probe",
-                        extra_setting_value=(
-                            self._config.window.home_find_use_article_probe
-                        ),
                     ),
                 ],
             )
@@ -211,8 +201,6 @@ class WindowDiagnosticService:
                     find_seconds,
                     "home_find_timeout_seconds",
                     self._config.window.home_find_timeout_seconds,
-                    extra_setting_key="home_find_use_article_probe",
-                    extra_setting_value=self._config.window.home_find_use_article_probe,
                 ),
                 _timing_config_item(
                     "激活主页窗口",
@@ -495,7 +483,6 @@ class WindowDiagnosticService:
             home_window = self._window_factory.find_home_window(
                 reader=reader,
                 timeout_seconds=self._config.window.home_find_timeout_seconds,
-                use_article_probe=self._config.window.home_find_use_article_probe,
             )
         except WechatHomeWindowMinimized as exc:
             find_seconds = _elapsed(self._monotonic, started_at)
@@ -602,8 +589,6 @@ def _home_minimized_result(
                 find_seconds,
                 "home_find_timeout_seconds",
                 config.window.home_find_timeout_seconds,
-                extra_setting_key="home_find_use_article_probe",
-                extra_setting_value=config.window.home_find_use_article_probe,
             )
         )
     return _result(

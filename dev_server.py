@@ -13,9 +13,8 @@ import socket
 import subprocess
 import sys
 import tempfile
-from threading import Event, Lock, Thread
+from threading import Lock
 from typing import Any
-from uuid import uuid4
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -41,9 +40,6 @@ from src.modules.proxy.mitmproxy_listener import MitmproxyListener, MitmproxyLis
 from src.modules.proxy.proxy_state import ProxySnapshot, proxy_points_to
 from src.modules.request.chrome_headers import build_chrome_document_headers
 from src.modules.system.windows_system_proxy import WindowsSystemProxy
-from src.modules.system.window_diagnostic_trace_store import (
-    WindowDiagnosticTraceStore,
-)
 from src.services.archive.archive_delete_service import ArchiveDeleteService
 from src.services.archive.archive_excel_export_service import ArchiveExcelExportService
 from src.services.archive.offline_cache_job_service import (
@@ -53,16 +49,9 @@ from src.services.archive.offline_cache_job_service import (
 from src.services.capture.capture_runtime_factory import CaptureRuntimeFactory
 from src.services.capture.window_runtime_factory import WindowRuntimeFactory
 from src.services.history.history_query_service import HistoryQueryService
+from src.services.history.history_clear_service import HistoryClearService
 from src.services.runtime.database_init_service import DatabaseInitService
-from src.services.runtime.article_detail_diagnostic_service import (
-    ArticleDetailDiagnosticService,
-)
-from src.services.runtime.article_detail_comments_diagnostic_service import (
-    ArticleDetailCommentsDiagnosticService,
-)
-from src.services.runtime.initial_content_storage_diagnostic_service import (
-    InitialContentStorageDiagnosticService,
-)
+from src.services.runtime.article_card_probe_service import ArticleCardProbeService
 from src.services.runtime.runtime_cache_clear_service import RuntimeCacheClearService
 from src.services.runtime.runtime_log_service import RuntimeLogService
 from src.services.runtime.startup_self_check_service import StartupSelfCheckService
@@ -71,8 +60,21 @@ from src.services.runtime.window_diagnostic_service import (
     WINDOW_DIAGNOSTIC_ACTIONS,
     WindowDiagnosticService,
 )
-from src.services.runtime.window_click_flow_diagnostic_service import (
-    WindowClickFlowDiagnosticService,
+from src.services.task.window_click_flow_huey_service import (
+    WindowClickFlowConflictError,
+    WindowClickFlowHueyService,
+)
+from src.services.task.single_article_detail_huey_service import (
+    SingleArticleDetailHueyService,
+)
+from src.services.task.initial_content_storage_huey_service import (
+    InitialContentStorageHueyService,
+)
+from src.services.task.article_detail_comments_huey_service import (
+    ArticleDetailCommentsHueyService,
+)
+from src.services.task.article_detail_offline_cache_huey_service import (
+    ArticleDetailOfflineCacheHueyService,
 )
 from src.services.task.task_manager import TaskConflictError
 from src.storage.sqlite.connection import sqlite_connection
@@ -104,22 +106,16 @@ class DevBackendContext:
     port_checker: Any | None = None
     mitm_listener_factory: Any | None = None
     window_diagnostic_runner: Any | None = None
-    window_click_flow_diagnostic_runner: Any | None = None
-    window_click_flow_diagnostic_jobs: dict[str, dict[str, Any]] = field(default_factory=dict)
-    window_click_flow_diagnostic_lock: Any = field(default_factory=Lock, repr=False)
-    window_click_flow_diagnostic_stop_flags: dict[str, Event] = field(default_factory=dict)
+    window_click_flow_huey_service: Any | None = None
+    article_detail_card_probe_service: Any | None = None
+    article_detail_huey_service: Any | None = None
     diagnostic_mitm_listener: Any | None = None
     diagnostic_mitm_started_at: float = 0.0
     diagnostic_system_proxy_snapshot: ProxySnapshot | None = None
     article_detail_diagnostic_runner: Any | None = None
-    article_detail_diagnostic_jobs: dict[str, dict[str, Any]] = field(default_factory=dict)
-    article_detail_diagnostic_lock: Any = field(default_factory=Lock, repr=False)
-    initial_content_storage_diagnostic_runner: Any | None = None
-    initial_content_storage_diagnostic_jobs: dict[str, dict[str, Any]] = field(default_factory=dict)
-    initial_content_storage_diagnostic_lock: Any = field(default_factory=Lock, repr=False)
-    article_detail_comments_diagnostic_runner: Any | None = None
-    article_detail_comments_diagnostic_jobs: dict[str, dict[str, Any]] = field(default_factory=dict)
-    article_detail_comments_diagnostic_lock: Any = field(default_factory=Lock, repr=False)
+    initial_content_storage_huey_service: Any | None = None
+    article_detail_comments_huey_service: Any | None = None
+    article_detail_offline_cache_huey_service: Any | None = None
     health_check_results: dict[str, dict[str, Any]] = field(default_factory=dict)
     health_startup_completed: bool = False
     health_check_lock: Any = field(default_factory=Lock, repr=False)
@@ -251,6 +247,59 @@ class WindowClickFlowDiagnosticPayload(BaseModel):
         return self
 
 
+class ArticleDetailDiagnosticPayload(BaseModel):
+    """单篇详情诊断输入；当前前端只传跳过已采集记录开关。"""
+
+    cardIndex: int = Field(default=1, ge=1)
+    accountName: str | None = None
+    card: dict[str, Any] | None = None
+    skipCollectedRecords: bool = False
+
+
+class InitialContentStorageDiagnosticPayload(BaseModel):
+    """初始内容存储诊断输入；文章详情存储是该流程的锁定动作。"""
+
+    skipCollectedRecords: bool = False
+    storeArticleDetail: bool = True
+
+    @model_validator(mode="after")
+    def lock_store_article_detail(self) -> InitialContentStorageDiagnosticPayload:
+        # 前端显示为锁定勾选；后端也强制为 True，避免被手动请求绕过。
+        self.storeArticleDetail = True
+        return self
+
+
+class ArticleDetailCommentsDiagnosticPayload(BaseModel):
+    """评论信息存储诊断输入；文章详情和评论信息都是锁定动作。"""
+
+    skipCollectedRecords: bool = False
+    storeArticleDetail: bool = True
+    storeCommentInfo: bool = True
+
+    @model_validator(mode="after")
+    def lock_store_options(self) -> ArticleDetailCommentsDiagnosticPayload:
+        # 前端两个存储项显示为锁定勾选；后端也强制开启，避免手动请求绕过流程。
+        self.storeArticleDetail = True
+        self.storeCommentInfo = True
+        return self
+
+
+class ArticleDetailOfflineCacheDiagnosticPayload(BaseModel):
+    """离线缓存诊断输入；文章详情和离线归档内容都是锁定动作。"""
+
+    skipCollectedRecords: bool = False
+    storeArticleDetail: bool = True
+    archiveOfflineContent: bool = True
+    statefulOfflineCache: bool = False
+
+    @model_validator(mode="after")
+    def lock_store_options(self) -> ArticleDetailOfflineCacheDiagnosticPayload:
+        # 前端两个存储项显示为锁定勾选；带状态是可选实验项，不在这里锁定。
+        self.storeArticleDetail = True
+        self.archiveOfflineContent = True
+        return self
+
+
 def create_dev_backend(
     *,
     project_root: str | Path | None = None,
@@ -275,6 +324,45 @@ def create_dev_backend(
             runtime_logger=runtime_logger,
         ),
         runtime_logger=runtime_logger,
+        window_click_flow_huey_service=WindowClickFlowHueyService(
+            temp_root=runtime.config.storage.temp_dir,
+            config=runtime.config,
+            window_factory=runtime.window_factory,
+        ),
+        article_detail_card_probe_service=ArticleCardProbeService(
+            config=runtime.config,
+            window_factory=runtime.window_factory,
+        ),
+        article_detail_huey_service=SingleArticleDetailHueyService(
+            temp_root=runtime.config.storage.temp_dir,
+            config=runtime.config,
+            window_factory=runtime.window_factory,
+            capture_factory=runtime.capture_factory,
+            database_path=db_path,
+        ),
+        initial_content_storage_huey_service=InitialContentStorageHueyService(
+            temp_root=runtime.config.storage.temp_dir,
+            config=runtime.config,
+            window_factory=runtime.window_factory,
+            capture_factory=runtime.capture_factory,
+            database_path=db_path,
+        ),
+        article_detail_comments_huey_service=ArticleDetailCommentsHueyService(
+            temp_root=runtime.config.storage.temp_dir,
+            config=runtime.config,
+            window_factory=runtime.window_factory,
+            capture_factory=runtime.capture_factory,
+            database_path=db_path,
+        ),
+        article_detail_offline_cache_huey_service=ArticleDetailOfflineCacheHueyService(
+            temp_root=runtime.config.storage.temp_dir,
+            config=runtime.config,
+            window_factory=runtime.window_factory,
+            capture_factory=runtime.capture_factory,
+            database_path=db_path,
+            browser_cache_dir=root / ".playwright-browsers",
+            write_coordinator=runtime.database_write_coordinator,
+        ),
         offline_cache_service=OfflineCacheJobService(
             database_path=db_path,
             storage_root=runtime.config.storage.article_storage_root,
@@ -282,7 +370,6 @@ def create_dev_backend(
             browser_cache_dir=root / ".playwright-browsers",
             max_concurrent_processes=runtime.config.offline_cache.max_concurrent_processes,
             max_scroll_seconds=runtime.config.offline_cache.max_scroll_seconds,
-            max_scroll_count=runtime.config.offline_cache.max_scroll_count,
             resource_timeout_seconds=runtime.config.offline_cache.resource_timeout_seconds,
             write_coordinator=runtime.database_write_coordinator,
         ),
@@ -553,6 +640,26 @@ def create_backend_app(backend: DevBackendContext) -> FastAPI:
             collect_end_date=collectEndDate,
         )
 
+    @app.delete("/api/history/records")
+    def clear_history_records():
+        if getattr(backend, "active_task_id", None):
+            return JSONResponse(
+                {
+                    "ok": False,
+                    "status": "busy",
+                    "message": "当前采集任务仍在运行，不能清空采集历史。",
+                },
+                status_code=409,
+            )
+        result = HistoryClearService(backend.db_path).clear_all()
+        backend.append_log(
+            "INFO",
+            result["message"],
+            source="history-clear",
+            summary=True,
+        )
+        return result
+
     @app.get("/api/history/summary")
     def get_history_summary() -> dict[str, Any]:
         return HistoryQueryService(backend.db_path).get_summary()
@@ -736,28 +843,42 @@ def create_backend_app(backend: DevBackendContext) -> FastAPI:
         return _stop_window_click_flow_diagnostic_job(backend, job_id)
 
     @app.post("/api/diagnostics/article-detail")
-    def start_article_detail_diagnostic(_payload: UnsupportedPayload | None = None):
-        return _start_article_detail_diagnostic_job(backend)
+    def start_article_detail_diagnostic(payload: ArticleDetailDiagnosticPayload):
+        return _start_article_detail_diagnostic_job(backend, payload)
 
     @app.get("/api/diagnostics/article-detail/{job_id}")
     def get_article_detail_diagnostic(job_id: str):
         return _article_detail_diagnostic_job_payload(backend, job_id)
 
     @app.post("/api/diagnostics/initial-content-storage")
-    def start_initial_content_storage_diagnostic(_payload: UnsupportedPayload | None = None):
-        return _start_initial_content_storage_diagnostic_job(backend)
+    def start_initial_content_storage_diagnostic(
+        payload: InitialContentStorageDiagnosticPayload | None = None,
+    ):
+        return _start_initial_content_storage_diagnostic_job(backend, payload)
 
     @app.get("/api/diagnostics/initial-content-storage/{job_id}")
     def get_initial_content_storage_diagnostic(job_id: str):
         return _initial_content_storage_diagnostic_job_payload(backend, job_id)
 
     @app.post("/api/diagnostics/article-detail-comments")
-    def start_article_detail_comments_diagnostic(_payload: UnsupportedPayload | None = None):
-        return _start_article_detail_comments_diagnostic_job(backend)
+    def start_article_detail_comments_diagnostic(
+        payload: ArticleDetailCommentsDiagnosticPayload | None = None,
+    ):
+        return _start_article_detail_comments_diagnostic_job(backend, payload)
 
     @app.get("/api/diagnostics/article-detail-comments/{job_id}")
     def get_article_detail_comments_diagnostic(job_id: str):
         return _article_detail_comments_diagnostic_job_payload(backend, job_id)
+
+    @app.post("/api/diagnostics/article-detail-offline-cache")
+    def start_article_detail_offline_cache_diagnostic(
+        payload: ArticleDetailOfflineCacheDiagnosticPayload | None = None,
+    ):
+        return _start_article_detail_offline_cache_diagnostic_job(backend, payload)
+
+    @app.get("/api/diagnostics/article-detail-offline-cache/{job_id}")
+    def get_article_detail_offline_cache_diagnostic(job_id: str):
+        return _article_detail_offline_cache_diagnostic_job_payload(backend, job_id)
 
     @app.get("/api/ca/mitm/list")
     def list_mitm_ca_certificates():
@@ -792,6 +913,36 @@ def create_backend_app(backend: DevBackendContext) -> FastAPI:
 
 def shutdown_backend(backend: DevBackendContext) -> None:
     """后端退出时只取消当前采集任务；8766 端口由 uvicorn 生命周期关闭。"""
+    if backend.window_click_flow_huey_service is not None:
+        try:
+            backend.window_click_flow_huey_service.shutdown()
+            backend.append_log("INFO", "后端退出，已停止窗口诊断Huey队列。")
+        except Exception as exc:
+            backend.append_log("ERROR", f"窗口诊断Huey队列停止失败：{exc}")
+    if backend.article_detail_huey_service is not None:
+        try:
+            backend.article_detail_huey_service.shutdown()
+            backend.append_log("INFO", "后端退出，已停止单篇详情Huey队列。")
+        except Exception as exc:
+            backend.append_log("ERROR", f"单篇详情Huey队列停止失败：{exc}")
+    if backend.initial_content_storage_huey_service is not None:
+        try:
+            backend.initial_content_storage_huey_service.shutdown()
+            backend.append_log("INFO", "后端退出，已停止初始内容存储Huey队列。")
+        except Exception as exc:
+            backend.append_log("ERROR", f"初始内容存储Huey队列停止失败：{exc}")
+    if backend.article_detail_comments_huey_service is not None:
+        try:
+            backend.article_detail_comments_huey_service.shutdown()
+            backend.append_log("INFO", "后端退出，已停止单篇评论存储Huey队列。")
+        except Exception as exc:
+            backend.append_log("ERROR", f"单篇评论存储Huey队列停止失败：{exc}")
+    if backend.article_detail_offline_cache_huey_service is not None:
+        try:
+            backend.article_detail_offline_cache_huey_service.shutdown()
+            backend.append_log("INFO", "后端退出，已停止单篇离线缓存Huey队列。")
+        except Exception as exc:
+            backend.append_log("ERROR", f"单篇离线缓存Huey队列停止失败：{exc}")
     if backend.offline_cache_service is not None:
         try:
             backend.offline_cache_service.shutdown()
@@ -1362,17 +1513,33 @@ def _runtime_cache_busy_reason(backend: DevBackendContext) -> str | None:
     if backend.offline_cache_service is not None and backend.offline_cache_service.is_busy():
         return "离线缓存任务正在运行"
 
+    if (
+        backend.window_click_flow_huey_service is not None
+        and backend.window_click_flow_huey_service.is_active()
+    ):
+        return "诊断任务正在运行"
+    if (
+        backend.article_detail_huey_service is not None
+        and backend.article_detail_huey_service.is_active()
+    ):
+        return "诊断任务正在运行"
+    if (
+        backend.initial_content_storage_huey_service is not None
+        and backend.initial_content_storage_huey_service.is_active()
+    ):
+        return "诊断任务正在运行"
+    if (
+        backend.article_detail_comments_huey_service is not None
+        and backend.article_detail_comments_huey_service.is_active()
+    ):
+        return "诊断任务正在运行"
+    if (
+        backend.article_detail_offline_cache_huey_service is not None
+        and backend.article_detail_offline_cache_huey_service.is_active()
+    ):
+        return "诊断任务正在运行"
+
     diagnostic_groups = (
-        (backend.window_click_flow_diagnostic_jobs, backend.window_click_flow_diagnostic_lock),
-        (backend.article_detail_diagnostic_jobs, backend.article_detail_diagnostic_lock),
-        (
-            backend.initial_content_storage_diagnostic_jobs,
-            backend.initial_content_storage_diagnostic_lock,
-        ),
-        (
-            backend.article_detail_comments_diagnostic_jobs,
-            backend.article_detail_comments_diagnostic_lock,
-        ),
     )
     for jobs, lock in diagnostic_groups:
         with lock:
@@ -2007,12 +2174,10 @@ def _integer_config_keys() -> set[str]:
     return {
         "proxy.port",
         "comment.max_pages",
-        "offline_cache.max_scroll_count",
         "runtime.temp_retention_days",
         "runtime.log_retention_days",
         "window.scroll_wheel_steps",
         "window.date_seek_max_steps",
-        "window.max_scroll_attempts",
         "window.bounce_attempts",
         "window.bounce_up_steps",
         "window.bounce_down_steps",
@@ -2036,11 +2201,9 @@ def _float_config_keys() -> set[str]:
         "window.article_title_poll_interval_seconds",
         "window.article_title_stable_delay_seconds",
         "window.article_close_confirm_timeout_seconds",
-        "window.visible_snapshot_max_age_seconds",
         "window.scroll_initial_delay_seconds",
         "window.scroll_probe_interval_seconds",
         "window.scroll_probe_max_interval_seconds",
-        "window.scroll_settle_timeout_seconds",
         "window.lazy_load_timeout_seconds",
         "window.unchanged_before_bounce_seconds",
         "window.bounce_pause_seconds",
@@ -2735,587 +2898,462 @@ def _window_diagnostic_payload(
 def _start_window_click_flow_diagnostic_job(
     backend: DevBackendContext,
     options: WindowClickFlowDiagnosticPayload | None = None,
-) -> dict[str, Any]:
+) -> dict[str, Any] | JSONResponse:
     options = options or WindowClickFlowDiagnosticPayload()
-    job_id = f"window-click-flow-{uuid4().hex[:12]}"
-    stop_event = Event()
-    trace_store = WindowDiagnosticTraceStore(
-        temp_root=Path(backend.runtime.config.storage.temp_dir),
-        job_id=job_id,
-    )
-    trace_store.append_event(
-        {
-            "event": "diagnostic-start",
-            "status": "running",
-            "message": "窗口读取诊断已启动",
-            "details": {"options": options.model_dump()},
-        }
-    )
-    initial = {
-        "ok": False,
-        "status": "running",
-        "jobId": job_id,
-        "action": "window-click-flow",
-        "title": "主页内容读取结果",
-        "message": "正在启动主页内容读取测试...",
-        "tone": "info",
-        "items": [],
-        "recognizedCount": 0,
-        "skippedCount": 0,
-        "stoppedByUser": False,
-        "startedAt": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "options": options.model_dump(),
-        **trace_store.path_fields(),
-    }
-    with backend.window_click_flow_diagnostic_lock:
-        backend.window_click_flow_diagnostic_jobs[job_id] = initial
-        backend.window_click_flow_diagnostic_stop_flags[job_id] = stop_event
-        _trim_window_click_flow_diagnostic_jobs(backend)
-
-    worker = Thread(
-        target=_run_window_click_flow_diagnostic_job,
-        args=(backend, job_id, options),
-        name=f"awa-window-click-flow-{job_id}",
-        daemon=True,
-    )
-    worker.start()
-    return dict(initial)
+    service = _window_click_flow_huey_service(backend)
+    try:
+        return service.start(
+            max_records=options.maxRecords,
+            date_filter_mode=options.dateFilterMode,
+            start_date=options.startDate,
+            end_date=options.endDate,
+        )
+    except WindowClickFlowConflictError as exc:
+        return JSONResponse(
+            {
+                "ok": False,
+                "status": "conflict",
+                "action": "window-click-flow",
+                "title": "主页内容读取结果",
+                "message": str(exc),
+                "tone": "warning",
+                "items": [],
+            },
+            status_code=409,
+        )
 
 
 def _window_click_flow_diagnostic_job_payload(
     backend: DevBackendContext,
     job_id: str,
 ) -> dict[str, Any] | JSONResponse:
-    with backend.window_click_flow_diagnostic_lock:
-        job = backend.window_click_flow_diagnostic_jobs.get(job_id)
-        if job is None:
-            return JSONResponse(
-                {
-                    "ok": False,
-                    "status": "missing",
-                    "jobId": job_id,
-                    "action": "window-click-flow",
-                    "title": "主页内容读取结果",
-                    "message": "未找到该主页内容读取诊断记录。",
-                    "tone": "warning",
-                    "items": [{"label": "任务ID", "value": job_id}],
-                },
-                status_code=404,
-            )
-        return dict(job)
+    try:
+        return _window_click_flow_huey_service(backend).get(job_id)
+    except KeyError:
+        return _missing_window_click_flow_job_response(
+            job_id,
+            message="未找到该主页内容读取诊断记录。",
+        )
 
 
 def _stop_window_click_flow_diagnostic_job(
     backend: DevBackendContext,
     job_id: str,
 ) -> dict[str, Any] | JSONResponse:
-    with backend.window_click_flow_diagnostic_lock:
-        job = backend.window_click_flow_diagnostic_jobs.get(job_id)
-        if job is None:
-            return JSONResponse(
-                {
-                    "ok": False,
-                    "status": "missing",
-                    "jobId": job_id,
-                    "action": "window-click-flow",
-                    "title": "主页内容读取结果",
-                    "message": "未找到该主页内容读取诊断记录，无法停止。",
-                    "tone": "warning",
-                    "items": [{"label": "任务ID", "value": job_id}],
-                },
-                status_code=404,
-            )
-        stop_event = backend.window_click_flow_diagnostic_stop_flags.get(job_id)
-        if stop_event is None:
-            return dict(job)
-        stop_event.set()
-        stop_payload = {
-            **job,
-            "ok": False,
-            "status": "stop-requested",
-            "message": "已请求停止主页内容读取，等待当前读取收尾...",
-            "tone": "warning",
-            "stoppedByUser": True,
-        }
-        backend.window_click_flow_diagnostic_jobs[job_id] = stop_payload
-        return dict(stop_payload)
-
-
-def _run_window_click_flow_diagnostic_job(
-    backend: DevBackendContext,
-    job_id: str,
-    options: WindowClickFlowDiagnosticPayload,
-) -> None:
-    trace_store = WindowDiagnosticTraceStore(
-        temp_root=Path(backend.runtime.config.storage.temp_dir),
-        job_id=job_id,
-    )
-    trace_paths = trace_store.path_fields()
-
-    def update(payload: dict[str, Any]) -> None:
-        payload = {
-            "jobId": job_id,
-            "action": "window-click-flow",
-            "title": "主页内容读取结果",
-            **trace_paths,
-            **payload,
-        }
-        with backend.window_click_flow_diagnostic_lock:
-            backend.window_click_flow_diagnostic_jobs[job_id] = payload
-
-    def stop_requested() -> bool:
-        with backend.window_click_flow_diagnostic_lock:
-            stop_event = backend.window_click_flow_diagnostic_stop_flags.get(job_id)
-        return bool(stop_event is not None and stop_event.is_set())
-
     try:
-        if callable(backend.window_click_flow_diagnostic_runner):
-            result = backend.window_click_flow_diagnostic_runner(
-                backend,
-                update,
-                stop_requested,
-                options,
-            )
-        else:
-            runtime = backend.runtime
-            window_factory = getattr(runtime, "window_factory", None)
-            if window_factory is None:
-                window_factory = WindowRuntimeFactory(runtime.config)
-            service = WindowClickFlowDiagnosticService(
-                config=runtime.config,
-                window_factory=window_factory,
-            )
-            result = service.run(
-                max_records=options.maxRecords,
-                date_filter_mode=options.dateFilterMode,
-                start_date=options.startDate,
-                end_date=options.endDate,
-                stop_requested=stop_requested,
-                on_update=update,
-                trace_store=trace_store,
-            )
-        if not isinstance(result, dict):
-            raise RuntimeError("主页内容读取诊断返回了无法识别的结果")
-        result = {
-            "jobId": job_id,
-            "action": "window-click-flow",
-            "title": "主页内容读取结果",
-            **result,
-            "finishedAt": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            **trace_paths,
-        }
-        trace_store.write_result(result)
-        update(result)
-    except Exception as exc:
-        failed_result = {
-            "jobId": job_id,
-            "action": "window-click-flow",
-            "title": "主页内容读取结果",
+        return _window_click_flow_huey_service(backend).stop(job_id)
+    except KeyError:
+        return _missing_window_click_flow_job_response(
+            job_id,
+            message="未找到该主页内容读取诊断记录，无法停止。",
+        )
+
+
+def _window_click_flow_huey_service(backend: DevBackendContext) -> Any:
+    service = backend.window_click_flow_huey_service
+    if service is None:
+        raise RuntimeError("窗口读取诊断Huey服务尚未初始化")
+    return service
+
+
+def _missing_window_click_flow_job_response(
+    job_id: str,
+    *,
+    message: str,
+) -> JSONResponse:
+    return JSONResponse(
+        {
             "ok": False,
-            "status": "failed",
-            "message": f"主页内容读取测试失败：{exc}",
-            "tone": "error",
-            "items": [],
-            "records": [],
-            "events": [],
-            "recognizedCount": 0,
-            "skippedCount": 0,
-            "stoppedByUser": stop_requested(),
-            "finishedAt": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            **trace_paths,
-        }
-        try:
-            trace_store.append_event(
-                {
-                    "event": "diagnostic-failed",
-                    "status": "failed",
-                    "message": str(exc),
-                    "details": {"exceptionType": type(exc).__name__},
-                }
-            )
-            trace_store.write_result(failed_result)
-        except OSError as trace_exc:
-            failed_result["traceError"] = str(trace_exc)
-        update(failed_result)
-    finally:
-        with backend.window_click_flow_diagnostic_lock:
-            if job_id in backend.window_click_flow_diagnostic_jobs:
-                backend.window_click_flow_diagnostic_stop_flags.pop(job_id, None)
-
-
-def _trim_window_click_flow_diagnostic_jobs(backend: DevBackendContext) -> None:
-    jobs = backend.window_click_flow_diagnostic_jobs
-    if len(jobs) <= 20:
-        return
-    for key in list(jobs.keys())[: len(jobs) - 20]:
-        jobs.pop(key, None)
-        backend.window_click_flow_diagnostic_stop_flags.pop(key, None)
-
-
-def _start_article_detail_diagnostic_job(backend: DevBackendContext) -> dict[str, Any]:
-    job_id = f"article-detail-{uuid4().hex[:12]}"
-    initial = {
-        "ok": False,
-        "status": "running",
-        "jobId": job_id,
-        "action": "single-article-detail",
-        "title": "详情获取结果",
-        "message": "正在执行单篇文章详情获取...",
-        "tone": "info",
-        "items": [
-            {"label": "流程", "value": "单篇文章详情流程"},
-            {"label": "状态", "value": "执行中"},
-        ],
-        "startedAt": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-    }
-    with backend.article_detail_diagnostic_lock:
-        backend.article_detail_diagnostic_jobs[job_id] = initial
-        _trim_article_detail_diagnostic_jobs(backend)
-
-    worker = Thread(
-        target=_run_article_detail_diagnostic_job,
-        args=(backend, job_id),
-        name=f"awa-detail-diagnostic-{job_id}",
-        daemon=True,
+            "status": "missing",
+            "jobId": job_id,
+            "action": "window-click-flow",
+            "title": "主页内容读取结果",
+            "message": message,
+            "tone": "warning",
+            "items": [{"label": "任务ID", "value": job_id}],
+        },
+        status_code=404,
     )
-    worker.start()
-    return dict(initial)
+
+
+def _start_article_detail_diagnostic_job(
+    backend: DevBackendContext,
+    payload: ArticleDetailDiagnosticPayload | None = None,
+) -> dict[str, Any] | JSONResponse:
+    payload = payload or ArticleDetailDiagnosticPayload()
+    try:
+        card_index = payload.cardIndex
+        account_name = payload.accountName
+        card = payload.card
+        if card is None or not account_name:
+            probe_result = _article_detail_card_probe_service(
+                backend
+            ).read_first_visible_card()
+            records = list(probe_result.get("records") or [])
+            if not probe_result.get("ok") or not records:
+                return _article_detail_probe_not_started_payload(probe_result)
+            if card is None:
+                card = dict(records[0])
+                card_index = _coerce_positive_int(card.get("index"), card_index)
+            if not account_name:
+                account_name = str(probe_result.get("accountName") or "")
+        return _article_detail_huey_service(backend).start(
+            card_index=card_index,
+            account_name=account_name,
+            card=card,
+            skip_collected_records=payload.skipCollectedRecords,
+        )
+    except Exception as exc:
+        backend.append_log("ERROR", f"详情获取Huey任务启动失败：{exc}")
+        return JSONResponse(
+            {
+                "ok": False,
+                "status": "failed",
+                "action": "single-article-detail",
+                "title": "详情获取结果",
+                "message": f"详情获取Huey任务启动失败：{exc}",
+                "tone": "error",
+                "items": [{"label": "失败原因", "value": str(exc)}],
+            },
+            status_code=400,
+        )
+
+
+def _article_detail_probe_not_started_payload(probe_result: dict[str, Any]) -> dict[str, Any]:
+    result = dict(probe_result)
+    result.setdefault("ok", False)
+    result.setdefault("status", "failed")
+    result.setdefault("action", "single-article-detail")
+    result.setdefault("title", "详情获取结果")
+    result.setdefault("message", "读取首篇文章卡片失败，未启动单篇 Huey 任务。")
+    result.setdefault("tone", "warning")
+    result.setdefault("items", [])
+    result.setdefault("records", [])
+    result.setdefault("accountName", "")
+    result.setdefault("captureType", "none")
+    result["jobId"] = ""
+    result["hueyStarted"] = False
+    return result
 
 
 def _article_detail_diagnostic_job_payload(
     backend: DevBackendContext,
     job_id: str,
 ) -> dict[str, Any] | JSONResponse:
-    with backend.article_detail_diagnostic_lock:
-        job = backend.article_detail_diagnostic_jobs.get(job_id)
-        if job is None:
-            return JSONResponse(
-                {
-                    "ok": False,
-                    "status": "missing",
-                    "jobId": job_id,
-                    "action": "single-article-detail",
-                    "title": "详情获取结果",
-                    "message": "未找到该详情获取诊断记录。",
-                    "tone": "warning",
-                    "items": [{"label": "任务ID", "value": job_id}],
-                },
-                status_code=404,
-            )
-        return dict(job)
-
-
-def _run_article_detail_diagnostic_job(
-    backend: DevBackendContext,
-    job_id: str,
-) -> None:
-    def update(payload: dict[str, Any]) -> None:
-        payload = {
-            "jobId": job_id,
-            "action": "single-article-detail",
-            "title": "详情获取结果",
-            **payload,
-        }
-        with backend.article_detail_diagnostic_lock:
-            backend.article_detail_diagnostic_jobs[job_id] = payload
-
     try:
-        if callable(backend.article_detail_diagnostic_runner):
-            result = backend.article_detail_diagnostic_runner(backend, update)
-        else:
-            runtime = backend.runtime
-            window_factory = getattr(runtime, "window_factory", None)
-            if window_factory is None:
-                window_factory = WindowRuntimeFactory(runtime.config)
-            capture_factory = getattr(runtime, "capture_factory", None)
-            if capture_factory is None:
-                capture_factory = CaptureRuntimeFactory(
-                    runtime.config,
-                    window_factory=window_factory,
-                )
-            result = ArticleDetailDiagnosticService(
-                config=runtime.config,
-                window_factory=window_factory,
-                capture_factory=capture_factory,
-                db_path=backend.db_path,
-            ).run(on_update=update)
-        result = {
-            "jobId": job_id,
-            "action": "single-article-detail",
-            "title": "详情获取结果",
-            **(result if isinstance(result, dict) else {}),
-            "finishedAt": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        }
-        result.setdefault("ok", False)
-        result.setdefault("status", "failed")
-        result.setdefault("message", "详情获取诊断返回了无法识别的结果。")
-        result.setdefault("tone", "success" if result.get("ok") else "error")
-        result.setdefault("items", [])
-        update(result)
-    except Exception as exc:
-        backend.append_log("ERROR", f"详情获取诊断失败：{exc}")
-        update(
+        return _article_detail_huey_service(backend).get(job_id)
+    except KeyError:
+        return JSONResponse(
             {
                 "ok": False,
-                "status": "failed",
-                "message": f"详情获取诊断失败：{exc}",
-                "tone": "error",
-                "items": [{"label": "失败原因", "value": str(exc)}],
-                "finishedAt": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            }
+                "status": "missing",
+                "jobId": job_id,
+                "action": "single-article-detail",
+                "title": "详情获取结果",
+                "message": "未找到该详情获取诊断记录。",
+                "tone": "warning",
+                "items": [{"label": "任务ID", "value": job_id}],
+            },
+            status_code=404,
         )
 
 
-def _trim_article_detail_diagnostic_jobs(backend: DevBackendContext) -> None:
-    jobs = backend.article_detail_diagnostic_jobs
-    if len(jobs) <= 20:
-        return
-    for key in list(jobs.keys())[: len(jobs) - 20]:
-        jobs.pop(key, None)
+def _article_detail_huey_service(backend: DevBackendContext) -> Any:
+    service = backend.article_detail_huey_service
+    if service is None:
+        raise RuntimeError("单篇详情Huey服务尚未初始化")
+    return service
 
 
-def _start_initial_content_storage_diagnostic_job(backend: DevBackendContext) -> dict[str, Any]:
-    job_id = f"initial-storage-{uuid4().hex[:12]}"
-    initial = {
-        "ok": False,
-        "status": "running",
-        "jobId": job_id,
-        "action": "initial-content-storage",
-        "title": "初始内容存储结果",
-        "message": "正在执行初始内容存储测试...",
-        "tone": "info",
-        "items": [
-            {"label": "流程", "value": "初始内容存储测试"},
-            {"label": "状态", "value": "执行中"},
-        ],
-        "startedAt": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-    }
-    with backend.initial_content_storage_diagnostic_lock:
-        backend.initial_content_storage_diagnostic_jobs[job_id] = initial
-        _trim_initial_content_storage_diagnostic_jobs(backend)
-
-    worker = Thread(
-        target=_run_initial_content_storage_diagnostic_job,
-        args=(backend, job_id),
-        name=f"awa-initial-storage-diagnostic-{job_id}",
-        daemon=True,
+def _article_detail_card_probe_service(backend: DevBackendContext) -> Any:
+    service = backend.article_detail_card_probe_service
+    if service is not None:
+        return service
+    return ArticleCardProbeService(
+        config=backend.runtime.config,
+        window_factory=backend.runtime.window_factory,
     )
-    worker.start()
-    return dict(initial)
+
+
+def _coerce_positive_int(value: Any, fallback: int) -> int:
+    try:
+        result = int(value)
+    except (TypeError, ValueError):
+        return max(1, int(fallback))
+    return max(1, result)
+
+
+def _start_initial_content_storage_diagnostic_job(
+    backend: DevBackendContext,
+    payload: InitialContentStorageDiagnosticPayload | None = None,
+) -> dict[str, Any] | JSONResponse:
+    payload = payload or InitialContentStorageDiagnosticPayload()
+    try:
+        probe_result = _article_detail_card_probe_service(backend).read_first_visible_card()
+        records = list(probe_result.get("records") or [])
+        if not probe_result.get("ok") or not records:
+            return _initial_content_storage_probe_not_started_payload(probe_result)
+        card = dict(records[0])
+        card_index = _coerce_positive_int(card.get("index"), 1)
+        account_name = str(probe_result.get("accountName") or "")
+        return _initial_content_storage_huey_service(backend).start(
+            card_index=card_index,
+            account_name=account_name,
+            card=card,
+            skip_collected_records=payload.skipCollectedRecords,
+            store_article_detail=True,
+        )
+    except Exception as exc:
+        backend.append_log("ERROR", f"初始内容存储Huey任务启动失败：{exc}")
+        return JSONResponse(
+            {
+                "ok": False,
+                "status": "failed",
+                "action": "initial-content-storage",
+                "title": "初始内容存储结果",
+                "message": f"初始内容存储Huey任务启动失败：{exc}",
+                "tone": "error",
+                "items": [{"label": "失败原因", "value": str(exc)}],
+                "options": {
+                    "skipCollectedRecords": payload.skipCollectedRecords,
+                    "storeArticleDetail": True,
+                },
+            },
+            status_code=400,
+        )
 
 
 def _initial_content_storage_diagnostic_job_payload(
     backend: DevBackendContext,
     job_id: str,
 ) -> dict[str, Any] | JSONResponse:
-    with backend.initial_content_storage_diagnostic_lock:
-        job = backend.initial_content_storage_diagnostic_jobs.get(job_id)
-        if job is None:
-            return JSONResponse(
-                {
-                    "ok": False,
-                    "status": "missing",
-                    "jobId": job_id,
-                    "action": "initial-content-storage",
-                    "title": "初始内容存储结果",
-                    "message": "未找到该初始内容存储诊断记录。",
-                    "tone": "warning",
-                    "items": [{"label": "任务ID", "value": job_id}],
-                },
-                status_code=404,
-            )
-        return dict(job)
-
-
-def _run_initial_content_storage_diagnostic_job(
-    backend: DevBackendContext,
-    job_id: str,
-) -> None:
-    def update(payload: dict[str, Any]) -> None:
-        payload = {
-            "jobId": job_id,
-            "action": "initial-content-storage",
-            "title": "初始内容存储结果",
-            **payload,
-        }
-        with backend.initial_content_storage_diagnostic_lock:
-            backend.initial_content_storage_diagnostic_jobs[job_id] = payload
-
     try:
-        if callable(backend.initial_content_storage_diagnostic_runner):
-            result = backend.initial_content_storage_diagnostic_runner(backend, update)
-        else:
-            runtime = backend.runtime
-            window_factory = getattr(runtime, "window_factory", None)
-            if window_factory is None:
-                window_factory = WindowRuntimeFactory(runtime.config)
-            capture_factory = getattr(runtime, "capture_factory", None)
-            if capture_factory is None:
-                capture_factory = CaptureRuntimeFactory(
-                    runtime.config,
-                    window_factory=window_factory,
-                )
-            result = InitialContentStorageDiagnosticService(
-                config=runtime.config,
-                window_factory=window_factory,
-                capture_factory=capture_factory,
-                db_path=backend.db_path,
-            ).run(on_update=update)
-        result = {
-            "jobId": job_id,
-            "action": "initial-content-storage",
-            "title": "初始内容存储结果",
-            **(result if isinstance(result, dict) else {}),
-            "finishedAt": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        }
-        result.setdefault("ok", False)
-        result.setdefault("status", "failed")
-        result.setdefault("message", "初始内容存储诊断返回了无法识别的结果。")
-        result.setdefault("tone", "success" if result.get("ok") else "error")
-        result.setdefault("items", [])
-        update(result)
-    except Exception as exc:
-        backend.append_log("ERROR", f"初始内容存储诊断失败：{exc}")
-        update(
+        return _initial_content_storage_huey_service(backend).get(job_id)
+    except KeyError:
+        return JSONResponse(
             {
                 "ok": False,
-                "status": "failed",
-                "message": f"初始内容存储诊断失败：{exc}",
-                "tone": "error",
-                "items": [{"label": "失败原因", "value": str(exc)}],
-                "finishedAt": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            }
+                "status": "missing",
+                "jobId": job_id,
+                "action": "initial-content-storage",
+                "title": "初始内容存储结果",
+                "message": "未找到该初始内容存储诊断记录。",
+                "tone": "warning",
+                "items": [{"label": "任务ID", "value": job_id}],
+            },
+            status_code=404,
         )
 
 
-def _trim_initial_content_storage_diagnostic_jobs(backend: DevBackendContext) -> None:
-    jobs = backend.initial_content_storage_diagnostic_jobs
-    if len(jobs) <= 20:
-        return
-    for key in list(jobs.keys())[: len(jobs) - 20]:
-        jobs.pop(key, None)
+def _initial_content_storage_huey_service(backend: DevBackendContext) -> Any:
+    service = backend.initial_content_storage_huey_service
+    if service is None:
+        raise RuntimeError("初始内容存储Huey服务尚未初始化")
+    return service
 
 
-def _start_article_detail_comments_diagnostic_job(backend: DevBackendContext) -> dict[str, Any]:
-    job_id = f"detail-comments-{uuid4().hex[:12]}"
-    initial = {
-        "ok": False,
-        "status": "running",
-        "jobId": job_id,
-        "action": "article-detail-comments",
-        "title": "详情评论结果",
-        "message": "正在执行详情评论测试...",
-        "tone": "info",
-        "items": [
-            {"label": "流程", "value": "单篇文章详情评论"},
-            {"label": "状态", "value": "执行中"},
-        ],
-        "startedAt": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-    }
-    with backend.article_detail_comments_diagnostic_lock:
-        backend.article_detail_comments_diagnostic_jobs[job_id] = initial
-        _trim_article_detail_comments_diagnostic_jobs(backend)
+def _initial_content_storage_probe_not_started_payload(
+    probe_result: dict[str, Any],
+) -> dict[str, Any]:
+    result = dict(probe_result)
+    result.setdefault("ok", False)
+    result.setdefault("status", "failed")
+    result["action"] = "initial-content-storage"
+    result["title"] = "初始内容存储结果"
+    result.setdefault("message", "读取首篇文章卡片失败，未启动初始内容存储 Huey 任务。")
+    result.setdefault("tone", "warning")
+    result.setdefault("items", [])
+    result.setdefault("records", [])
+    result.setdefault("accountName", "")
+    result.setdefault("captureType", "none")
+    result["jobId"] = ""
+    result["hueyStarted"] = False
+    return result
 
-    worker = Thread(
-        target=_run_article_detail_comments_diagnostic_job,
-        args=(backend, job_id),
-        name=f"awa-detail-comments-diagnostic-{job_id}",
-        daemon=True,
-    )
-    worker.start()
-    return dict(initial)
+
+def _start_article_detail_comments_diagnostic_job(
+    backend: DevBackendContext,
+    payload: ArticleDetailCommentsDiagnosticPayload | None = None,
+) -> dict[str, Any] | JSONResponse:
+    payload = payload or ArticleDetailCommentsDiagnosticPayload()
+    try:
+        probe_result = _article_detail_card_probe_service(backend).read_first_visible_card()
+        records = list(probe_result.get("records") or [])
+        if not probe_result.get("ok") or not records:
+            return _article_detail_comments_probe_not_started_payload(probe_result)
+
+        card = dict(records[0])
+        card_index = int(card.get("index") or 1)
+        if card_index <= 0:
+            card_index = 1
+        account_name = str(probe_result.get("accountName") or "")
+        return _article_detail_comments_huey_service(backend).start(
+            card_index=card_index,
+            account_name=account_name,
+            card=card,
+            skip_collected_records=payload.skipCollectedRecords,
+            store_article_detail=True,
+            store_comment_info=True,
+        )
+    except Exception as exc:
+        backend.append_log("ERROR", f"单篇评论存储Huey任务启动失败：{exc}")
+        return JSONResponse(
+            {
+                "ok": False,
+                "status": "failed",
+                "jobId": "",
+                "action": "article-detail-comments",
+                "title": "详情评论结果",
+                "message": f"单篇评论存储Huey任务启动失败：{exc}",
+                "tone": "error",
+                "items": [{"label": "失败原因", "value": str(exc)}],
+                "hueyStarted": False,
+            },
+            status_code=400,
+        )
 
 
 def _article_detail_comments_diagnostic_job_payload(
     backend: DevBackendContext,
     job_id: str,
 ) -> dict[str, Any] | JSONResponse:
-    with backend.article_detail_comments_diagnostic_lock:
-        job = backend.article_detail_comments_diagnostic_jobs.get(job_id)
-        if job is None:
-            return JSONResponse(
-                {
-                    "ok": False,
-                    "status": "missing",
-                    "jobId": job_id,
-                    "action": "article-detail-comments",
-                    "title": "详情评论结果",
-                    "message": "未找到该详情评论诊断记录。",
-                    "tone": "warning",
-                    "items": [{"label": "任务ID", "value": job_id}],
-                },
-                status_code=404,
-            )
-        return dict(job)
-
-
-def _run_article_detail_comments_diagnostic_job(
-    backend: DevBackendContext,
-    job_id: str,
-) -> None:
-    def update(payload: dict[str, Any]) -> None:
-        payload = {
-            "jobId": job_id,
-            "action": "article-detail-comments",
-            "title": "详情评论结果",
-            **payload,
-        }
-        with backend.article_detail_comments_diagnostic_lock:
-            backend.article_detail_comments_diagnostic_jobs[job_id] = payload
-
     try:
-        if callable(backend.article_detail_comments_diagnostic_runner):
-            result = backend.article_detail_comments_diagnostic_runner(backend, update)
-        else:
-            runtime = backend.runtime
-            window_factory = getattr(runtime, "window_factory", None)
-            if window_factory is None:
-                window_factory = WindowRuntimeFactory(runtime.config)
-            capture_factory = getattr(runtime, "capture_factory", None)
-            if capture_factory is None:
-                capture_factory = CaptureRuntimeFactory(
-                    runtime.config,
-                    window_factory=window_factory,
-                )
-            result = ArticleDetailCommentsDiagnosticService(
-                config=runtime.config,
-                window_factory=window_factory,
-                capture_factory=capture_factory,
-                db_path=backend.db_path,
-            ).run(on_update=update)
-        result = {
-            "jobId": job_id,
-            "action": "article-detail-comments",
-            "title": "详情评论结果",
-            **(result if isinstance(result, dict) else {}),
-            "finishedAt": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        }
-        result.setdefault("ok", False)
-        result.setdefault("status", "failed")
-        result.setdefault("message", "详情评论诊断返回了无法识别的结果。")
-        result.setdefault("tone", "success" if result.get("ok") else "error")
-        result.setdefault("items", [])
-        update(result)
-    except Exception as exc:
-        backend.append_log("ERROR", f"详情评论诊断失败：{exc}")
-        update(
+        return _article_detail_comments_huey_service(backend).get(job_id)
+    except KeyError:
+        return JSONResponse(
             {
                 "ok": False,
-                "status": "failed",
-                "message": f"详情评论诊断失败：{exc}",
-                "tone": "error",
-                "items": [{"label": "失败原因", "value": str(exc)}],
-                "finishedAt": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            }
+                "status": "missing",
+                "jobId": job_id,
+                "action": "article-detail-comments",
+                "title": "详情评论结果",
+                "message": "未找到该详情评论诊断记录。",
+                "tone": "warning",
+                "items": [{"label": "任务ID", "value": job_id}],
+            },
+            status_code=404,
         )
 
 
-def _trim_article_detail_comments_diagnostic_jobs(backend: DevBackendContext) -> None:
-    jobs = backend.article_detail_comments_diagnostic_jobs
-    if len(jobs) <= 20:
-        return
-    for key in list(jobs.keys())[: len(jobs) - 20]:
-        jobs.pop(key, None)
+def _article_detail_comments_huey_service(backend: DevBackendContext) -> Any:
+    service = backend.article_detail_comments_huey_service
+    if service is None:
+        raise RuntimeError("单篇评论存储Huey服务尚未初始化")
+    return service
+
+
+def _article_detail_comments_probe_not_started_payload(
+    probe_result: dict[str, Any],
+) -> dict[str, Any]:
+    result = dict(probe_result)
+    result["action"] = "article-detail-comments"
+    result["title"] = "详情评论结果"
+    result["jobId"] = ""
+    result["hueyStarted"] = False
+    result.setdefault("ok", False)
+    result.setdefault("status", "no-visible-card")
+    result.setdefault("message", "读取首篇文章卡片失败，未启动单篇评论存储 Huey 任务。")
+    result.setdefault("tone", "warning")
+    result.setdefault("items", [])
+    return result
+
+
+def _start_article_detail_offline_cache_diagnostic_job(
+    backend: DevBackendContext,
+    payload: ArticleDetailOfflineCacheDiagnosticPayload | None = None,
+) -> dict[str, Any] | JSONResponse:
+    payload = payload or ArticleDetailOfflineCacheDiagnosticPayload()
+    try:
+        probe_result = _article_detail_card_probe_service(backend).read_first_visible_card()
+        records = list(probe_result.get("records") or [])
+        if not probe_result.get("ok") or not records:
+            return _article_detail_offline_cache_probe_not_started_payload(probe_result)
+
+        card = dict(records[0])
+        card_index = _coerce_positive_int(card.get("index"), 1)
+        account_name = str(probe_result.get("accountName") or "")
+        return _article_detail_offline_cache_huey_service(backend).start(
+            card_index=card_index,
+            account_name=account_name,
+            card=card,
+            skip_collected_records=payload.skipCollectedRecords,
+            store_article_detail=True,
+            archive_offline_content=True,
+            stateful_offline_cache=payload.statefulOfflineCache,
+        )
+    except Exception as exc:
+        backend.append_log("ERROR", f"单篇离线缓存Huey任务启动失败：{exc}")
+        return JSONResponse(
+            {
+                "ok": False,
+                "status": "failed",
+                "jobId": "",
+                "action": "article-detail-offline-cache",
+                "title": "单篇离线缓存结果",
+                "message": f"单篇离线缓存Huey任务启动失败：{exc}",
+                "tone": "error",
+                "items": [{"label": "失败原因", "value": str(exc)}],
+                "hueyStarted": False,
+                "options": {
+                    "skipCollectedRecords": payload.skipCollectedRecords,
+                    "storeArticleDetail": True,
+                    "archiveOfflineContent": True,
+                    "statefulOfflineCache": payload.statefulOfflineCache,
+                },
+            },
+            status_code=400,
+        )
+
+
+def _article_detail_offline_cache_diagnostic_job_payload(
+    backend: DevBackendContext,
+    job_id: str,
+) -> dict[str, Any] | JSONResponse:
+    try:
+        return _article_detail_offline_cache_huey_service(backend).get(job_id)
+    except KeyError:
+        return JSONResponse(
+            {
+                "ok": False,
+                "status": "missing",
+                "jobId": job_id,
+                "action": "article-detail-offline-cache",
+                "title": "单篇离线缓存结果",
+                "message": "未找到该单篇离线缓存诊断记录。",
+                "tone": "warning",
+                "items": [{"label": "任务ID", "value": job_id}],
+            },
+            status_code=404,
+        )
+
+
+def _article_detail_offline_cache_huey_service(backend: DevBackendContext) -> Any:
+    service = backend.article_detail_offline_cache_huey_service
+    if service is None:
+        raise RuntimeError("单篇离线缓存Huey服务尚未初始化")
+    return service
+
+
+def _article_detail_offline_cache_probe_not_started_payload(
+    probe_result: dict[str, Any],
+) -> dict[str, Any]:
+    result = dict(probe_result)
+    result["action"] = "article-detail-offline-cache"
+    result["title"] = "单篇离线缓存结果"
+    result["jobId"] = ""
+    result["hueyStarted"] = False
+    result.setdefault("ok", False)
+    result.setdefault("status", "no-visible-card")
+    result.setdefault("message", "读取首篇文章卡片失败，未启动单篇离线缓存 Huey 任务。")
+    result.setdefault("tone", "warning")
+    result.setdefault("items", [])
+    result.setdefault("options", {
+        "skipCollectedRecords": False,
+        "storeArticleDetail": True,
+        "archiveOfflineContent": True,
+        "statefulOfflineCache": False,
+    })
+    return result
 
 
 def _run_diagnostic_command(backend: DevBackendContext, args: list[str], *, timeout: int) -> Any:

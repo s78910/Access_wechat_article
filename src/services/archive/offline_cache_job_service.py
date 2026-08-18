@@ -153,7 +153,6 @@ class OfflineCacheJobService:
         browser_cache_dir: str | Path,
         max_concurrent_processes: int,
         max_scroll_seconds: float,
-        max_scroll_count: int,
         resource_timeout_seconds: float,
         process_control: Any | None = None,
         write_coordinator: DatabaseWriteCoordinator | None = None,
@@ -165,7 +164,6 @@ class OfflineCacheJobService:
         self.browser_cache_dir = Path(browser_cache_dir).resolve()
         self.max_concurrent_processes = max(1, int(max_concurrent_processes))
         self.max_scroll_seconds = max(0.0, float(max_scroll_seconds))
-        self.max_scroll_count = max(1, int(max_scroll_count))
         self.resource_timeout_seconds = max(0.1, float(resource_timeout_seconds))
         self._process_control = process_control or OfflineCacheProcessControlService()
         self._write_coordinator = write_coordinator or DatabaseWriteCoordinator()
@@ -388,7 +386,6 @@ class OfflineCacheJobService:
                 "stage_dir": str(stage_dir),
                 "browser_cache_dir": str(self.browser_cache_dir),
                 "max_scroll_seconds": self.max_scroll_seconds,
-                "max_scroll_count": self.max_scroll_count,
                 "resource_timeout_seconds": self.resource_timeout_seconds,
             }
             # 启动和登记必须处于同一临界区，确保 shutdown 能看到所有已启动子进程。

@@ -125,11 +125,6 @@ def build_app_config(mapping: Mapping[str, Any], *, project_root: str | Path) ->
         window=WindowConfig(
             activation_wait_seconds=_as_float(window, "activation_wait_seconds"),
             home_find_timeout_seconds=_as_float(window, "home_find_timeout_seconds"),
-            home_find_use_article_probe=_as_bool(
-                window,
-                "home_find_use_article_probe",
-            ),
-            screen_click_wait_seconds=_as_float(window, "screen_click_wait_seconds"),
             restore_focus_after_close=_as_bool(window, "restore_focus_after_close"),
             article_open_timeout_seconds=_as_float(
                 window, "article_open_timeout_seconds"
@@ -143,12 +138,8 @@ def build_app_config(mapping: Mapping[str, Any], *, project_root: str | Path) ->
             article_close_confirm_timeout_seconds=_as_float(
                 window, "article_close_confirm_timeout_seconds"
             ),
-            visible_snapshot_max_age_seconds=_as_float(
-                window, "visible_snapshot_max_age_seconds"
-            ),
             scroll_wheel_steps=_as_int(window, "scroll_wheel_steps"),
             date_seek_max_steps=_as_int(window, "date_seek_max_steps"),
-            max_scroll_attempts=_as_int(window, "max_scroll_attempts"),
             scroll_initial_delay_seconds=_as_float(
                 window, "scroll_initial_delay_seconds"
             ),
@@ -157,9 +148,6 @@ def build_app_config(mapping: Mapping[str, Any], *, project_root: str | Path) ->
             ),
             scroll_probe_max_interval_seconds=_as_float(
                 window, "scroll_probe_max_interval_seconds"
-            ),
-            scroll_settle_timeout_seconds=_as_float(
-                window, "scroll_settle_timeout_seconds"
             ),
             lazy_load_timeout_seconds=_as_float(window, "lazy_load_timeout_seconds"),
             unchanged_before_bounce_seconds=_as_float(
@@ -185,7 +173,6 @@ def build_app_config(mapping: Mapping[str, Any], *, project_root: str | Path) ->
         offline_cache=OfflineCacheConfig(
             enabled_by_default=_as_bool(offline_cache, "enabled_by_default"),
             max_scroll_seconds=_as_float(offline_cache, "max_scroll_seconds"),
-            max_scroll_count=_as_int(offline_cache, "max_scroll_count"),
             resource_timeout_seconds=_as_float(offline_cache, "resource_timeout_seconds"),
             max_concurrent_processes=_as_int(
                 offline_cache,
@@ -287,9 +274,10 @@ def _latest_menu_mapping(mapping: Mapping[str, Any]) -> dict[str, Any]:
     single_tab = _mapping_value(windows_command, "single_article_tab")
     home_window = _mapping_value(windows_command, "home_window")
     home_scroll = _mapping_value(windows_command, "home_scroll")
+    window_runtime = result.setdefault("window", {})
     _copy_keys(
         single_tab,
-        result.setdefault("window", {}),
+        window_runtime,
         (
             "restore_focus_after_close",
             "article_open_timeout_seconds",
@@ -298,30 +286,33 @@ def _latest_menu_mapping(mapping: Mapping[str, Any]) -> dict[str, Any]:
             "article_close_confirm_timeout_seconds",
         ),
     )
+    if "article_title_poll_interval_seconds_range" in single_tab:
+        _, max_interval = _number_pair(
+            single_tab,
+            "article_title_poll_interval_seconds_range",
+        )
+        # 运行时代码当前只消费最大轮询间隔；起始值用于 YAML 和设置页展示。
+        window_runtime["article_title_poll_interval_seconds"] = max_interval
+
     _copy_keys(
         home_window,
-        result.setdefault("window", {}),
+        window_runtime,
         (
             "activation_wait_seconds",
             "home_find_timeout_seconds",
-            "home_find_use_article_probe",
-            "screen_click_wait_seconds",
         ),
     )
     _copy_keys(
         home_scroll,
-        result.setdefault("window", {}),
+        window_runtime,
         (
-            "max_scroll_attempts",
             "scroll_wheel_steps",
             "date_seek_max_steps",
             "scroll_initial_delay_seconds",
             "scroll_probe_interval_seconds",
             "scroll_probe_max_interval_seconds",
-            "scroll_settle_timeout_seconds",
             "unchanged_before_bounce_seconds",
             "lazy_load_timeout_seconds",
-            "visible_snapshot_max_age_seconds",
             "bounce_enabled",
             "bounce_up_steps",
             "bounce_pause_seconds",
@@ -329,6 +320,20 @@ def _latest_menu_mapping(mapping: Mapping[str, Any]) -> dict[str, Any]:
             "bounce_attempts",
         ),
     )
+    if "date_seek_scroll_steps_range" in home_scroll:
+        normal_steps, max_steps = _number_pair(
+            home_scroll,
+            "date_seek_scroll_steps_range",
+        )
+        window_runtime["scroll_wheel_steps"] = int(normal_steps)
+        window_runtime["date_seek_max_steps"] = int(max_steps)
+    if "scroll_probe_interval_seconds_range" in home_scroll:
+        initial_interval, max_interval = _number_pair(
+            home_scroll,
+            "scroll_probe_interval_seconds_range",
+        )
+        window_runtime["scroll_probe_interval_seconds"] = initial_interval
+        window_runtime["scroll_probe_max_interval_seconds"] = max_interval
 
     data_acquisition = _mapping_value(mapping, "data_acquisition")
     reference_request = _mapping_value(data_acquisition, "reference_request")
@@ -359,7 +364,6 @@ def _latest_menu_mapping(mapping: Mapping[str, Any]) -> dict[str, Any]:
         (
             "enabled_by_default",
             "max_scroll_seconds",
-            "max_scroll_count",
             "resource_timeout_seconds",
             "max_concurrent_processes",
         ),
@@ -381,6 +385,27 @@ def _copy_keys(
     for key in keys:
         if key in source:
             target[key] = source[key]
+
+
+def _number_pair(source: Mapping[str, Any], key: str) -> tuple[float, float]:
+    value = source.get(key)
+    if (
+        isinstance(value, str)
+        or not isinstance(value, (list, tuple))
+        or len(value) != 2
+    ):
+        raise ConfigValidationError(f"{key} 必须是包含两个数值的数组")
+
+    try:
+        first = float(value[0])
+        second = float(value[1])
+    except (TypeError, ValueError) as exc:
+        raise ConfigValidationError(f"{key} 必须是包含两个数值的数组") from exc
+
+    if second < first:
+        raise ConfigValidationError(f"{key} 的结束值不能小于起始值")
+
+    return first, second
 
 
 def _section(data: Mapping[str, Any], key: str) -> Mapping[str, Any]:

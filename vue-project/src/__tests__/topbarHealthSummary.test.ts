@@ -92,7 +92,8 @@ test('点击状态块立即打开统一弹窗，再执行对应单项检测', ()
   assert.match(appTopbarVue, /type TopbarHealthKey = 'https' \| 'ca' \| 'proxy-port' \| 'storage'/)
   assert.match(appTopbarVue, /key: TopbarHealthKey/)
   assert.match(appTopbarVue, /healthCheck: \[key: TopbarHealthKey\]/)
-  assert.match(appTopbarVue, /<button[\s\S]*?v-for="item in props\.healthItems"[\s\S]*?@click="emit\('healthCheck', item\.key\)"/)
+  assert.match(appTopbarVue, /<a-button[\s\S]*?v-for="item in props\.healthItems"[\s\S]*?@click="emit\('healthCheck', item\.key\)"/)
+  assert.doesNotMatch(appTopbarVue, /<button[\s\S]*?v-for="item in props\.healthItems"/)
   assert.match(appVue, /@health-check="handleTopbarHealthCheck"/)
 
   const handler = appVue.match(/async function handleTopbarHealthCheck[\s\S]*?\n\}/)?.[0] ?? ''
@@ -124,6 +125,9 @@ test('四项健康状态使用醒目的状态图标替代圆点分隔符', () =>
 
 test('顶部六个矩形块组成靠右排列的统一工具组', () => {
   assert.match(appTopbarVue, /class="topbar-tools"/)
+  assert.match(appTopbarVue, /<a-button[\s\S]*?class="github-pill"[\s\S]*?:href="props\.githubUrl"/)
+  assert.match(appTopbarVue, /<a-button[\s\S]*?:class="\['theme-switch',\s*\{ 'is-dark': props\.isDark \}\]"/)
+  assert.doesNotMatch(appTopbarVue, /<a\s+[\s\S]*?class="github-pill"/)
   assert.match(appTopbarVue, /theme-switch/)
   assert.match(appTopbarVue, /<span class="sun"><AppIcon icon="fa-solid fa-sun" \/><\/span>/)
   assert.match(appTopbarVue, /aria-label="切换明暗主题"/)

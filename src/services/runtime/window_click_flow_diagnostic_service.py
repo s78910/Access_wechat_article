@@ -116,7 +116,6 @@ class WindowClickFlowDiagnosticService:
             home_window = self._window_factory.find_home_window(
                 reader=locator_reader,
                 timeout_seconds=self._config.window.home_find_timeout_seconds,
-                use_article_probe=self._config.window.home_find_use_article_probe,
             )
             if home_window is None:
                 return payload(

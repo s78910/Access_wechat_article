@@ -431,6 +431,28 @@ export type WindowClickFlowDiagnosticOptions = {
   endDate?: string
 }
 
+export type ArticleDetailDiagnosticOptions = {
+  skipCollectedRecords?: boolean
+}
+
+export type InitialContentStorageDiagnosticOptions = {
+  skipCollectedRecords?: boolean
+  storeArticleDetail?: boolean
+}
+
+export type ArticleDetailCommentsDiagnosticOptions = {
+  skipCollectedRecords?: boolean
+  storeArticleDetail?: boolean
+  storeCommentInfo?: boolean
+}
+
+export type ArticleDetailOfflineCacheDiagnosticOptions = {
+  skipCollectedRecords?: boolean
+  storeArticleDetail?: boolean
+  archiveOfflineContent?: boolean
+  statefulOfflineCache?: boolean
+}
+
 export type ArticleDetailDiagnosticResult = {
   ok: boolean
   status: string
@@ -439,6 +461,7 @@ export type ArticleDetailDiagnosticResult = {
     | 'single-article-detail'
     | 'initial-content-storage'
     | 'article-detail-comments'
+    | 'article-detail-offline-cache'
     | 'window-click-flow'
   title?: string
   message?: string
@@ -459,6 +482,10 @@ export type ArticleDetailDiagnosticResult = {
   commentPath?: string
   commentAssetCount?: number
   commentAssetDir?: string
+  offlineIndexPath?: string
+  offlineResourceCount?: number
+  offlineAssetsDir?: string
+  offlineWarning?: string
   recognizedCount?: number
   skippedCount?: number
   stoppedByUser?: boolean
@@ -642,6 +669,14 @@ export type HistorySummary = {
   collectedArticleCount: number
   averageDuration: string
   trend: HistoryTrendItem[]
+  dbPath?: string
+  message?: string
+}
+
+export type HistoryClearResult = {
+  ok: boolean
+  status: string
+  deletedCount: number
   dbPath?: string
   message?: string
 }
@@ -873,8 +908,10 @@ export async function stopWindowClickFlowDiagnostic(jobId: string) {
   )
 }
 
-export async function startArticleDetailDiagnostic() {
-  return postJson<ArticleDetailDiagnosticResult>('/api/diagnostics/article-detail', {})
+export async function startArticleDetailDiagnostic(
+  options: ArticleDetailDiagnosticOptions = {},
+) {
+  return postJson<ArticleDetailDiagnosticResult>('/api/diagnostics/article-detail', options)
 }
 
 export async function getArticleDetailDiagnostic(jobId: string) {
@@ -883,8 +920,10 @@ export async function getArticleDetailDiagnostic(jobId: string) {
   )
 }
 
-export async function startInitialContentStorageDiagnostic() {
-  return postJson<ArticleDetailDiagnosticResult>('/api/diagnostics/initial-content-storage', {})
+export async function startInitialContentStorageDiagnostic(
+  options: InitialContentStorageDiagnosticOptions = {},
+) {
+  return postJson<ArticleDetailDiagnosticResult>('/api/diagnostics/initial-content-storage', options)
 }
 
 export async function getInitialContentStorageDiagnostic(jobId: string) {
@@ -893,13 +932,27 @@ export async function getInitialContentStorageDiagnostic(jobId: string) {
   )
 }
 
-export async function startArticleDetailCommentsDiagnostic() {
-  return postJson<ArticleDetailDiagnosticResult>('/api/diagnostics/article-detail-comments', {})
+export async function startArticleDetailCommentsDiagnostic(
+  options: ArticleDetailCommentsDiagnosticOptions = {},
+) {
+  return postJson<ArticleDetailDiagnosticResult>('/api/diagnostics/article-detail-comments', options)
 }
 
 export async function getArticleDetailCommentsDiagnostic(jobId: string) {
   return requestHttpApi<ArticleDetailDiagnosticResult>(
     '/api/diagnostics/article-detail-comments/' + encodeURIComponent(jobId),
+  )
+}
+
+export async function startArticleDetailOfflineCacheDiagnostic(
+  options: ArticleDetailOfflineCacheDiagnosticOptions = {},
+) {
+  return postJson<ArticleDetailDiagnosticResult>('/api/diagnostics/article-detail-offline-cache', options)
+}
+
+export async function getArticleDetailOfflineCacheDiagnostic(jobId: string) {
+  return requestHttpApi<ArticleDetailDiagnosticResult>(
+    '/api/diagnostics/article-detail-offline-cache/' + encodeURIComponent(jobId),
   )
 }
 
@@ -942,6 +995,10 @@ export async function getHistorySuggestions(query: HistorySuggestionsQuery = {})
 
 export async function getHistorySummary() {
   return requestHttpApi<HistorySummary>('/api/history/summary')
+}
+
+export async function clearHistoryRecords() {
+  return requestHttpApi<HistoryClearResult>('/api/history/records', { method: 'DELETE' })
 }
 
 export async function listArchiveAccountArticles(accountId: number, page = 1, pageSize = 10) {

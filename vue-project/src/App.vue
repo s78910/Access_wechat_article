@@ -1,5 +1,6 @@
 ﻿<script setup lang="ts">
 import AppIcon from './components/AppIcon.vue'
+import { DownOutlined, QuestionCircleOutlined } from '@ant-design/icons-vue'
 import { theme } from 'ant-design-vue'
 import type { ThemeConfig } from 'ant-design-vue/es/config-provider/context'
 import zhCN from 'ant-design-vue/es/locale/zh_CN'
@@ -103,8 +104,25 @@ const quickStartUrl = 'https://github.com/yeximm/Access_wechat_article/blob/main
 const MAX_PYWEBVIEW_STATUS_RETRIES = 12
 const PYWEBVIEW_STATUS_RETRY_DELAY_MS = 400
 const LOG_POLL_LIMIT = 100
-const pageCount = ref(1)
 const taskDateFilterMode = ref<TaskDateFilterMode>('all')
+const unlimitedDateTaskCount = ref<number | null>(1)
+const dateRangeTaskCount = ref<number | null>(0)
+const latestDateTaskCount = ref<number | null>(0)
+const earliestDateTaskCount = ref<number | null>(1)
+const taskCountSnapshots: Record<TaskDateFilterMode, typeof unlimitedDateTaskCount> = {
+  all: unlimitedDateTaskCount,
+  range: dateRangeTaskCount,
+  before: latestDateTaskCount,
+  after: earliestDateTaskCount,
+}
+// 输入框只展示当前筛选模式的数量，切换模式时保留各自上一次输入值。
+const pageCount = computed<number | null>({
+  get: () => taskCountSnapshots[taskDateFilterMode.value].value,
+  set: (value) => {
+    taskCountSnapshots[taskDateFilterMode.value].value = value
+  },
+})
+const taskDateFilterOpen = ref(false)
 const taskStartDate = ref('')
 const taskEndDate = ref('')
 const taskDateRangeValue = computed<TaskDateRangeValue>({
@@ -122,13 +140,20 @@ const taskDateRangeValue = computed<TaskDateRangeValue>({
 })
 const taskDateFilterOptions: { label: string; value: TaskDateFilterMode }[] = [
   { label: '不限日期', value: 'all' },
-  { label: '日期范围', value: 'range' },
-  { label: '截止日期', value: 'before' },
-  { label: '起始日期', value: 'after' },
+  { label: '指定任务日期范围', value: 'range' },
+  { label: '截止日期 (不早于)', value: 'before' },
+  { label: '起始日期 (不晚于)', value: 'after' },
 ]
 const taskDateFilterLabel = computed(() =>
   taskDateFilterOptions.find((option) => option.value === taskDateFilterMode.value)?.label ?? '不限日期',
 )
+const TASK_DATE_FILTER_HINTS: Record<TaskDateFilterMode, string> = {
+  all: '从当前主页开始不限制文章发布时间',
+  range: '采集起始日期至截止日期内发布的文章',
+  before: '采集从当前主页开始到指定日期内发布的文章',
+  after: '采集指定日期之前发布的文章',
+}
+const taskDateFilterHint = computed(() => TASK_DATE_FILTER_HINTS[taskDateFilterMode.value])
 const pywebviewStatusLabel = ref('检测中')
 const environmentStatus = ref({ ...INITIAL_ENVIRONMENT_STATUS })
 const defaultTrafficStatus: TrafficStatus = {
@@ -178,12 +203,7 @@ const archiveSummary = ref<ArchiveSummary | null>(null)
 const activeLogLevel = ref<LogFilterLevel>('ALL')
 const uptimeSeconds = ref(0)
 const homeRuntimeState = ref<'idle' | 'detecting' | 'running'>('idle')
-const descriptionTooltip = ref({
-  visible: false,
-  text: '',
-  x: 0,
-  y: 0,
-})
+const statusValueTooltipKey = ref('')
 const downloadSelections = ref({
   articleDetail: true,
   offlineArchive: false,
@@ -191,9 +211,6 @@ const downloadSelections = ref({
   skipCollectedRecords: true,
 })
 const mainTaskSelectionDefaultsApplied = ref(false)
-const isHoldingPageStep = ref(false)
-let pageHoldDelayTimer: number | undefined
-let pageHoldIntervalTimer: number | undefined
 let pywebviewStatusRetryTimer: number | undefined
 let pywebviewStatusRetryCount = 0
 let taskPollingTimer: number | undefined
@@ -239,7 +256,7 @@ const normalizedPageCount = computed(() => {
 
 const taskDateFieldLabel = computed(() => {
   const labels: Record<TaskDateFilterMode, string> = {
-    all: '日期范围',
+    all: '指定时间',
     range: '日期范围',
     before: '截止日期',
     after: '起始日期',
@@ -250,6 +267,7 @@ const taskDateFieldLabel = computed(() => {
 
 function selectTaskDateFilterMode(mode: TaskDateFilterMode) {
   taskDateFilterMode.value = mode
+  taskDateFilterOpen.value = false
 }
 
 const taskSettingsLocked = computed(() =>
@@ -449,6 +467,10 @@ const logTabs = [
   { level: 'WARN', label: 'WARN' },
   { level: 'ERROR', label: 'ERROR' },
 ] satisfies { level: LogFilterLevel; label: string }[]
+const logSegmentOptions = logTabs.map((tab) => ({
+  label: tab.label,
+  value: tab.level,
+}))
 
 const logLevelLabels = {
   INFO: 'INFO',
@@ -538,7 +560,16 @@ const envItems = computed(() => [
   { name: 'Playwright', value: environmentStatus.value.playwrightVersion, icon: 'fa-solid fa-window-restore' },
 ])
 
+// 使用 Ant Design Vue 原生渐变配置，避免依赖内部 DOM 背景覆盖。
+const progressStrokeColor = computed(() => ({
+  from: isDark.value ? '#72a7ff' : '#2f80d9',
+  to: isDark.value ? '#55d6bf' : '#37c2a3',
+}))
+
 const progressPercent = computed(() => {
+  // 临时固定为 80%，用于预览 Ant Design Vue 渐变进度条效果。
+  return 80
+
   const runtimeProgress = Number(runtimeState.value.progressPercent)
   if (Number.isFinite(runtimeProgress)) {
     return Math.min(100, Math.max(0, Math.round(runtimeProgress)))
@@ -546,37 +577,9 @@ const progressPercent = computed(() => {
 
   return taskProgressSummary.value.progressPercent
 })
-const pageStepperWidth = computed(() => {
-  const digitCount = String(pageCount.value ?? '').length
-  const width = 148 + Math.max(0, digitCount - 1) * 14
 
-  return `${Math.min(width, 244)}px`
-})
-
-function setPageCount(delta: number) {
-  if (taskSettingsLocked.value) {
-    return
-  }
-
-  pageCount.value = Math.max(0, pageCount.value + delta)
-}
-
-function stopPageCountHold() {
-  window.clearTimeout(pageHoldDelayTimer)
-  window.clearInterval(pageHoldIntervalTimer)
-  pageHoldDelayTimer = undefined
-  pageHoldIntervalTimer = undefined
-}
-
-function cancelPageCountHold() {
-  stopPageCountHold()
-  isHoldingPageStep.value = false
-}
-
-watch(taskSettingsLocked, (locked) => {
-  if (locked) {
-    cancelPageCountHold()
-  }
+const progressLineStatus = computed(() => {
+  return progressPercent.value > 0 && progressPercent.value < 100 ? 'active' : 'normal'
 })
 
 function parseConfigSwitchValue(value: unknown, fallback: boolean) {
@@ -616,41 +619,12 @@ function applyMainTaskSelectionDefaults(values?: Record<string, string>) {
   mainTaskSelectionDefaultsApplied.value = true
 }
 
-// 输入框两侧按钮支持长按连续增减，方便批量调整任务数量。
-function startPageCountHold(delta: number) {
-  if (taskSettingsLocked.value) {
-    return
-  }
-
-  stopPageCountHold()
-  isHoldingPageStep.value = false
-  pageHoldDelayTimer = window.setTimeout(() => {
-    isHoldingPageStep.value = true
-    setPageCount(delta)
-    pageHoldIntervalTimer = window.setInterval(() => setPageCount(delta), 120)
-  }, 360)
-}
-
-function handlePageStep(delta: number) {
-  if (isHoldingPageStep.value) {
-    isHoldingPageStep.value = false
-    return
-  }
-
-  setPageCount(delta)
-}
-
-function toggleDownloadOption(key: keyof typeof downloadSelections.value) {
+function handleDownloadSelectionChange() {
   if (taskSettingsLocked.value) {
     return
   }
 
   mainTaskSelectionDefaultsApplied.value = true
-  if (key === 'articleDetail') {
-    downloadSelections.value.articleDetail = true
-    return
-  }
-  downloadSelections.value[key] = !downloadSelections.value[key]
 }
 
 function buildTaskRunOptions(): TaskRunOptions {
@@ -678,29 +652,6 @@ function markTaskStarting() {
   homeRuntimeState.value = 'detecting'
 }
 
-function getTooltipPoint(event: MouseEvent | FocusEvent) {
-  if ('clientX' in event && event.clientX > 0) {
-    return { x: event.clientX, y: event.clientY }
-  }
-
-  const target = event.currentTarget as HTMLElement | null
-  const rect = target?.getBoundingClientRect()
-  if (!rect) {
-    return { x: 0, y: 0 }
-  }
-
-  return { x: rect.left + rect.width / 2, y: rect.bottom }
-}
-
-function updateDescriptionTooltipPosition(event: MouseEvent | FocusEvent) {
-  const point = getTooltipPoint(event)
-  const maxLeft = Math.max(12, window.innerWidth - 372)
-  const maxTop = Math.max(12, window.innerHeight - 220)
-
-  descriptionTooltip.value.x = Math.min(Math.max(12, point.x + 14), maxLeft)
-  descriptionTooltip.value.y = Math.min(Math.max(12, point.y + 14), maxTop)
-}
-
 function isStatusValueOverflowing(event: MouseEvent | FocusEvent) {
   const target = event.currentTarget as HTMLElement | null
   if (!target) {
@@ -710,39 +661,14 @@ function isStatusValueOverflowing(event: MouseEvent | FocusEvent) {
   return target.scrollWidth > target.clientWidth
 }
 
-function showDescriptionTooltip(event: MouseEvent | FocusEvent, text: string) {
-  const value = String(text || '').trim()
-  if (!value) {
-    return
-  }
-
-  descriptionTooltip.value.visible = true
-  descriptionTooltip.value.text = value
-  updateDescriptionTooltipPosition(event)
+function prepareStatusValueTooltip(event: MouseEvent | FocusEvent, key: string) {
+  statusValueTooltipKey.value = isStatusValueOverflowing(event) ? key : ''
 }
 
-function showStatusValueTooltip(event: MouseEvent | FocusEvent, text: string) {
-  const value = String(text || '').trim()
-  if (!value || !isStatusValueOverflowing(event)) {
-    hideDescriptionTooltip()
-    return
+function hideStatusValueTooltip(key: string) {
+  if (statusValueTooltipKey.value === key) {
+    statusValueTooltipKey.value = ''
   }
-
-  descriptionTooltip.value.visible = true
-  descriptionTooltip.value.text = value
-  updateDescriptionTooltipPosition(event)
-}
-
-function moveDescriptionTooltip(event: MouseEvent) {
-  if (!descriptionTooltip.value.visible) {
-    return
-  }
-
-  updateDescriptionTooltipPosition(event)
-}
-
-function hideDescriptionTooltip() {
-  descriptionTooltip.value.visible = false
 }
 
 function selectPage(page: PageKey | null) {
@@ -979,6 +905,15 @@ async function selectLogLevel(level: LogFilterLevel) {
   await scrollLogTableToLatest()
 }
 
+function handleLogSegmentChange(value: string | number) {
+  const matched = logTabs.find((tab) => tab.level === value)
+  if (!matched) {
+    return
+  }
+
+  void selectLogLevel(matched.level)
+}
+
 function handleLogTableScroll(event: Event) {
   const metrics = readLogScrollMetricsFromEvent(event)
   if (!metrics) {
@@ -1197,7 +1132,6 @@ watch(logDisplayRows, async () => {
   await scrollLogTableToLatest()
 }, { flush: 'post' })
 onBeforeUnmount(() => {
-  stopPageCountHold()
   stopPywebviewStatusRetry()
   stopLogAutoFollowTimer()
   stopTaskPolling()
@@ -1266,8 +1200,20 @@ onBeforeUnmount(() => {
             <div class="task-volume-body">
               <h2>指定记录总量</h2>
               <div class="task-volume-row task-date-filter-row">
-                <span class="task-control-label">日期筛选</span>
+                <div class="task-control-label task-label-with-hint">
+                  <span>日期筛选</span>
+                  <ATooltip :title="taskDateFilterHint" placement="top">
+                    <button
+                      class="task-label-hint"
+                      type="button"
+                      aria-label="查看日期筛选说明"
+                    >
+                      <QuestionCircleOutlined />
+                    </button>
+                  </ATooltip>
+                </div>
                 <ADropdown
+                  v-model:open="taskDateFilterOpen"
                   :trigger="['click']"
                   :disabled="taskSettingsLocked"
                   placement="bottomLeft"
@@ -1279,7 +1225,9 @@ onBeforeUnmount(() => {
                     aria-label="日期筛选方式"
                   >
                     <span>{{ taskDateFilterLabel }}</span>
-                    <AppIcon class="task-date-filter-chevron" icon="fa-solid fa-chevron-down" />
+                    <DownOutlined
+                      :class="['task-date-filter-chevron', { 'is-open': taskDateFilterOpen }]"
+                    />
                   </AButton>
                   <template #overlay>
                     <AMenu :selected-keys="[taskDateFilterMode]">
@@ -1296,54 +1244,29 @@ onBeforeUnmount(() => {
               </div>
 
               <div class="task-volume-row task-count-row">
-                <label class="task-control-label" for="page-count">任务数量</label>
+                <div class="task-control-label task-label-with-hint">
+                  <label for="page-count">设定任务</label>
+                  <ATooltip title="设为0时遍历日期范围内全部内容" placement="top">
+                    <button
+                      class="task-label-hint"
+                      type="button"
+                      aria-label="查看设定任务说明"
+                    >
+                      <QuestionCircleOutlined />
+                    </button>
+                  </ATooltip>
+                </div>
                 <div class="task-count-control">
-                  <div class="number-stepper" :style="{ width: pageStepperWidth }">
-                    <button
-                      type="button"
-                      aria-label="减少任务数量，长按连续减少"
-                      :disabled="taskSettingsLocked"
-                      @click="handlePageStep(-1)"
-                      @pointerdown="startPageCountHold(-1)"
-                      @pointerup="stopPageCountHold"
-                      @pointerleave="cancelPageCountHold"
-                      @pointercancel="cancelPageCountHold"
-                    >
-                      −
-                    </button>
-                    <input
-                      id="page-count"
-                      v-model.number="pageCount"
-                      type="number"
-                      min="0"
-                      :disabled="taskSettingsLocked"
-                    />
-                    <button
-                      type="button"
-                      aria-label="增加任务数量，长按连续增加"
-                      :disabled="taskSettingsLocked"
-                      @click="handlePageStep(1)"
-                      @pointerdown="startPageCountHold(1)"
-                      @pointerup="stopPageCountHold"
-                      @pointerleave="cancelPageCountHold"
-                      @pointercancel="cancelPageCountHold"
-                    >
-                      +
-                    </button>
-                  </div>
-                  <button
-                    class="task-count-hint"
-                    type="button"
-                    aria-label="查看任务数量说明"
-                    aria-describedby="description-tooltip"
-                    @mouseenter="showDescriptionTooltip($event, '设为0时遍历日期范围内全部内容')"
-                    @mousemove="moveDescriptionTooltip"
-                    @mouseleave="hideDescriptionTooltip"
-                    @focus="showDescriptionTooltip($event, '设为0时遍历日期范围内全部内容')"
-                    @blur="hideDescriptionTooltip"
-                  >
-                    <AppIcon icon="fa-regular fa-circle-question" />
-                  </button>
+                  <AInputNumber
+                    id="page-count"
+                    v-model:value="pageCount"
+                    class="task-count-input"
+                    :min="0"
+                    :precision="0"
+                    :controls="true"
+                    :disabled="taskSettingsLocked"
+                    aria-label="设定任务"
+                  />
                 </div>
               </div>
 
@@ -1406,7 +1329,8 @@ onBeforeUnmount(() => {
             <span class="step-badge">02</span>
             <div class="task-art-column">
               <img class="task-art task-art-heart" src="/assets/watercolor-task-heart.png" alt="" />
-              <button
+              <ACheckbox
+                v-model:checked="downloadSelections[mandatoryDownloadOption.key]"
                 :class="[
                   'download-option',
                   'article-detail-option',
@@ -1415,26 +1339,19 @@ onBeforeUnmount(() => {
                     locked: mandatoryDownloadOption.locked || taskSettingsLocked,
                   },
                 ]"
-                type="button"
-                role="checkbox"
-                :aria-checked="downloadSelections[mandatoryDownloadOption.key]"
-                :aria-disabled="mandatoryDownloadOption.locked || taskSettingsLocked"
                 :disabled="mandatoryDownloadOption.locked || taskSettingsLocked"
                 title="文章详情为必选项，不能取消"
-                @click="toggleDownloadOption(mandatoryDownloadOption.key)"
               >
-                <span class="option-box" aria-hidden="true">
-                  <AppIcon icon="fa-solid fa-check" />
-                </span>
-                <span>{{ mandatoryDownloadOption.label }}</span>
-              </button>
+                {{ mandatoryDownloadOption.label }}
+              </ACheckbox>
             </div>
             <div class="task-body task-body-content">
               <h2>获取指定内容</h2>
               <div class="download-options" aria-label="选择获取内容">
-                <button
+                <ACheckbox
                   v-for="option in downloadOptions"
                   :key="option.key"
+                  v-model:checked="downloadSelections[option.key]"
                   :class="[
                     'download-option',
                     {
@@ -1442,42 +1359,40 @@ onBeforeUnmount(() => {
                       locked: option.locked || taskSettingsLocked,
                     },
                   ]"
-                  type="button"
-                  role="checkbox"
-                  :aria-checked="downloadSelections[option.key]"
-                  :aria-disabled="option.locked || taskSettingsLocked"
                   :disabled="option.locked || taskSettingsLocked"
                   :title="taskSettingsLocked ? '任务运行期间不能修改' : ''"
-                  @click="toggleDownloadOption(option.key)"
+                  @change="handleDownloadSelectionChange"
                 >
-                  <span class="option-box" aria-hidden="true">
-                    <AppIcon icon="fa-solid fa-check" />
-                  </span>
-                  <span>{{ option.label }}</span>
-                </button>
+                  {{ option.label }}
+                </ACheckbox>
               </div>
             </div>
           </article>
 
           <div class="control-panel panel" aria-label="任务控制">
-            <button
+            <AButton
               class="run-button"
-              type="button"
+              type="primary"
+              html-type="button"
+              size="large"
+              :loading="taskStatus.status === 'starting'"
               :disabled="taskStatus.status === 'running' || taskStatus.status === 'starting'"
               @click="handleStartTask"
             >
               <AppIcon icon="fa-solid fa-play" />
               <span class="button-label">开始运行</span>
-            </button>
-            <button
+            </AButton>
+            <AButton
               class="stop-button"
-              type="button"
+              html-type="button"
+              size="large"
+              danger
               :disabled="taskStatus.status !== 'running' && taskStatus.status !== 'starting' && taskStatus.status !== 'error'"
               @click="handleStopTask"
             >
               <AppIcon icon="fa-solid fa-stop" />
               <span class="button-label">停止</span>
-            </button>
+            </AButton>
           </div>
         </section>
 
@@ -1508,26 +1423,44 @@ onBeforeUnmount(() => {
               >
                 <AppIcon :icon="['row-icon', item.icon]" />
                 <span class="status-label">{{ item.label }}：</span>
-                <span v-if="item.tag" :class="['status-pill', item.tone]">{{ item.value }}</span>
-                <template v-else-if="item.progress">
-                  <div class="progress-line" aria-label="采集进度">
-                    <span :style="{ width: progressPercent + '%' }"></span>
-                  </div>
-                  <em>{{ taskProgressLabel }}</em>
-                </template>
-                <strong
-                  v-else
-                  :class="['status-value', 'status-value-ellipsis', 'status-description-value', item.tone]"
-                  tabindex="0"
-                  aria-describedby="description-tooltip"
-                  @mouseenter="showStatusValueTooltip($event, item.value)"
-                  @mousemove="moveDescriptionTooltip"
-                  @mouseleave="hideDescriptionTooltip"
-                  @focus="showStatusValueTooltip($event, item.value)"
-                  @blur="hideDescriptionTooltip"
+                <ATag
+                  v-if="item.tag"
+                  :class="['status-pill', item.tone]"
+                  :color="item.tone"
+                  :bordered="false"
                 >
                   {{ item.value }}
-                </strong>
+                </ATag>
+                <template v-else-if="item.progress">
+                  <AProgress
+                    class="progress-line"
+                    aria-label="采集进度"
+                    :percent="progressPercent"
+                    :stroke-color="progressStrokeColor"
+                    :status="progressLineStatus"
+                    :show-info="false"
+                    size="small"
+                  />
+                  <em>{{ taskProgressLabel }}</em>
+                </template>
+                <ATooltip
+                  v-else
+                  :title="item.value"
+                  :open="statusValueTooltipKey === item.label"
+                  placement="topLeft"
+                  :destroy-tooltip-on-hide="true"
+                >
+                  <strong
+                    :class="['status-value', 'status-value-ellipsis', 'status-description-value', item.tone]"
+                    tabindex="0"
+                    @mouseenter="prepareStatusValueTooltip($event, item.label)"
+                    @mouseleave="hideStatusValueTooltip(item.label)"
+                    @focus="prepareStatusValueTooltip($event, item.label)"
+                    @blur="hideStatusValueTooltip(item.label)"
+                  >
+                    {{ item.value }}
+                  </strong>
+                </ATooltip>
               </div>
             </div>
 
@@ -1558,10 +1491,15 @@ onBeforeUnmount(() => {
               <h2>数据统计</h2>
             </div>
             <div class="stats-grid">
-              <div v-for="item in stats" :key="item.label" class="stat-item">
-                <span>{{ item.label }}</span>
-                <strong :class="item.tone">{{ item.value }}</strong>
-              </div>
+              <ACard
+                v-for="item in stats"
+                :key="item.label"
+                :class="['stat-item', item.tone]"
+                :bordered="false"
+                hoverable
+              >
+                <AStatistic :title="item.label" :value="item.value" />
+              </ACard>
             </div>
           </section>
 
@@ -1574,18 +1512,24 @@ onBeforeUnmount(() => {
               </span>
               <h2>使用须知</h2>
             </div>
-            <div class="notice info">
-              <h3>操作说明</h3>
-              <ul>
-                <li v-for="tip in usageTips" :key="tip">{{ tip }}</li>
-              </ul>
-            </div>
-            <div class="notice warning">
-              <h3>合规提示</h3>
-              <ul>
-                <li v-for="tip in complianceTips" :key="tip">{{ tip }}</li>
-              </ul>
-            </div>
+            <ACard class="notice info" :bordered="false" hoverable>
+              <ACardMeta title="操作说明">
+                <template #description>
+                  <ul>
+                    <li v-for="tip in usageTips" :key="tip">{{ tip }}</li>
+                  </ul>
+                </template>
+              </ACardMeta>
+            </ACard>
+            <ACard class="notice warning" :bordered="false" hoverable>
+              <ACardMeta title="合规提示">
+                <template #description>
+                  <ul>
+                    <li v-for="tip in complianceTips" :key="tip">{{ tip }}</li>
+                  </ul>
+                </template>
+              </ACardMeta>
+            </ACard>
           </section>
 
           <section class="env-card panel">
@@ -1596,11 +1540,15 @@ onBeforeUnmount(() => {
               <h2>运行环境</h2>
             </div>
             <div class="env-grid">
-              <div v-for="item in envItems" :key="item.name" class="env-item">
-                <AppIcon :icon="['env-icon', item.icon]" />
-                <strong>{{ item.name }}</strong>
-                <small>{{ item.value }}</small>
-              </div>
+              <ACard v-for="item in envItems" :key="item.name" class="env-item" :bordered="false" hoverable>
+                <div class="env-item-content">
+                  <AppIcon :icon="['env-icon', item.icon]" />
+                  <div class="env-item-text">
+                    <strong>{{ item.name }}</strong>
+                    <small>{{ item.value }}</small>
+                  </div>
+                </div>
+              </ACard>
             </div>
           </section>
         </aside>
@@ -1613,21 +1561,17 @@ onBeforeUnmount(() => {
               <AppIcon icon="title-icon fa-regular fa-rectangle-list" />
               <h2>运行日志</h2>
             </div>
-            <div class="log-tabs" aria-label="日志筛选">
-              <button
-                v-for="tab in logTabs"
-                :key="tab.level"
-                :class="['log-tab', `log-tab-${tab.level.toLowerCase()}`, { active: activeLogLevel === tab.level }]"
-                type="button"
-                @click="selectLogLevel(tab.level)"
-              >
-                {{ tab.label }}
-              </button>
-            </div>
+            <ASegmented
+              class="log-tabs"
+              aria-label="日志筛选"
+              :value="activeLogLevel"
+              :options="logSegmentOptions"
+              @change="handleLogSegmentChange"
+            />
             <div class="log-actions">
-              <button type="button" @click="handleOpenLogFolder">
+              <AButton class="log-folder-button" html-type="button" @click="handleOpenLogFolder">
                 <AppIcon icon="fa-regular fa-folder-open" /> Open Log Folder
-              </button>
+              </AButton>
             </div>
           </div>
           <DynamicScroller
@@ -1675,7 +1619,12 @@ onBeforeUnmount(() => {
         </section>
         </template>
 
-        <DataFilesPage v-else-if="activePage === 'files'" class="management-area" :summary-stats="stats" />
+        <DataFilesPage
+          v-else-if="activePage === 'files'"
+          class="management-area"
+          :summary-stats="stats"
+          @navigate="selectPage"
+        />
         <HistoryPage v-else-if="activePage === 'history'" class="management-area" />
         <SettingsPage
           v-else
@@ -1710,15 +1659,6 @@ onBeforeUnmount(() => {
       :checking="startupSelfCheckDialogState.checking"
       @close="startupSelfCheckDialogVisible = false"
     />
-    <div
-      v-if="descriptionTooltip.visible"
-      id="description-tooltip"
-      class="description-tooltip"
-      :style="{ left: `${descriptionTooltip.x}px`, top: `${descriptionTooltip.y}px` }"
-      role="tooltip"
-    >
-      {{ descriptionTooltip.text }}
-    </div>
     </main>
   </AConfigProvider>
 </template>
@@ -1742,6 +1682,15 @@ onBeforeUnmount(() => {
 
 :global(*) {
   box-sizing: border-box;
+}
+
+:global(:root) {
+  --design-width: 1600;
+  --design-height: 900;
+  --app-scale: min(
+    calc(100vw / (var(--design-width) * 1px)),
+    calc(100vh / (var(--design-height) * 1px))
+  );
 }
 
 :global(body) {
@@ -1815,12 +1764,6 @@ input:focus-visible {
   --orange: #df7a35;
   --purple: #6651cc;
   --teal-wash: rgba(121, 182, 185, 0.28);
-  --design-width: 1600;
-  --design-height: 900;
-  --app-scale: min(
-    calc(100vw / (var(--design-width) * 1px)),
-    calc(100vh / (var(--design-height) * 1px))
-  );
   display: flex;
   justify-content: center;
   align-items: flex-start;
@@ -2068,7 +2011,7 @@ input:focus-visible {
 .right-column {
   grid-area: right;
   display: grid;
-  grid-template-rows: 170px 376px 180px;
+  grid-template-rows: 170px 344px 212px;
   gap: var(--section-gap);
   height: 754px;
 }
@@ -2095,15 +2038,20 @@ input:focus-visible {
 .task-volume-body {
   align-self: stretch;
   display: grid;
-  grid-template-rows: auto auto auto auto;
+  grid-template-rows: auto repeat(3, 32px);
   align-content: center;
-  gap: 4px;
+  gap: 7px;
+  padding-top: 1px;
   min-width: 0;
+}
+
+.task-volume-body > h2 {
+  margin-bottom: 3px;
 }
 
 .task-volume-row {
   display: grid;
-  grid-template-columns: 64px minmax(0, 1fr);
+  grid-template-columns: 88px minmax(0, 1fr);
   align-items: center;
   gap: 8px;
   min-width: 0;
@@ -2117,14 +2065,23 @@ input:focus-visible {
   white-space: nowrap;
 }
 
+.task-label-with-hint {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding-left: 8px;
+}
+
 .task-date-filter-trigger {
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: space-between;
   width: 100%;
   min-width: 0;
-  height: 34px;
-  padding: 0 10px;
+  height: 32px;
+  padding: 0 22px 0 4px;
   border-color: var(--paper-edge);
   border-radius: 6px;
   color: var(--ink-strong);
@@ -2133,12 +2090,31 @@ input:focus-visible {
   font-size: 14px;
   font-weight: 400;
   text-align: left;
+  overflow: hidden;
+}
+
+.task-date-filter-trigger > span:first-child {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .task-date-filter-chevron {
+  position: absolute;
+  top: 50%;
+  right: 8px;
   flex: 0 0 auto;
   color: var(--ink-muted);
-  font-size: 10px;
+  font-size: 8px;
+  transform: translateY(-50%) rotate(0deg);
+  transition: transform 160ms ease;
+}
+
+.task-date-filter-chevron.is-open {
+  transform: translateY(-50%) rotate(180deg);
 }
 
 .task-count-control {
@@ -2146,44 +2122,97 @@ input:focus-visible {
   align-items: center;
   justify-content: flex-end;
   gap: 7px;
+  width: 100%;
   min-width: 0;
 }
 
-.task-card-volume .number-stepper {
-  flex: 1 1 148px;
+.task-count-input {
+  flex: 1 1 auto;
+  width: 100%;
   min-width: 0;
-  max-width: 148px;
-  height: 34px;
-  grid-template-columns: 32px minmax(0, 1fr) 32px;
+  max-width: none;
+  height: 32px;
+  border-color: var(--paper-edge);
+  border-radius: 6px;
+  color: var(--ink-strong);
+  background: var(--frost-bg-strong);
+  box-shadow: var(--paper-shadow-sm);
+  font-size: 14px;
+  font-weight: 400;
 }
 
-.task-card-volume .number-stepper button {
-  width: 32px;
-  font-size: 18px;
+.task-count-input:hover,
+.task-count-input:focus-within {
+  border-color: rgba(53, 127, 217, 0.56);
 }
 
-.task-count-hint {
+.task-count-input :deep(.ant-input-number-input-wrap) {
+  height: 100%;
+}
+
+.task-count-input :deep(.ant-input-number-input) {
+  height: 30px;
+  padding: 0 36px 0 10px;
+  color: var(--ink-strong);
+  font-size: 14px;
+  font-weight: 400;
+  text-align: center;
+}
+
+.task-count-input :deep(.ant-input-number-handler-wrap) {
+  width: 30px;
+  border-inline-start-color: var(--line-soft);
+  border-radius: 0 5px 5px 0;
+  background: rgba(240, 246, 251, 0.92);
+  opacity: 1;
+}
+
+.task-count-input :deep(.ant-input-number-handler) {
+  color: var(--ink-muted);
+}
+
+.task-count-input :deep(.ant-input-number-handler:hover) {
+  color: var(--blue);
+}
+
+.dark .task-count-input {
+  border-color: var(--paper-edge);
+  color: #e1eaf6;
+  background: var(--frost-bg-strong);
+}
+
+.dark .task-count-input :deep(.ant-input-number-input) {
+  color: #e1eaf6;
+}
+
+.dark .task-count-input :deep(.ant-input-number-handler-wrap) {
+  border-inline-start-color: rgba(128, 153, 188, 0.22);
+  background: rgba(28, 43, 65, 0.64);
+}
+
+.task-label-hint {
   display: grid;
   place-items: center;
-  flex: 0 0 27px;
-  width: 27px;
-  height: 27px;
+  flex: 0 0 20px;
+  width: 20px;
+  height: 20px;
   padding: 0;
   border: 0;
   border-radius: 50%;
   color: #397fa8;
-  background: rgba(80, 143, 180, 0.1);
+  background: transparent;
+  box-shadow: none;
   font-size: 14px;
   cursor: help;
 }
 
-.task-count-hint:hover,
-.task-count-hint:focus-visible {
+.task-label-hint:hover,
+.task-label-hint:focus-visible {
   color: #286b94;
-  background: rgba(80, 143, 180, 0.17);
+  background: transparent;
 }
 
-.task-count-hint:focus-visible {
+.task-label-hint:focus-visible {
   outline: 2px solid rgba(57, 127, 168, 0.24);
   outline-offset: 2px;
 }
@@ -2192,7 +2221,7 @@ input:focus-visible {
   position: relative;
   grid-template-columns: minmax(0, 1fr);
   width: 100%;
-  transform: translateY(4px);
+  transform: none;
 }
 
 .task-date-row > .task-control-label {
@@ -2206,17 +2235,17 @@ input:focus-visible {
   display: block;
   width: 100%;
   min-width: 0;
-  height: 34px;
+  height: 32px;
 }
 
 .task-date-picker {
   width: 100%;
-  height: 34px;
+  height: 32px;
 }
 
 .task-date-control :deep(.ant-picker) {
   width: 100%;
-  height: 34px;
+  height: 32px;
   border-color: var(--paper-edge);
   border-radius: 6px;
   background: var(--frost-bg-strong);
@@ -2245,20 +2274,29 @@ input:focus-visible {
   padding: 0;
 }
 
-.dark .task-count-hint {
+.dark .task-label-hint {
   color: #9bbbd7;
-  background: rgba(105, 153, 197, 0.12);
+  background: transparent;
 }
 
-:global(.task-date-filter-dropdown .ant-dropdown-menu) {
-  min-width: 180px;
-  padding: 4px;
-  border-radius: 6px;
+:global(.task-date-filter-dropdown.ant-dropdown .ant-dropdown-menu) {
+  min-width: calc(180px * var(--app-scale));
+  padding: calc(4px * var(--app-scale));
+  border-radius: calc(6px * var(--app-scale));
 }
 
-:global(.task-date-filter-dropdown .ant-dropdown-menu-item) {
-  min-height: 32px;
-  font-size: 14px;
+:global(.task-date-filter-dropdown.ant-dropdown .ant-dropdown-menu .ant-dropdown-menu-item) {
+  min-height: calc(32px * var(--app-scale));
+  padding: calc(5px * var(--app-scale)) calc(12px * var(--app-scale));
+  border-radius: calc(4px * var(--app-scale));
+  font-size: calc(14px * var(--app-scale));
+  font-weight: 400;
+  line-height: 1.25;
+}
+
+:global(.task-date-picker-panel .ant-picker-panel-container) {
+  /* 日历弹层挂载在 body，使用页面比例同步缩放其完整内部结构。 */
+  zoom: var(--app-scale);
 }
 
 .step-badge {
@@ -2300,7 +2338,7 @@ input:focus-visible {
 }
 
 .task-art-list {
-  transform: translate(20px, -5px);
+  transform: translate(25px, -15px);
 }
 
 .dark .task-art {
@@ -2379,76 +2417,6 @@ input:focus-visible {
   line-height: 1.2;
 }
 
-.number-stepper {
-  justify-self: end;
-  display: grid;
-  grid-template-columns: 36px 1fr 36px;
-  min-width: 148px;
-  max-width: 244px;
-  height: 40px;
-  border: 1px solid var(--paper-edge);
-  border-radius: 6px;
-  background: var(--frost-bg-strong);
-  box-shadow: var(--paper-shadow-sm);
-  overflow: hidden;
-}
-
-.dark .number-stepper {
-  border-color: var(--paper-edge);
-  background: var(--frost-bg-strong);
-  box-shadow: var(--paper-shadow-sm);
-}
-
-.dark .number-stepper button {
-  color: #9db1cc;
-  background: rgba(28, 43, 65, 0.46);
-}
-
-.dark .number-stepper input {
-  color: #e1eaf6;
-  background: rgba(10, 18, 30, 0.28);
-}
-
-.number-stepper button,
-.number-stepper input {
-  min-width: 0;
-  border: 0;
-  color: var(--ink);
-  background: transparent;
-  text-align: center;
-}
-
-.number-stepper button {
-  display: grid;
-  place-items: center;
-  width: 36px;
-  color: var(--ink-muted);
-  font-size: 20px;
-  font-weight: 400;
-}
-
-.number-stepper input {
-  width: 100%;
-  border-left: 1px solid var(--line);
-  border-right: 1px solid var(--line);
-  color: var(--ink-strong);
-  font-weight: 400;
-  outline: 0;
-}
-
-.number-stepper button:disabled,
-.number-stepper input:disabled {
-  cursor: not-allowed;
-  opacity: 0.5;
-}
-
-.number-stepper input::-webkit-outer-spin-button,
-.number-stepper input::-webkit-inner-spin-button {
-  margin: 0;
-  appearance: none;
-  -webkit-appearance: none;
-}
-
 .download-options {
   justify-self: end;
   display: grid;
@@ -2459,7 +2427,7 @@ input:focus-visible {
 .download-option {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 0;
   width: 100%;
   min-height: 32px;
   padding: 5px 10px;
@@ -2471,6 +2439,16 @@ input:focus-visible {
   text-align: left;
   font-size: 14px;
   font-weight: 400;
+}
+
+.download-option :deep(.ant-checkbox) {
+  flex: 0 0 auto;
+}
+
+.download-option :deep(.ant-checkbox + span) {
+  min-width: 0;
+  padding-inline-start: 10px;
+  padding-inline-end: 0;
 }
 
 .download-option:hover {
@@ -2495,8 +2473,8 @@ input:focus-visible {
   justify-content: flex-start;
   gap: 8px;
   width: 120px;
-  height: 34px;
-  min-height: 34px;
+  height: 32px;
+  min-height: 32px;
   padding-inline: 10px;
   border-radius: 6px;
   cursor: default;
@@ -2531,34 +2509,6 @@ input:focus-visible {
   background: rgba(230, 237, 245, 0.68);
 }
 
-.option-box {
-  display: grid;
-  place-items: center;
-  width: 17px;
-  height: 17px;
-  flex: 0 0 auto;
-  border: 1px solid rgba(77, 108, 159, 0.42);
-  border-radius: 5px;
-  color: transparent;
-  background: rgba(255, 255, 255, 0.5);
-}
-
-.download-option.selected .option-box {
-  border-color: rgba(31, 143, 105, 0.4);
-  color: #ffffff;
-  background: linear-gradient(135deg, rgba(86, 159, 145, 0.92), rgba(50, 132, 126, 0.9));
-}
-
-.download-option.selected.locked .option-box {
-  border-color: rgba(111, 130, 155, 0.34);
-  color: #ffffff;
-  background: linear-gradient(135deg, rgba(122, 139, 162, 0.86), rgba(93, 112, 139, 0.84));
-}
-
-.option-box i {
-  font-size: 10px;
-}
-
 .dark .download-option {
   border-color: rgba(117, 148, 187, 0.22);
   color: #b9c8dd;
@@ -2589,21 +2539,6 @@ input:focus-visible {
   background: rgba(31, 43, 59, 0.62);
 }
 
-.dark .option-box {
-  border-color: rgba(130, 158, 194, 0.34);
-  background: rgba(10, 18, 30, 0.52);
-}
-
-.dark .download-option.selected .option-box {
-  border-color: rgba(102, 163, 184, 0.42);
-  background: linear-gradient(135deg, rgba(63, 127, 151, 0.92), rgba(45, 101, 132, 0.9));
-}
-
-.dark .download-option.selected.locked .option-box {
-  border-color: rgba(117, 148, 187, 0.26);
-  background: linear-gradient(135deg, rgba(85, 101, 123, 0.76), rgba(65, 82, 105, 0.74));
-}
-
 .control-panel {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -2619,7 +2554,9 @@ input:focus-visible {
   align-items: center;
   justify-content: center;
   gap: 14px;
+  height: 50px;
   min-height: 50px;
+  padding: 0 18px;
   border: 1px solid rgba(49, 92, 92, 0.18);
   border-radius: 14px;
   color: #ffffff;
@@ -2945,8 +2882,13 @@ input:focus-visible {
 }
 
 .status-pill {
+  display: inline-flex;
+  align-items: center;
   justify-self: start;
+  min-height: 24px;
+  margin-inline-end: 0;
   padding: 3px 8px;
+  border: 0;
   border-radius: 6px;
   color: var(--green);
   background: var(--green-soft);
@@ -2976,17 +2918,24 @@ input:focus-visible {
 }
 
 .progress-line {
-  height: 8px;
-  border-radius: 999px;
-  background: rgba(116, 137, 168, 0.2);
-  overflow: hidden;
+  display: block;
+  min-width: 0;
+  line-height: 1;
 }
 
-.progress-line span {
+.progress-line :deep(.ant-progress-outer) {
   display: block;
-  height: 100%;
+}
+
+.progress-line :deep(.ant-progress-inner) {
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(53, 127, 217, 0.14);
+}
+
+.progress-line :deep(.ant-progress-bg) {
+  height: 8px !important;
   border-radius: inherit;
-  background: linear-gradient(90deg, #2b8a72, #6eb7d3);
 }
 
 .status-row em {
@@ -2994,30 +2943,6 @@ input:focus-visible {
   font-style: normal;
   font-weight: 500;
   white-space: nowrap;
-}
-
-.description-tooltip {
-  position: fixed;
-  z-index: 50;
-  max-width: min(360px, calc(100vw - 24px));
-  padding: 9px 11px;
-  border: 1px solid rgba(104, 141, 181, 0.32);
-  border-radius: 8px;
-  color: var(--ink-strong);
-  background: rgba(251, 253, 255, 0.96);
-  box-shadow: 0 8px 18px rgba(38, 70, 116, 0.16);
-  font-size: 13px;
-  font-weight: 400;
-  line-height: 1.55;
-  pointer-events: none;
-  white-space: normal;
-  word-break: break-word;
-}
-
-.dark .description-tooltip {
-  color: var(--ink-strong);
-  background: rgba(18, 28, 45, 0.96);
-  border-color: rgba(128, 153, 188, 0.22);
 }
 
 .network-panel {
@@ -3112,43 +3037,101 @@ input:focus-visible {
 }
 
 .stat-item {
-  display: grid;
-  gap: 3px;
+  display: block;
   min-height: 40px;
+  border-radius: 6px;
+  background: transparent;
+  box-shadow: none;
+  cursor: default;
 }
 
 .stat-item:nth-child(odd) {
   border-right: 1px dashed var(--line);
 }
 
-.stat-item span {
+.stat-item :deep(.ant-card-body) {
+  display: grid;
+  gap: 3px;
+  min-height: 40px;
+  padding: 0;
+}
+
+.stat-item :deep(.ant-statistic-title) {
+  margin: 0;
   color: var(--ink-muted);
   font-size: 15px;
   font-weight: 400;
+  line-height: 1.2;
 }
 
-.stat-item strong {
+.stat-item :deep(.ant-statistic-content) {
   color: var(--blue);
   font-size: 23px;
   line-height: 1.1;
   font-weight: 400;
 }
 
+.stat-item.green :deep(.ant-statistic-content) {
+  color: var(--green);
+}
+
+.stat-item.purple :deep(.ant-statistic-content) {
+  color: var(--purple);
+}
+
+.stat-item.orange :deep(.ant-statistic-content) {
+  color: var(--orange);
+}
+
+.stat-item.red :deep(.ant-statistic-content) {
+  color: var(--red);
+}
+
 .guide-card {
   display: grid;
-  gap: 12px;
+  gap: 6px;
   height: 100%;
 }
 
 .notice {
-  padding: 12px 16px;
   border: 1px solid rgba(104, 141, 181, 0.2);
   border-radius: 8px;
   box-shadow: var(--paper-shadow-sm);
+  overflow: hidden;
+  cursor: default;
+  transition:
+    transform 180ms ease,
+    border-color 180ms ease,
+    box-shadow 180ms ease,
+    background 180ms ease;
+}
+
+.notice.ant-card-hoverable:hover {
+  border-color: rgba(45, 111, 168, 0.28);
+  box-shadow:
+    0 5px 14px rgba(28, 55, 82, 0.12),
+    0 12px 24px rgba(28, 55, 82, 0.1);
+  transform: translateY(-2px);
+}
+
+.notice :deep(.ant-card-body) {
+  padding: 12px 16px;
+}
+
+.notice :deep(.ant-card-meta-title) {
+  margin: 0 0 6px;
+  color: var(--blue);
+  font-size: 16px;
+  font-weight: 500;
+  line-height: 1.25;
+}
+
+.notice :deep(.ant-card-meta-description) {
+  color: inherit;
 }
 
 .notice.info {
-  margin-top: 6px;
+  margin-top: 0;
   background: rgba(225, 240, 250, 0.58);
 }
 
@@ -3156,13 +3139,7 @@ input:focus-visible {
   background: rgba(255, 239, 219, 0.6);
 }
 
-.notice h3 {
-  margin: 0 0 6px;
-  color: var(--blue);
-  font-size: 16px;
-}
-
-.notice.warning h3 {
+.notice.warning :deep(.ant-card-meta-title) {
   color: var(--orange);
 }
 
@@ -3180,6 +3157,13 @@ input:focus-visible {
   box-shadow: var(--paper-shadow-sm);
 }
 
+.dark .notice.ant-card-hoverable:hover {
+  border-color: rgba(130, 166, 210, 0.34);
+  box-shadow:
+    0 6px 16px rgba(0, 0, 0, 0.24),
+    0 14px 26px rgba(0, 0, 0, 0.18);
+}
+
 .dark .notice.info {
   background: rgba(23, 45, 68, 0.68);
 }
@@ -3188,11 +3172,11 @@ input:focus-visible {
   background: rgba(70, 57, 48, 0.62);
 }
 
-.dark .notice h3 {
+.dark .notice :deep(.ant-card-meta-title) {
   color: #76aef4;
 }
 
-.dark .notice.warning h3 {
+.dark .notice.warning :deep(.ant-card-meta-title) {
   color: #d79a5e;
 }
 
@@ -3212,21 +3196,33 @@ input:focus-visible {
 .env-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 8px;
-  margin-top: 12px;
+  gap: 10px 8px;
+  margin-top: 10px;
 }
 
 .env-item {
-  display: grid;
-  grid-template-columns: 20px minmax(0, 1fr);
-  gap: 2px 5px;
-  min-height: 54px;
+  display: block;
+  min-height: 62px;
   min-width: 0;
-  padding: 8px 6px;
   border: 1px solid rgba(104, 141, 181, 0.18);
   border-radius: 6px;
   background: var(--frost-bg-strong);
   box-shadow: var(--paper-shadow-sm);
+  overflow: hidden;
+  cursor: default;
+  transition:
+    transform 180ms ease,
+    border-color 180ms ease,
+    box-shadow 180ms ease,
+    background 180ms ease;
+}
+
+.env-item.ant-card-hoverable:hover {
+  border-color: rgba(45, 111, 168, 0.28);
+  box-shadow:
+    0 5px 14px rgba(28, 55, 82, 0.12),
+    0 12px 24px rgba(28, 55, 82, 0.1);
+  transform: translateY(-2px);
 }
 
 .dark .env-item {
@@ -3234,9 +3230,41 @@ input:focus-visible {
   box-shadow: var(--paper-shadow-sm);
 }
 
+.dark .env-item.ant-card-hoverable:hover {
+  border-color: rgba(130, 166, 210, 0.34);
+  box-shadow:
+    0 6px 16px rgba(0, 0, 0, 0.24),
+    0 14px 26px rgba(0, 0, 0, 0.18);
+}
+
+.env-item :deep(.ant-card-body) {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  min-height: 62px;
+  padding: 8px 7px;
+}
+
+.env-item-content {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr);
+  align-items: center;
+  justify-items: start;
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
+  text-align: left;
+}
+
+.env-item-text {
+  display: grid;
+  align-content: center;
+  justify-items: start;
+  gap: 2px;
+  min-width: 0;
+}
+
 .env-icon {
-  grid-row: 1 / 3;
-  align-self: center;
   color: var(--blue);
   font-size: 17px;
   line-height: 1;
@@ -3298,33 +3326,106 @@ input:focus-visible {
 .log-actions {
   display: flex;
   align-items: center;
-  gap: 16px;
   min-width: 0;
 }
 
-.log-tabs button,
-.log-actions button {
-  border: 0;
+.log-tabs {
+  justify-self: start;
+  padding: 2px;
+  border: 1px solid rgba(104, 141, 181, 0.2);
+  border-radius: 8px;
+  background: rgba(252, 254, 255, 0.62);
+  box-shadow: var(--paper-shadow-sm);
+}
+
+.log-tabs :deep(.ant-segmented-group) {
+  gap: 2px;
+}
+
+.log-tabs :deep(.ant-segmented-item) {
+  min-height: 25px;
+  border-radius: 6px;
   color: var(--ink);
-  background: transparent;
   font-size: 13px;
   font-weight: 400;
+  line-height: 25px;
   white-space: nowrap;
 }
 
-.log-actions i {
-  width: 14px;
-  margin-right: 4px;
-  text-align: center;
+.log-tabs :deep(.ant-segmented-item-label) {
+  min-height: 25px;
+  padding: 0 9px;
+  line-height: 25px;
 }
 
-.log-tabs button.active {
+.log-tabs :deep(.ant-segmented-item-selected) {
   color: var(--blue);
-  border-bottom: 2px solid var(--blue);
+  background: rgba(225, 240, 250, 0.92);
+  box-shadow: var(--paper-shadow-sm);
+}
+
+.log-tabs :deep(.ant-segmented-thumb) {
+  background: rgba(225, 240, 250, 0.92);
+  box-shadow: var(--paper-shadow-sm);
 }
 
 .log-actions {
   justify-content: flex-end;
+  gap: 16px;
+}
+
+.log-folder-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 10px;
+  border-color: rgba(104, 141, 181, 0.22);
+  border-radius: 7px;
+  color: var(--ink);
+  background: rgba(252, 254, 255, 0.58);
+  box-shadow: var(--paper-shadow-sm);
+  font-size: 13px;
+  font-weight: 400;
+}
+
+.log-folder-button:hover,
+.log-folder-button:focus-visible {
+  border-color: rgba(45, 111, 168, 0.28);
+  color: var(--blue);
+  background: rgba(225, 240, 250, 0.78);
+}
+
+.log-folder-button i {
+  width: 14px;
+  text-align: center;
+}
+
+.dark .log-tabs {
+  border-color: rgba(128, 153, 188, 0.18);
+  background: rgba(15, 24, 39, 0.48);
+}
+
+.dark .log-tabs :deep(.ant-segmented-item) {
+  color: #c3d0e2;
+}
+
+.dark .log-tabs :deep(.ant-segmented-item-selected),
+.dark .log-tabs :deep(.ant-segmented-thumb) {
+  color: #8ab9f6;
+  background: rgba(38, 58, 86, 0.86);
+}
+
+.dark .log-folder-button {
+  border-color: rgba(128, 153, 188, 0.18);
+  color: #c3d0e2;
+  background: rgba(15, 24, 39, 0.48);
+}
+
+.dark .log-folder-button:hover,
+.dark .log-folder-button:focus-visible {
+  color: #8ab9f6;
+  background: rgba(38, 58, 86, 0.78);
 }
 
 .log-table {
@@ -3460,7 +3561,7 @@ input:focus-visible {
 
 @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
   .panel,
-  .number-stepper,
+  .task-count-input,
   .notice,
   .env-item {
     background: var(--paper);
@@ -3469,7 +3570,7 @@ input:focus-visible {
 
 @media (prefers-reduced-transparency: reduce) {
   .panel,
-  .number-stepper,
+  .task-count-input,
   .notice,
   .env-item {
     background: var(--paper);
@@ -3479,6 +3580,10 @@ input:focus-visible {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .task-date-filter-chevron {
+    transition: none;
+  }
+
   *,
   *::before,
   *::after {

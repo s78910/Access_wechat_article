@@ -81,7 +81,6 @@ def _open_and_close_article(
     home_window = factory.find_home_window(
         reader=reader,
         timeout_seconds=payload.get("home_find_timeout_seconds"),
-        use_article_probe=True,
     )
     if home_window is None:
         raise RuntimeError("未找到可操作的微信公众号主页窗口")

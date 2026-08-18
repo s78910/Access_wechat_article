@@ -22,7 +22,7 @@ test('记录详情标题绑定文章短链接并展示可点击光标', () => {
 })
 
 test('记录详情增加打开目录操作列', () => {
-  assert.match(pageSource, />操作</)
+  assert.match(pageSource, /title: '操作'/)
   assert.match(pageSource, /record-open-col/)
   assert.match(pageSource, /openRecordArchiveDirectory/)
   assert.match(pageSource, /openArchiveArticleDirectory/)

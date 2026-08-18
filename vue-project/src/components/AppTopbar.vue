@@ -44,10 +44,10 @@ const emit = defineEmits<{
 
     <div class="topbar-tools">
       <div class="topbar-health" aria-label="系统健康摘要">
-        <button
+        <a-button
           v-for="item in props.healthItems"
           :key="item.key"
-          type="button"
+          html-type="button"
           :class="[
             'health-item',
             'health-item--' + (item.tone ?? 'info'),
@@ -62,11 +62,11 @@ const emit = defineEmits<{
           <strong class="health-label">{{ item.label }}</strong>
           <AppIcon class="health-status-icon" :icon="item.statusIcon" aria-hidden="true" />
           <span class="health-value">{{ item.value }}</span>
-        </button>
+        </a-button>
       </div>
 
       <div class="top-actions">
-        <a
+        <a-button
           class="github-pill"
           :href="props.githubUrl"
           target="_blank"
@@ -80,18 +80,18 @@ const emit = defineEmits<{
             {{ props.githubStars }}
           </span>
           <AppIcon v-else icon="github-open fa-solid fa-arrow-up-right-from-square" />
-        </a>
+        </a-button>
 
-        <button
+        <a-button
           :class="['theme-switch', { 'is-dark': props.isDark }]"
-          type="button"
+          html-type="button"
           :aria-pressed="props.isDark"
           aria-label="切换明暗主题"
           @click="emit('toggleTheme')"
         >
           <span class="sun"><AppIcon icon="fa-solid fa-sun" /></span>
           <span class="moon"><AppIcon icon="fa-solid fa-moon" /></span>
-        </button>
+        </a-button>
       </div>
     </div>
   </header>

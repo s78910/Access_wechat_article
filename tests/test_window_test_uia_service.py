@@ -403,10 +403,8 @@ def _service(
 ) -> WindowClickFlowDiagnosticService:
     window = SimpleNamespace(
         home_find_timeout_seconds=1.0,
-        home_find_use_article_probe=False,
         scroll_wheel_steps=3,
         date_seek_max_steps=18,
-        max_scroll_attempts=6,
         scroll_initial_delay_seconds=0.0,
         scroll_probe_interval_seconds=0.0,
         scroll_probe_max_interval_seconds=0.0,

@@ -7,9 +7,9 @@ const appVue = readFileSync(new URL('../App.vue', import.meta.url), 'utf-8')
 test('任务启动和运行期间锁定数量及内容设置', () => {
   assert.match(appVue, /const taskSettingsLocked = computed\([\s\S]*starting[\s\S]*running/)
   assert.match(appVue, /id="page-count"[\s\S]*:disabled="taskSettingsLocked"/)
-  assert.match(appVue, /v-for="option in downloadOptions"[\s\S]*:disabled="option\.locked \|\| taskSettingsLocked"/)
-  assert.match(appVue, /function setPageCount\([\s\S]*if \(taskSettingsLocked\.value\)[\s\S]*return/)
-  assert.match(appVue, /function toggleDownloadOption\([\s\S]*if \(taskSettingsLocked\.value\)[\s\S]*return/)
+  assert.match(appVue, /<ACheckbox[\s\S]*v-for="option in downloadOptions"[\s\S]*:disabled="option\.locked \|\| taskSettingsLocked"/)
+  assert.match(appVue, /function handleDownloadSelectionChange\(\)[\s\S]*if \(taskSettingsLocked\.value\)[\s\S]*return/)
+  assert.doesNotMatch(appVue, /function toggleDownloadOption\(/)
 })
 
 test('启动请求失败时退出 starting 锁定状态', () => {

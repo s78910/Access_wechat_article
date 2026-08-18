@@ -223,7 +223,6 @@ class OfflineCacheJobServiceTest(unittest.TestCase):
                 browser_cache_dir=root / ".playwright-browsers",
                 max_concurrent_processes=3,
                 max_scroll_seconds=30,
-                max_scroll_count=30,
                 resource_timeout_seconds=10,
                 process_control=process_control,
             )
@@ -262,7 +261,6 @@ class OfflineCacheJobServiceTest(unittest.TestCase):
                 browser_cache_dir=root / ".playwright-browsers",
                 max_concurrent_processes=3,
                 max_scroll_seconds=30,
-                max_scroll_count=30,
                 resource_timeout_seconds=10,
                 process_control=process_control,
             )
@@ -290,7 +288,6 @@ class OfflineCacheJobServiceTest(unittest.TestCase):
             browser_cache_dir=root / ".playwright-browsers",
             max_concurrent_processes=3,
             max_scroll_seconds=30,
-            max_scroll_count=30,
             resource_timeout_seconds=10,
             process_control=_FakeProcessControl(tracker),
         )

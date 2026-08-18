@@ -29,8 +29,14 @@ test('设置页 CA 证书安装使用业务弹窗承载过程和结果', () => {
   assert.doesNotMatch(settingsPageSource, /window\.confirm/)
 })
 
-test('数据档案页删除确认迁移到通用确认弹窗并移除旧删除弹窗', () => {
-  assert.match(dataFilesPageSource, /import ConfirmDialog from '\.\.\/components\/ConfirmDialog\.vue'/)
-  assert.match(dataFilesPageSource, /<ConfirmDialog[\s\S]*tone="danger"/)
+test('数据档案页删除确认迁移到 Ant Design Modal 并保留业务提示内容', () => {
+  assert.doesNotMatch(dataFilesPageSource, /import ConfirmDialog from '\.\.\/components\/ConfirmDialog\.vue'/)
+  assert.match(dataFilesPageSource, /<AModal[\s\S]*class="archive-delete-modal"/)
+  assert.match(dataFilesPageSource, /:confirm-loading="archiveDeleting"/)
+  assert.match(dataFilesPageSource, /@ok="confirmDeleteDialog"/)
+  assert.match(dataFilesPageSource, /deleteDialog\.summaryItems/)
+  assert.match(dataFilesPageSource, /deleteDialog\.warning/)
+  assert.match(dataFilesPageSource, /deleteDialog\.errorMessage/)
+  assert.doesNotMatch(dataFilesPageSource, /<ConfirmDialog/)
   assert.doesNotMatch(dataFilesPageSource, /DeleteConfirmDialog/)
 })

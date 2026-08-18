@@ -4,6 +4,7 @@ import test from 'node:test'
 import {
   cacheArchiveAccount,
   cacheArchiveArticles,
+  clearHistoryRecords,
   exportArchiveAccountsToExcel,
   getArchiveCacheJob,
   getHistoryRecords,
@@ -315,6 +316,20 @@ test('采集历史统计通过 HTTP API 读取真实汇总', async () => {
 
     assert.equal(result.totalRecords, 20)
     assert.equal(mock.calls[0]?.url, '/api/history/summary')
+  } finally {
+    mock.restore()
+  }
+})
+
+test('清空采集历史通过独立 DELETE HTTP API 执行', async () => {
+  const mock = installFetchMock({ ok: true, status: 'deleted', deletedCount: 3 })
+  try {
+    const result = await clearHistoryRecords()
+
+    assert.equal(result.status, 'deleted')
+    assert.equal(result.deletedCount, 3)
+    assert.equal(mock.calls[0]?.url, '/api/history/records')
+    assert.equal(mock.calls[0]?.init?.method, 'DELETE')
   } finally {
     mock.restore()
   }

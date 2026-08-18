@@ -36,11 +36,24 @@ class InitialContentStorageDiagnosticService:
         self._monotonic = monotonic
         self._now = now
 
-    def run(self, *, on_update: DiagnosticUpdate | None = None) -> dict[str, Any]:
+    def run(
+        self,
+        *,
+        on_update: DiagnosticUpdate | None = None,
+        skip_collected_records: bool = False,
+        store_article_detail: bool = True,
+    ) -> dict[str, Any]:
+        # “初始内容存储”的业务目标就是写入文章详情，界面只允许锁定开启。
+        store_article_detail = True
         started_at = self._monotonic()
 
         def update(payload: dict[str, Any]) -> None:
             if on_update is not None:
+                payload = _with_option_context(
+                    payload,
+                    skip_collected_records=skip_collected_records,
+                    store_article_detail=store_article_detail,
+                )
                 payload = {
                     "action": "initial-content-storage",
                     "title": "初始内容存储结果",
@@ -61,18 +74,43 @@ class InitialContentStorageDiagnosticService:
             title="初始内容存储结果",
             running_message="初始内容存储测试正在执行...",
             failed_prefix="初始内容存储测试失败",
+            skip_collected_records=skip_collected_records,
         )
 
-        items = _normalize_detail_items(detail.items)
+        items = _prepend_option_items(
+            _normalize_detail_items(detail.items),
+            skip_collected_records=skip_collected_records,
+            store_article_detail=store_article_detail,
+        )
+        if detail.status == "skipped-collected":
+            result = _with_option_context(
+                _result(
+                    ok=True,
+                    status=detail.status,
+                    message=detail.message,
+                    tone=detail.tone,
+                    items=items,
+                    capture_type=detail.capture_type,
+                    total_seconds=_elapsed(self._monotonic, started_at),
+                ),
+                skip_collected_records=skip_collected_records,
+                store_article_detail=store_article_detail,
+            )
+            update(result)
+            return result
         if detail.data is None or not detail.ok:
-            result = _result(
-                ok=False,
-                status=detail.status,
-                message=detail.message,
-                tone=detail.tone,
-                items=items,
-                capture_type=detail.capture_type,
-                total_seconds=_elapsed(self._monotonic, started_at),
+            result = _with_option_context(
+                _result(
+                    ok=False,
+                    status=detail.status,
+                    message=detail.message,
+                    tone=detail.tone,
+                    items=items,
+                    capture_type=detail.capture_type,
+                    total_seconds=_elapsed(self._monotonic, started_at),
+                ),
+                skip_collected_records=skip_collected_records,
+                store_article_detail=store_article_detail,
             )
             update(result)
             return result
@@ -142,21 +180,25 @@ class InitialContentStorageDiagnosticService:
                     ],
                 }
             )
-            result = _result(
-                ok=True,
-                status="completed",
-                message=f"初始内容存储完成，HTML 来源：{saved.html_source}。",
-                tone="success",
-                items=items,
-                capture_type=detail.capture_type,
-                total_seconds=total_seconds,
-                html_source=saved.html_source,
-                archive_dir=saved.archive_dir,
-                article_id=saved.article_id,
-                account_id=saved.account_id,
-                history_id=saved.history_id,
-                attempt_id=saved.attempt_id,
-                resource_manifest=saved.resource_manifest.to_json_values(),
+            result = _with_option_context(
+                _result(
+                    ok=True,
+                    status="completed",
+                    message=f"初始内容存储完成，HTML 来源：{saved.html_source}。",
+                    tone="success",
+                    items=items,
+                    capture_type=detail.capture_type,
+                    total_seconds=total_seconds,
+                    html_source=saved.html_source,
+                    archive_dir=saved.archive_dir,
+                    article_id=saved.article_id,
+                    account_id=saved.account_id,
+                    history_id=saved.history_id,
+                    attempt_id=saved.attempt_id,
+                    resource_manifest=saved.resource_manifest.to_json_values(),
+                ),
+                skip_collected_records=skip_collected_records,
+                store_article_detail=store_article_detail,
             )
             update(result)
             return result
@@ -171,14 +213,18 @@ class InitialContentStorageDiagnosticService:
                 _cell("失败原因", save.message),
             ],
         }
-        result = _result(
-            ok=False,
-            status="save-failed",
-            message=save.message or "初始内容解析保存失败。",
-            tone="error",
-            items=items,
-            capture_type=detail.capture_type,
-            total_seconds=_elapsed(self._monotonic, started_at),
+        result = _with_option_context(
+            _result(
+                ok=False,
+                status="save-failed",
+                message=save.message or "初始内容解析保存失败。",
+                tone="error",
+                items=items,
+                capture_type=detail.capture_type,
+                total_seconds=_elapsed(self._monotonic, started_at),
+            ),
+            skip_collected_records=skip_collected_records,
+            store_article_detail=store_article_detail,
         )
         update(result)
         return result
@@ -239,6 +285,50 @@ def _normalize_detail_items(items: list[dict[str, Any]]) -> list[dict[str, Any]]
             copied["label"] = "详情获取整理耗时"
         normalized.append(copied)
     return normalized
+
+
+def _with_option_context(
+    payload: dict[str, Any],
+    *,
+    skip_collected_records: bool,
+    store_article_detail: bool,
+) -> dict[str, Any]:
+    result = dict(payload)
+    result["items"] = _prepend_option_items(
+        list(result.get("items") or []),
+        skip_collected_records=skip_collected_records,
+        store_article_detail=store_article_detail,
+    )
+    result["options"] = {
+        "skipCollectedRecords": bool(skip_collected_records),
+        "storeArticleDetail": bool(store_article_detail),
+    }
+    return result
+
+
+def _prepend_option_items(
+    items: list[dict[str, Any]],
+    *,
+    skip_collected_records: bool,
+    store_article_detail: bool,
+) -> list[dict[str, Any]]:
+    option_labels = {"跳过已采集记录", "存储文章详情"}
+    remaining = [
+        dict(item)
+        for item in items
+        if str(item.get("label") or "") not in option_labels
+    ]
+    return [
+        {
+            "label": "跳过已采集记录",
+            "value": "开启" if skip_collected_records else "关闭",
+        },
+        {
+            "label": "存储文章详情",
+            "value": "开启（锁定）" if store_article_detail else "关闭",
+        },
+        *remaining,
+    ]
 
 
 def _cell(label: str, value: Any) -> dict[str, str]:

@@ -33,11 +33,10 @@ class ArticleClicker:
         native_click: Callable[[int, int, int], None] | None = None,
         uia_click: Callable[[Any], None] | None = None,
         screen_click: Callable[..., None] | None = None,
-        screen_click_wait_seconds: float = 0.3,
     ) -> None:
         self._native_click = native_click or _post_message_click
         # 兼容旧工厂/测试注入参数，但主页点击不再调用 UIA Click 或系统鼠标。
-        del uia_click, screen_click, screen_click_wait_seconds
+        del uia_click, screen_click
 
     def click(self, target: ArticleTarget) -> ClickResult:
         try:

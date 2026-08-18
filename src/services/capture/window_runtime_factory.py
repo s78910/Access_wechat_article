@@ -60,14 +60,9 @@ class WindowRuntimeFactory:
         *,
         reader: Any,
         timeout_seconds: float | None = None,
-        use_article_probe: bool = True,
     ) -> Any:
         return self._home_finder(
-            article_counter=(
-                (lambda window: len(reader.read(window))) if use_article_probe else None
-            ),
             timeout_seconds=timeout_seconds,
-            use_article_probe=use_article_probe,
         )
 
     def create_home_reader(self) -> Any:
@@ -98,18 +93,15 @@ class WindowRuntimeFactory:
             reader=reader,
             account_name=account_name,
             scroller=scroller,
-            max_scroll_attempts=self._window.max_scroll_attempts,
             scroll_wait_seconds=self._window.scroll_initial_delay_seconds,
             scroll_probe_interval_seconds=self._window.scroll_probe_interval_seconds,
             scroll_probe_max_interval_seconds=(
                 self._window.scroll_probe_max_interval_seconds
             ),
-            scroll_settle_timeout_seconds=self._window.scroll_settle_timeout_seconds,
             lazy_load_timeout_seconds=self._window.lazy_load_timeout_seconds,
             unchanged_before_bounce_seconds=(
                 self._window.unchanged_before_bounce_seconds
             ),
-            snapshot_max_age_seconds=self._window.visible_snapshot_max_age_seconds,
             bounce_enabled=self._window.bounce_enabled,
             bounce_attempts=self._window.bounce_attempts,
             bounce_up_steps=self._window.bounce_up_steps,
@@ -124,9 +116,7 @@ class WindowRuntimeFactory:
         )
 
     def create_clicker(self) -> Any:
-        return self._clicker_factory(
-            screen_click_wait_seconds=self._window.screen_click_wait_seconds,
-        )
+        return self._clicker_factory()
 
     def create_tab_service(self) -> Any:
         adapter = self._tab_adapter_factory(

@@ -242,6 +242,15 @@ class FetchHistoryRepository:
         ).fetchall()
         return [str(row["suggestion"]) for row in rows]
 
+    def delete_all(self) -> int:
+        """只清空采集历史流水表，保留公众号、文章和归档目录数据。"""
+
+        deleted_count = int(
+            self.connection.execute("SELECT COUNT(*) FROM awa_fetch_history").fetchone()[0]
+        )
+        self.connection.execute("DELETE FROM awa_fetch_history")
+        return deleted_count
+
     def _build_filters(
         self,
         *,

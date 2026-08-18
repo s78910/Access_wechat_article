@@ -5,6 +5,7 @@ import time
 from typing import Any, Callable, Mapping
 
 from src.domain.enums import ProcessMessageType
+from src.modules.archive.offline_navigation_state import load_offline_navigation_state
 from src.modules.archive.offline_archiver import (
     OfflineArchiveRequest,
     OfflineArchiveResult,
@@ -29,6 +30,11 @@ def run_offline_cache_process(
     started_at = time.monotonic()
     article_id = int(payload["article_id"])
     try:
+        navigation_state = load_offline_navigation_state(
+            enabled=bool(payload.get("stateful_offline_cache")),
+            article_directory=payload.get("article_directory"),
+            request_json_path=payload.get("request_json_path"),
+        )
         request = OfflineArchiveRequest(
             article_id=article_id,
             article_title=str(payload.get("article_title") or ""),
@@ -36,12 +42,20 @@ def run_offline_cache_process(
             stage_dir=Path(str(payload["stage_dir"])),
             browser_cache_dir=Path(str(payload["browser_cache_dir"])),
             max_scroll_seconds=float(payload.get("max_scroll_seconds", 30.0)),
-            max_scroll_count=int(payload.get("max_scroll_count", 30)),
             resource_timeout_seconds=float(payload.get("resource_timeout_seconds", 10.0)),
+            navigation_url=navigation_state.url,
+            navigation_mode=navigation_state.mode,
+            navigation_user_agent=navigation_state.user_agent,
+            navigation_headers=navigation_state.headers,
+            navigation_cookies=navigation_state.cookies,
         )
         channel.send(
             ProcessMessageType.READY,
-            {"article_id": article_id, "stage_dir": str(request.stage_dir)},
+            {
+                "article_id": article_id,
+                "stage_dir": str(request.stage_dir),
+                "navigation_mode": request.navigation_mode,
+            },
         )
         result = archive_func(
             request,
@@ -54,6 +68,7 @@ def run_offline_cache_process(
             article_id=article_id,
             result=result,
             elapsed_seconds=time.monotonic() - started_at,
+            navigation_mode=request.navigation_mode,
         )
         message_type = ProcessMessageType.RESULT if result.ok else ProcessMessageType.FAILED
         channel.send(message_type, {"offline_cache_result": result_payload})
@@ -76,6 +91,7 @@ def _result_payload(
     article_id: int,
     result: OfflineArchiveResult,
     elapsed_seconds: float,
+    navigation_mode: str,
 ) -> dict[str, Any]:
     return {
         "ok": bool(result.ok),
@@ -87,6 +103,7 @@ def _result_payload(
         "message": result.message,
         "warning": result.warning,
         "elapsed_seconds": round(max(0.0, elapsed_seconds), 3),
+        "navigation_mode": navigation_mode,
     }
 
 

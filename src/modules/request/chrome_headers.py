@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any, Mapping
+from urllib.parse import urlsplit
 
 import requests
 
@@ -20,6 +21,7 @@ WECHAT_BROWSER_USER_AGENT = (
 )
 
 DIRECT_REQUEST_PROXIES = {"http": None, "https": None}
+WECHAT_ARTICLE_INDEX_URL = "https://mp.weixin.qq.com/s/index.html"
 
 _SEC_CH_UA = '"Not/A)Brand";v="8", "Chromium";v="126", "Google Chrome";v="126"'
 
@@ -118,6 +120,45 @@ def build_wechat_document_headers(
     return headers
 
 
+def build_wechat_article_document_headers(
+    reference_url: str,
+    overrides: Mapping[str, Any] | None = None,
+) -> dict[str, str]:
+    """构造微信文章主文档导航请求头，避免复用图片、CSS 等资源请求头。"""
+    headers = build_wechat_document_headers(overrides)
+    headers.update(
+        {
+            "Cache-Control": "max-age=0",
+            "Accept": (
+                "text/html,application/xhtml+xml,application/xml;q=0.9,"
+                "image/avif,image/wxpic,image/webp,image/apng,*/*;q=0.8,"
+                "application/signed-exchange;v=b3;q=0.7"
+            ),
+            "Sec-Fetch-Site": "same-origin",
+            "Sec-Fetch-Mode": "navigate",
+            "Sec-Fetch-Dest": "document",
+            "Upgrade-Insecure-Requests": "1",
+        }
+    )
+    # 刷新或资源请求里带来的条件缓存头会导致 304 或弱化页面内容，离线缓存不继承。
+    headers.pop("If-Modified-Since", None)
+    headers.pop("If-None-Match", None)
+    headers.pop("Pragma", None)
+    headers.pop("Sec-Fetch-User", None)
+
+    referer = _document_navigation_referer(
+        reference_url,
+        _header_value(overrides, "referer"),
+    )
+    if referer:
+        headers["Referer"] = referer
+
+    exportkey = _raw_query_value(reference_url, "exportkey")
+    if exportkey:
+        headers["exportkey"] = exportkey
+    return headers
+
+
 def build_wechat_json_headers(
     overrides: Mapping[str, Any] | None = None,
     *,
@@ -163,3 +204,56 @@ def _apply_safe_overrides(headers: dict[str, str], overrides: Mapping[str, Any] 
         ):
             continue
         headers[_CANONICAL_NAMES[name]] = value
+
+
+def _header_value(headers: Mapping[str, Any] | None, name: str) -> str:
+    wanted = name.strip().lower()
+    for raw_key, raw_value in dict(headers or {}).items():
+        if str(raw_key).strip().lower() == wanted:
+            return str(raw_value).strip()
+    return ""
+
+
+def _document_navigation_referer(reference_url: str, captured_referer: str) -> str:
+    if captured_referer:
+        parsed = urlsplit(captured_referer)
+        if (parsed.hostname or "").lower() != "mp.weixin.qq.com":
+            return captured_referer
+        path = parsed.path.rstrip("/")
+        if path == "/s/index.html":
+            return captured_referer
+        if path != "/s":
+            return captured_referer
+    return _wechat_article_index_referer(reference_url)
+
+
+def _wechat_article_index_referer(reference_url: str) -> str:
+    data_version = _raw_query_value(reference_url, "data_version")
+    fullversion = _raw_query_value(reference_url, "fasttmpl_fullversion")
+    fasttmpl_type = _raw_query_value(reference_url, "fasttmpl_type")
+    if not data_version and fullversion:
+        data_version = fullversion.split("-", 1)[0]
+
+    pairs: list[tuple[str, str]] = []
+    if data_version:
+        pairs.append(("data_version", data_version))
+    if fullversion:
+        pairs.append(("fasttmpl_fullversion", fullversion))
+    if fasttmpl_type:
+        pairs.append(("fasttmpl_type", fasttmpl_type))
+    if not pairs:
+        return WECHAT_ARTICLE_INDEX_URL
+    query = "&".join(f"{key}={value}" for key, value in pairs)
+    return f"{WECHAT_ARTICLE_INDEX_URL}?{query}"
+
+
+def _raw_query_value(url: str, name: str) -> str:
+    wanted = name.strip().lower()
+    query = urlsplit(str(url or "")).query
+    for part in query.split("&"):
+        if not part:
+            continue
+        key, _, value = part.partition("=")
+        if key.strip().lower() == wanted:
+            return value.strip()
+    return ""

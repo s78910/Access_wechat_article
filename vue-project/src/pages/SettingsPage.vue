@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import AppIcon from '../components/AppIcon.vue'
 import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
+import { notification } from 'ant-design-vue'
 import { resolveDiagnosticProgressMessage } from '../utils/diagnosticProgressMessage'
 import {
   checkCaCertificate,
@@ -11,6 +12,7 @@ import {
   getTaskStatus,
   getArticleDetailDiagnostic,
   getArticleDetailCommentsDiagnostic,
+  getArticleDetailOfflineCacheDiagnostic,
   getInitialContentStorageDiagnostic,
   getWindowClickFlowDiagnostic,
   installCaCertificate,
@@ -25,6 +27,7 @@ import {
   updateRuntimeConfig,
   startArticleDetailDiagnostic,
   startArticleDetailCommentsDiagnostic,
+  startArticleDetailOfflineCacheDiagnostic,
   startInitialContentStorageDiagnostic,
   startWindowClickFlowDiagnostic,
   stopWindowClickFlowDiagnostic,
@@ -119,18 +122,6 @@ const logLevelOptions = [
   { label: 'WARN（警告信息）', value: 'WARN' },
   { label: 'ERROR（错误信息）', value: 'ERROR' },
 ]
-
-const selectPopupConfig = { transfer: true, zIndex: 3000 }
-const windowClickFlowDatePopupConfig = {
-  transfer: true,
-  zIndex: 3000,
-  className: 'window-click-flow-date-picker-panel',
-}
-const windowClickFlowDateRangePopupConfig = {
-  transfer: true,
-  zIndex: 3000,
-  className: 'window-click-flow-date-range-picker-panel',
-}
 
 const settings = reactive({
   autoStartProxy: false,
@@ -243,9 +234,9 @@ type SettingsCategory = {
 type SettingsDetailField = {
   label: string
   configKey: string
-  value: string
+  value: string | SettingsDetailRangeValue
   description: string
-  inputType?: 'text' | 'number' | 'number-stepper' | 'switch'
+  inputType?: 'text' | 'number' | 'number-stepper' | 'switch' | 'readonly-range'
   unit?: string
   min?: number
   max?: number
@@ -253,6 +244,13 @@ type SettingsDetailField = {
   browseLabel?: string
   browseAction?: (field: SettingsDetailField) => void | Promise<void>
   tone?: 'default' | 'readonly' | 'success' | 'warning'
+}
+
+type SettingsDetailRangeValue = {
+  start: string
+  end: string
+  startLabel: string
+  endLabel: string
 }
 
 type SettingsDetailControl = {
@@ -280,6 +278,10 @@ type SettingsDetailAction = {
   disabled?: () => boolean
   showWindowClickFlowOptions?: boolean
   showScrollStepInput?: boolean
+  showArticleDetailSkipCollectedOption?: boolean
+  showInitialContentStorageOptions?: boolean
+  showArticleDetailCommentsOptions?: boolean
+  showArticleDetailOfflineCacheOptions?: boolean
   run: () => void | Promise<void>
 }
 
@@ -308,8 +310,6 @@ const settingsNumberValues = reactive<Record<string, number>>({
   'proxy_settings.process_control.stop_capture_poll_interval_seconds': 0.05,
   'windows_command.single_article_tab.article_title_stable_delay_seconds': 0.1,
   'windows_command.single_article_tab.article_open_timeout_seconds': 12,
-  'windows_command.single_article_tab.article_title_poll_initial_interval_seconds': 0.05,
-  'windows_command.single_article_tab.article_title_poll_interval_seconds': 0.15,
   'windows_command.single_article_tab.article_title_poll_growth_factor': 1.5,
   'windows_command.single_article_tab.article_close_confirm_timeout_seconds': 3,
   'windows_command.single_article_tab.article_close_title_poll_interval_seconds': 0.05,
@@ -322,19 +322,10 @@ const settingsNumberValues = reactive<Record<string, number>>({
   'windows_command.home_window.click_mouse_move_wait_seconds': 0.02,
   'windows_command.home_window.click_mouse_down_wait_seconds': 0.04,
   'windows_command.home_window.click_mouse_up_wait_seconds': 0.25,
-  'windows_command.home_window.screen_click_wait_seconds': 0.3,
   'windows_command.home_window.uia_control_click_wait_seconds': 0,
-  'windows_command.home_scroll.max_scroll_attempts': 6,
-  'windows_command.home_scroll.scroll_wheel_steps': 3,
-  'windows_command.home_scroll.date_seek_max_steps': 18,
   'windows_command.home_scroll.scroll_initial_delay_seconds': 0.05,
-  'windows_command.home_scroll.scroll_probe_interval_seconds': 0.1,
-  'windows_command.home_scroll.scroll_probe_max_interval_seconds': 0.4,
-  'windows_command.home_scroll.scroll_probe_growth_factor': 1.5,
-  'windows_command.home_scroll.scroll_settle_timeout_seconds': 1.2,
   'windows_command.home_scroll.unchanged_before_bounce_seconds': 0.6,
   'windows_command.home_scroll.lazy_load_timeout_seconds': 3,
-  'windows_command.home_scroll.visible_snapshot_max_age_seconds': 60,
   'windows_command.home_scroll.bounce_up_steps': 2,
   'windows_command.home_scroll.bounce_pause_seconds': 0.2,
   'windows_command.home_scroll.bounce_down_steps': 6,
@@ -346,7 +337,6 @@ const settingsNumberValues = reactive<Record<string, number>>({
   'data_acquisition.comment_collection.reply_max_pages': 50,
   'data_acquisition.comment_collection.max_concurrent_processes': 3,
   'data_acquisition.offline_cache.max_scroll_seconds': 30,
-  'data_acquisition.offline_cache.max_scroll_count': 30,
   'data_acquisition.offline_cache.resource_timeout_seconds': 10,
   'data_acquisition.offline_cache.max_concurrent_processes': 3,
 })
@@ -355,7 +345,6 @@ const settingsToggleValues = reactive<Record<string, boolean>>({
   'proxy_settings.basic_info.ssl_insecure': true,
   'proxy_settings.process_control.close_as_capture_deadline': true,
   'windows_command.single_article_tab.restore_focus_after_close': true,
-  'windows_command.home_window.home_find_use_article_probe': false,
   'windows_command.home_scroll.bounce_enabled': true,
   'data_acquisition.comment_collection.enabled_by_default': false,
   'data_acquisition.offline_cache.enabled_by_default': false,
@@ -363,6 +352,12 @@ const settingsToggleValues = reactive<Record<string, boolean>>({
 
 const runtimeConfigValues = reactive<Record<string, string>>({})
 let runtimeConfigSyncTimer = 0
+
+const readonlyRangeConfigKeys = new Set([
+  'windows_command.single_article_tab.article_title_poll_interval_seconds_range',
+  'windows_command.home_scroll.date_seek_scroll_steps_range',
+  'windows_command.home_scroll.scroll_probe_interval_seconds_range',
+])
 
 const wideControlKinds = new Set<SettingsDetailControl['kind']>([
   'verification-url',
@@ -477,11 +472,35 @@ const isWindowClickFlowDiagnosticRunning = ref(false)
 const isArticleDetailDiagnosticRunning = ref(false)
 const isInitialContentStorageDiagnosticRunning = ref(false)
 const isArticleDetailCommentsDiagnosticRunning = ref(false)
+const isArticleDetailOfflineCacheDiagnosticRunning = ref(false)
+const articleDetailSkipCollectedRecords = ref(false)
+const initialContentStorageSkipCollectedRecords = ref(false)
+const initialContentStorageStoreArticleDetail = ref(true)
+const articleDetailCommentsSkipCollectedRecords = ref(false)
+const articleDetailCommentsStoreArticleDetail = ref(true)
+const articleDetailCommentsStoreCommentInfo = ref(true)
+const articleDetailOfflineCacheSkipCollectedRecords = ref(false)
+const articleDetailOfflineCacheStateful = ref(false)
+const articleDetailOfflineCacheStoreArticleDetail = ref(true)
+const articleDetailOfflineCacheArchiveContent = ref(true)
 const activeWindowClickFlowJobId = ref('')
 const windowClickFlowMaxRecords = ref(20)
 const windowClickFlowDateFilterMode = ref<WindowClickFlowDiagnosticOptions['dateFilterMode']>('all')
 const windowClickFlowStartDate = ref('')
 const windowClickFlowEndDate = ref('')
+const windowClickFlowDateRangeValue = computed<string[] | null>({
+  get() {
+    if (!windowClickFlowStartDate.value && !windowClickFlowEndDate.value) {
+      return null
+    }
+
+    return [windowClickFlowStartDate.value, windowClickFlowEndDate.value]
+  },
+  set(value) {
+    windowClickFlowStartDate.value = Array.isArray(value) ? String(value[0] ?? '') : ''
+    windowClickFlowEndDate.value = Array.isArray(value) ? String(value[1] ?? '') : ''
+  },
+})
 const windowClickFlowDateFilterOptions = [
   { label: '不限日期', value: 'all' },
   { label: '日期范围', value: 'range' },
@@ -495,13 +514,7 @@ const windowClickFlowUsesUnlimitedRecords = computed(() => (
 const isRunningStartupSelfCheck = ref(false)
 const isSavingConfig = ref(false)
 const runtimeStatus = ref<TaskStatus | null>(null)
-const configToast = reactive({
-  visible: false,
-  message: '',
-  tone: 'info' as 'info' | 'success' | 'warning' | 'error',
-})
 let cacheCleanedTimer: number | undefined
-let configToastTimer: number | undefined
 
 const settingsEnvironmentItems = computed<EnvironmentItem[]>(() => props.environmentItems ?? [])
 const currentTaskStatus = computed(() => props.taskStatus ?? runtimeStatus.value)
@@ -513,6 +526,7 @@ const isRuntimeCacheBusy = computed(() => (
   || isArticleDetailDiagnosticRunning.value
   || isInitialContentStorageDiagnosticRunning.value
   || isArticleDetailCommentsDiagnosticRunning.value
+  || isArticleDetailOfflineCacheDiagnosticRunning.value
 ))
 const selectedSettingsCategoryKey = ref<SettingsCategoryKey>(settingsCategories[0]!.key)
 const selectedSettingsItemKey = ref<SettingsItemKey | null>(null)
@@ -677,8 +691,7 @@ const selectedSettingsDetail = computed<SettingsDetailContent | null>(() => {
         fields: [
           { label: '标题稳定等待', configKey: 'windows_command.single_article_tab.article_title_stable_delay_seconds', value: '0.1', description: '检测到目标文章标签标题后短暂等待；等待结束后立即关闭文章标签。', inputType: 'number-stepper', unit: '秒', min: 0, max: 5, step: 0.05 },
           { label: '详情页打开超时', configKey: 'windows_command.single_article_tab.article_open_timeout_seconds', value: '12.0', description: '点击文章后等待详情页打开的最大时长；超过仍未识别目标标题则认为打开失败。', inputType: 'number-stepper', unit: '秒', min: 1, max: 120, step: 0.5 },
-          { label: '标题轮询初始间隔', configKey: 'windows_command.single_article_tab.article_title_poll_initial_interval_seconds', value: '0.05', description: '等待文章标题时的初始轮询间隔；当前测试流程使用 0.05 秒起步。', inputType: 'number-stepper', unit: '秒', min: 0.01, max: 5, step: 0.01 },
-          { label: '标题轮询最大间隔', configKey: 'windows_command.single_article_tab.article_title_poll_interval_seconds', value: '0.15', description: '等待文章标题时允许增长到的最大轮询间隔。', inputType: 'number-stepper', unit: '秒', min: 0.05, max: 5, step: 0.05 },
+          { label: '标题轮询间隔', configKey: 'windows_command.single_article_tab.article_title_poll_interval_seconds_range', value: { start: '0.05', end: '0.15', startLabel: '起始值', endLabel: '最大值' }, description: '点击文章后等待文章标签打开时使用；从起始间隔开始检测标题，未检测到时逐步放大。使用区间：0.05 秒 ~ 0.15 秒。', inputType: 'readonly-range', unit: '秒', tone: 'readonly' },
           { label: '标题轮询增长倍数', configKey: 'windows_command.single_article_tab.article_title_poll_growth_factor', value: '1.5', description: '标题轮询间隔逐步放大的倍率；当前 YAML 使用 1.5 倍增长。', inputType: 'number-stepper', unit: '倍', min: 1, max: 5, step: 0.1 },
           { label: '关闭确认超时', configKey: 'windows_command.single_article_tab.article_close_confirm_timeout_seconds', value: '3.0', description: '关闭文章标签后，最多等待窗口标题变化或标签消失的时长。', inputType: 'number-stepper', unit: '秒', min: 0, max: 60, step: 0.5 },
           { label: '关闭后标题轮询间隔', configKey: 'windows_command.single_article_tab.article_close_title_poll_interval_seconds', value: '0.05', description: '关闭文章标签后检测标题变化的轮询间隔。', inputType: 'number-stepper', unit: '秒', min: 0.01, max: 5, step: 0.01 },
@@ -691,7 +704,6 @@ const selectedSettingsDetail = computed<SettingsDetailContent | null>(() => {
         fields: [
           { label: '激活主页窗口等待', configKey: 'windows_command.home_window.activation_wait_seconds', value: '0.25', description: '激活公众号主页窗口后等待窗口稳定，再继续准备点击文章。', inputType: 'number-stepper', unit: '秒', min: 0, max: 10, step: 0.05 },
           { label: '主页定位超时', configKey: 'windows_command.home_window.home_find_timeout_seconds', value: '3.0', description: '诊断工具查找微信主页窗口的最大等待时间；超过后直接提示先打开公众号主页。', inputType: 'number-stepper', unit: '秒', min: 0.5, max: 30, step: 0.5 },
-          { label: '定位读取文章卡片', configKey: 'windows_command.home_window.home_find_use_article_probe', value: '关闭', description: '激活主页诊断是否读取文章卡片辅助识别；关闭时按窗口特征快速定位，避免 UIA 读取拖慢。', inputType: 'switch' },
           { label: '点击前 MITM READY 等待', configKey: 'windows_command.home_window.mitm_ready_timeout_seconds', value: '10.0', description: '点击文章前等待 MITM 子进程进入 READY 状态的最大时长。', inputType: 'number-stepper', unit: '秒', min: 0, max: 300, step: 0.5 },
           { label: 'MITM 捕获超时', configKey: 'windows_command.home_window.mitm_capture_timeout_seconds', value: '20.0', description: 'MITM 捕获文章请求的最大时长，对应单次捕获生命周期。', inputType: 'number-stepper', unit: '秒', min: 1, max: 3600, step: 1 },
           { label: 'MITM 结果等待', configKey: 'windows_command.home_window.mitm_result_timeout_seconds', value: '11.0', description: '停止 MITM 后等待捕获结果返回的最大时长。', inputType: 'number-stepper', unit: '秒', min: 1, max: 600, step: 0.5 },
@@ -699,7 +711,6 @@ const selectedSettingsDetail = computed<SettingsDetailContent | null>(() => {
           { label: '鼠标移动后等待', configKey: 'windows_command.home_window.click_mouse_move_wait_seconds', value: '0.02', description: '发送鼠标移动消息后短暂停顿，避免点击事件过快进入下一步。', inputType: 'number-stepper', unit: '秒', min: 0, max: 2, step: 0.01 },
           { label: '鼠标按下后等待', configKey: 'windows_command.home_window.click_mouse_down_wait_seconds', value: '0.04', description: '发送鼠标按下消息后短暂停顿。', inputType: 'number-stepper', unit: '秒', min: 0, max: 2, step: 0.01 },
           { label: '鼠标释放后等待', configKey: 'windows_command.home_window.click_mouse_up_wait_seconds', value: '0.25', description: '等待 Chromium 异步处理点击，避免标题检测太早开始。', inputType: 'number-stepper', unit: '秒', min: 0, max: 5, step: 0.05 },
-          { label: '坐标点击等待', configKey: 'windows_command.home_window.screen_click_wait_seconds', value: '0.3', description: '走 uiautomation 坐标点击时的等待时间。', inputType: 'number-stepper', unit: '秒', min: 0, max: 5, step: 0.05 },
           { label: 'UIA 点击等待', configKey: 'windows_command.home_window.uia_control_click_wait_seconds', value: '0.0', description: '走 UIA 控件 Click 时的额外等待时间，当前默认不额外等待。', inputType: 'number-stepper', unit: '秒', min: 0, max: 5, step: 0.05 },
         ],
       }
@@ -707,17 +718,11 @@ const selectedSettingsDetail = computed<SettingsDetailContent | null>(() => {
       return {
         note: '主页滚动操作用于查找下一篇候选文章、判断页面变化、等待懒加载，并在必要时执行回弹滚动。',
         fields: [
-          { label: '最多向下滚动轮次', configKey: 'windows_command.home_scroll.max_scroll_attempts', value: '6', description: '找下一篇文章时最多向下滚动的轮次；连续找不到新候选文章就停止。', inputType: 'number-stepper', unit: '次', min: 1, max: 100, step: 1 },
-          { label: '普通向下滚动步长', configKey: 'windows_command.home_scroll.scroll_wheel_steps', value: '3', description: '普通向下滚动时发送的滚轮消息步数；保留相邻视口重叠，减少越过文章卡片。', inputType: 'number-stepper', unit: '步', min: 1, max: 50, step: 1 },
-          { label: '日期定位最大步长', configKey: 'windows_command.home_scroll.date_seek_max_steps', value: '18', description: '仅用于起始日期和日期范围定位；距离较远时最多滚动 18 步，正常文章收录仍使用普通步长。', inputType: 'number-stepper', unit: '步', min: 1, max: 50, step: 1 },
+          { label: '日期定位滚动步长', configKey: 'windows_command.home_scroll.date_seek_scroll_steps_range', value: { start: '3', end: '18', startLabel: '普通收录步长', endLabel: '日期定位最大步长' }, description: '日期定位阶段根据目标日期距离动态放大滚动步长；普通收录仍使用基础步长。使用区间：3 步 ~ 18 步。', inputType: 'readonly-range', unit: '步', tone: 'readonly' },
           { label: '滚动后读取等待', configKey: 'windows_command.home_scroll.scroll_initial_delay_seconds', value: '0.05', description: '每次滚动后先等待，再开始读取主页可见文章。', inputType: 'number-stepper', unit: '秒', min: 0, max: 5, step: 0.05 },
-          { label: '变化检测初始间隔', configKey: 'windows_command.home_scroll.scroll_probe_interval_seconds', value: '0.1', description: '滚动后检查页面变化的初始轮询间隔。', inputType: 'number-stepper', unit: '秒', min: 0.05, max: 5, step: 0.05 },
-          { label: '变化检测最大间隔', configKey: 'windows_command.home_scroll.scroll_probe_max_interval_seconds', value: '0.4', description: '滚动后检查页面变化允许增长到的最大轮询间隔。', inputType: 'number-stepper', unit: '秒', min: 0.05, max: 10, step: 0.05 },
-          { label: '变化轮询增长倍数', configKey: 'windows_command.home_scroll.scroll_probe_growth_factor', value: '1.5', description: '滚动变化轮询间隔逐步放大的倍率；当前 YAML 使用 1.5 倍增长。', inputType: 'number-stepper', unit: '倍', min: 1, max: 5, step: 0.1 },
-          { label: '页面稳定判断上限', configKey: 'windows_command.home_scroll.scroll_settle_timeout_seconds', value: '1.2', description: '页面稳定判断的保守上限；普通无变化场景会被无变化阈值提前截断。', inputType: 'number-stepper', unit: '秒', min: 0, max: 30, step: 0.1 },
+          { label: '变化检测轮询间隔', configKey: 'windows_command.home_scroll.scroll_probe_interval_seconds_range', value: { start: '0.1', end: '0.4', startLabel: '起始值', endLabel: '最大值' }, description: '滚动后用于判断 UIA 页面内容是否发生变化；从起始间隔开始检测，页面未变化时逐步放大。使用区间：0.1 秒 ~ 0.4 秒。', inputType: 'readonly-range', unit: '秒', tone: 'readonly' },
           { label: '无变化判定等待', configKey: 'windows_command.home_scroll.unchanged_before_bounce_seconds', value: '0.6', description: '滚动后页面持续无变化达到该时长，就认为本次滚动无效并准备回弹。', inputType: 'number-stepper', unit: '秒', min: 0, max: 10, step: 0.1 },
           { label: '懒加载最长等待', configKey: 'windows_command.home_scroll.lazy_load_timeout_seconds', value: '3.0', description: '检测到页面处于加载状态时，等待新内容出现的最长时间。', inputType: 'number-stepper', unit: '秒', min: 0, max: 60, step: 0.5 },
-          { label: '可见文章快照缓存', configKey: 'windows_command.home_scroll.visible_snapshot_max_age_seconds', value: '60.0', description: '当前可见文章快照最多缓存的时间，这是缓存有效期，不是主动等待时间。', inputType: 'number-stepper', unit: '秒', min: 0, max: 600, step: 1 },
           { label: '启用回弹滚动', configKey: 'windows_command.home_scroll.bounce_enabled', value: '开启', description: '滚动到底且没有触发懒加载时，是否允许先上滚再下滚寻找新文章。', inputType: 'switch' },
           { label: '回弹向上步长', configKey: 'windows_command.home_scroll.bounce_up_steps', value: '2', description: '回弹滚动时先向上滚动的步数。', inputType: 'number-stepper', unit: '步', min: 0, max: 50, step: 1 },
           { label: '回弹等待时间', configKey: 'windows_command.home_scroll.bounce_pause_seconds', value: '0.2', description: '向上滚动后等待该时长，再执行向下滚动。', inputType: 'number-stepper', unit: '秒', min: 0, max: 10, step: 0.1 },
@@ -750,7 +755,6 @@ const selectedSettingsDetail = computed<SettingsDetailContent | null>(() => {
         fields: [
           { label: '默认离线归档', configKey: 'data_acquisition.offline_cache.enabled_by_default', value: '关闭', description: '是否默认在主服务页勾选离线归档；具体任务仍可由前端开关覆盖。', inputType: 'switch' },
           { label: '最长滚动加载', configKey: 'data_acquisition.offline_cache.max_scroll_seconds', value: '30', description: '离线缓存时最长滚动加载时间。', inputType: 'number-stepper', unit: '秒', min: 1, max: 600, step: 1 },
-          { label: '最多滚动次数', configKey: 'data_acquisition.offline_cache.max_scroll_count', value: '30', description: '离线缓存时最大滚动次数。', inputType: 'number-stepper', unit: '次', min: 1, max: 1000, step: 1 },
           { label: '资源下载超时', configKey: 'data_acquisition.offline_cache.resource_timeout_seconds', value: '10', description: '单个离线资源下载超时。', inputType: 'number-stepper', unit: '秒', min: 1, max: 300, step: 1 },
           { label: '缓存子进程最大并发数', configKey: 'data_acquisition.offline_cache.max_concurrent_processes', value: '3', description: '同时运行的 Playwright 离线缓存独立子进程数量；超过上限的文章会排队。', inputType: 'number-stepper', unit: '个', min: 1, max: 10, step: 1 },
         ],
@@ -781,12 +785,13 @@ const selectedSettingsDetail = computed<SettingsDetailContent | null>(() => {
       }
     case 'flow-diagnostics':
       return {
-        note: '流程测试均基于当前微信主页窗口。已接入窗口测试、详情获取、初始内容存储和详情评论。',
+        note: '流程测试均基于当前微信主页窗口。已接入窗口测试、详情获取、初始内容存储、详情评论和离线缓存。',
         actions: [
           { label: '窗口点击流程', buttonLabel: '窗口测试', description: '首次立即激活公众号主页，按 UIA 日期组和文章卡片读取当前可视内容；滚动后重新读取并用日期加标题衔接，不点击文章、不启动 MITM。', icon: 'fa-solid fa-window-restore', tone: 'blue', showWindowClickFlowOptions: true, disabled: () => isWindowClickFlowDiagnosticRunning.value || isWindowDiagnosticRunning.value, run: handleWindowClickFlowDiagnosticAction },
-          { label: '单篇文章详情流程', buttonLabel: '详情获取', description: '单篇文章详情获取（包含 MITM 子进程）', icon: 'fa-regular fa-file-lines', tone: 'purple', disabled: () => isArticleDetailDiagnosticRunning.value || isInitialContentStorageDiagnosticRunning.value || isArticleDetailCommentsDiagnosticRunning.value || isWindowClickFlowDiagnosticRunning.value, run: handleArticleDetailDiagnosticAction },
-          { label: '初始内容存储测试', buttonLabel: '初始内容存储', description: '复用单篇文章详情流程，解析 HTML 并存储初始文章内容', icon: 'fa-solid fa-box-archive', tone: 'primary', disabled: () => isInitialContentStorageDiagnosticRunning.value || isArticleDetailDiagnosticRunning.value || isArticleDetailCommentsDiagnosticRunning.value || isWindowClickFlowDiagnosticRunning.value, run: handleInitialContentStorageDiagnosticAction },
-          { label: '单篇文章全内容', buttonLabel: '详情评论', description: '复用初始内容存储，随后启动独立评论子进程采集评论', icon: 'fa-regular fa-clipboard', tone: 'primary', disabled: () => isArticleDetailCommentsDiagnosticRunning.value || isArticleDetailDiagnosticRunning.value || isInitialContentStorageDiagnosticRunning.value || isWindowClickFlowDiagnosticRunning.value, run: handleArticleDetailCommentsDiagnosticAction },
+          { label: '单篇文章详情流程', buttonLabel: '详情获取', description: '激活主页窗口并读取当前可视区第一篇文章卡片', icon: 'fa-regular fa-file-lines', tone: 'purple', showArticleDetailSkipCollectedOption: true, disabled: () => isArticleDetailDiagnosticRunning.value || isInitialContentStorageDiagnosticRunning.value || isArticleDetailCommentsDiagnosticRunning.value || isArticleDetailOfflineCacheDiagnosticRunning.value || isWindowClickFlowDiagnosticRunning.value, run: handleArticleDetailDiagnosticAction },
+          { label: '初始内容存储测试', buttonLabel: '初始内容存储', description: '复用单篇文章详情流程，解析 HTML 并存储初始文章内容', icon: 'fa-solid fa-box-archive', tone: 'primary', showInitialContentStorageOptions: true, disabled: () => isInitialContentStorageDiagnosticRunning.value || isArticleDetailDiagnosticRunning.value || isArticleDetailCommentsDiagnosticRunning.value || isArticleDetailOfflineCacheDiagnosticRunning.value || isWindowClickFlowDiagnosticRunning.value, run: handleInitialContentStorageDiagnosticAction },
+          { label: '单篇评论存储测试', buttonLabel: '评论信息存储', description: '复用初始内容存储，随后启动独立评论子进程采集评论', icon: 'fa-regular fa-clipboard', tone: 'primary', showArticleDetailCommentsOptions: true, disabled: () => isArticleDetailCommentsDiagnosticRunning.value || isArticleDetailDiagnosticRunning.value || isInitialContentStorageDiagnosticRunning.value || isWindowClickFlowDiagnosticRunning.value || isArticleDetailOfflineCacheDiagnosticRunning.value, run: handleArticleDetailCommentsDiagnosticAction },
+          { label: '单篇离线缓存测试', buttonLabel: '离线缓存', description: '复用初始内容存储，随后启动 Playwright 子进程生成 index.html 和 assets', icon: 'fa-solid fa-download', tone: 'primary', showArticleDetailOfflineCacheOptions: true, disabled: () => isArticleDetailOfflineCacheDiagnosticRunning.value || isArticleDetailCommentsDiagnosticRunning.value || isArticleDetailDiagnosticRunning.value || isInitialContentStorageDiagnosticRunning.value || isWindowClickFlowDiagnosticRunning.value, run: handleArticleDetailOfflineCacheDiagnosticAction },
         ],
       }
     default:
@@ -838,19 +843,29 @@ function setNumericConfigValue(key: NumericConfigKey, value: number) {
   configForm.startupDelaySeconds = nextValue
 }
 
-function adjustNumericConfig(key: NumericConfigKey, direction: -1 | 1) {
-  const limit = numericConfigLimits[key]
-  setNumericConfigValue(key, getNumericConfigValue(key) + direction * limit.step)
-}
-
-function handleNumericConfigInput(key: NumericConfigKey, event: Event) {
-  const input = event.target as HTMLInputElement
-  setNumericConfigValue(key, input.valueAsNumber)
-  input.value = String(getNumericConfigValue(key))
+function handleNumericConfigNumberChange(key: NumericConfigKey, value: number | string | null) {
+  setNumericConfigValue(key, Number(value))
 }
 
 function getSettingsDisplayValue(field: SettingsDetailField) {
+  if (typeof field.value !== 'string') {
+    return field.value.start + ' ~ ' + field.value.end
+  }
+
   return runtimeConfigValues[field.configKey] ?? field.value
+}
+
+function getSettingsRangeValue(field: SettingsDetailField): SettingsDetailRangeValue {
+  if (typeof field.value !== 'string') {
+    return field.value
+  }
+
+  return {
+    start: field.value,
+    end: field.value,
+    startLabel: '起始值',
+    endLabel: '结束值',
+  }
 }
 
 function getRuntimeConfigDisplayValue(configKey: string) {
@@ -905,32 +920,16 @@ function setSettingsNumberValue(field: SettingsDetailField, value: number) {
   queueRuntimeConfigMemorySync()
 }
 
-function adjustSettingsNumberField(field: SettingsDetailField, direction: -1 | 1) {
-  const step = field.step ?? 1
-  setSettingsNumberValue(field, getSettingsNumberValue(field) + direction * step)
-}
-
-function handleSettingsNumberFieldInput(field: SettingsDetailField, event: Event) {
-  const input = event.target as HTMLInputElement
-  setSettingsNumberValue(field, input.valueAsNumber)
-  input.value = String(getSettingsNumberValue(field))
-}
-
-function getStepperWidth(value: number) {
-  const digitCount = String(value ?? '').length
-  const width = 148 + Math.max(0, digitCount - 1) * 14
-
-  return `${Math.min(width, 244)}px`
+function handleSettingsNumberFieldNumberChange(field: SettingsDetailField, value: number | string | null) {
+  setSettingsNumberValue(field, Number(value))
 }
 
 function showConfigNotice(message: string, tone: 'info' | 'success' | 'warning' | 'error' = 'info') {
-  configToast.visible = true
-  configToast.message = message
-  configToast.tone = tone
-  window.clearTimeout(configToastTimer)
-  configToastTimer = window.setTimeout(() => {
-    configToast.visible = false
-  }, 1000)
+  notification[tone]({
+    message,
+    placement: 'bottomRight',
+    duration: 2.4,
+  })
 }
 
 function closeDiagnosticResultDialog() {
@@ -1263,7 +1262,11 @@ async function toggleMitmProxyDiagnosticAction() {
 
 async function handlePendingBrowseAction(field: SettingsDetailField) {
   try {
-    const result = await selectRuntimeDirectory(field.configKey, getSettingsDisplayValue(field))
+    const displayValue = getSettingsDisplayValue(field)
+    const result = await selectRuntimeDirectory(
+      field.configKey,
+      typeof displayValue === 'string' ? displayValue : '',
+    )
     if (result.taskStatus) {
       emitTaskStatus(result.taskStatus)
     }
@@ -1382,14 +1385,15 @@ function buildWindowClickFlowDiagnosticOptions(): WindowClickFlowDiagnosticOptio
   }
 }
 
-function adjustWindowClickFlowMaxRecords(direction: -1 | 1) {
-  if (isWindowClickFlowDiagnosticRunning.value || windowClickFlowUsesUnlimitedRecords.value) {
+function handleWindowClickFlowMaxRecordsChange(value: number | string | null) {
+  if (windowClickFlowUsesUnlimitedRecords.value) {
+    windowClickFlowMaxRecords.value = 0
     return
   }
-  windowClickFlowMaxRecords.value = Math.max(
-    1,
-    Math.min(20, windowClickFlowMaxRecords.value + direction),
-  )
+
+  const parsedValue = Number(value)
+  const safeValue = Number.isFinite(parsedValue) ? parsedValue : windowClickFlowMaxRecords.value
+  windowClickFlowMaxRecords.value = Math.max(1, Math.min(20, Math.round(safeValue)))
 }
 
 watch(windowClickFlowDateFilterMode, () => {
@@ -1426,13 +1430,19 @@ async function handleArticleDetailDiagnosticAction() {
     tone: 'info',
     items: [
       { label: '流程', value: '单篇文章详情流程' },
+      {
+        label: '跳过已采集记录',
+        value: articleDetailSkipCollectedRecords.value ? '开启' : '关闭',
+      },
       { label: '状态', value: '启动中' },
     ],
   })
 
   let pollTimer: number | undefined
   try {
-    const started = await startArticleDetailDiagnostic()
+    const started = await startArticleDetailDiagnostic({
+      skipCollectedRecords: articleDetailSkipCollectedRecords.value,
+    })
     applyArticleDetailDiagnosticResult(started)
     const jobId = started.jobId
     let latest: ArticleDetailDiagnosticResult = started
@@ -1479,12 +1489,23 @@ async function handleInitialContentStorageDiagnosticAction() {
     tone: 'info',
     items: [
       { label: '流程', value: '初始内容存储测试' },
+      {
+        label: '跳过已采集记录',
+        value: initialContentStorageSkipCollectedRecords.value ? '开启' : '关闭',
+      },
+      {
+        label: '存储文章详情',
+        value: initialContentStorageStoreArticleDetail.value ? '开启（锁定）' : '关闭',
+      },
       { label: '状态', value: '启动中' },
     ],
   })
 
   try {
-    const started = await startInitialContentStorageDiagnostic()
+    const started = await startInitialContentStorageDiagnostic({
+      skipCollectedRecords: initialContentStorageSkipCollectedRecords.value,
+      storeArticleDetail: initialContentStorageStoreArticleDetail.value,
+    })
     applyArticleDetailDiagnosticResult(started)
     const jobId = started.jobId
     let latest: ArticleDetailDiagnosticResult = started
@@ -1533,7 +1554,11 @@ async function handleArticleDetailCommentsDiagnosticAction() {
   })
 
   try {
-    const started = await startArticleDetailCommentsDiagnostic()
+    const started = await startArticleDetailCommentsDiagnostic({
+      skipCollectedRecords: articleDetailCommentsSkipCollectedRecords.value,
+      storeArticleDetail: articleDetailCommentsStoreArticleDetail.value,
+      storeCommentInfo: articleDetailCommentsStoreCommentInfo.value,
+    })
     applyArticleDetailDiagnosticResult(started)
     const jobId = started.jobId
     let latest: ArticleDetailDiagnosticResult = started
@@ -1562,6 +1587,70 @@ async function handleArticleDetailCommentsDiagnosticAction() {
     showConfigNotice(message, 'error')
   } finally {
     isArticleDetailCommentsDiagnosticRunning.value = false
+  }
+}
+
+async function handleArticleDetailOfflineCacheDiagnosticAction() {
+  if (isArticleDetailOfflineCacheDiagnosticRunning.value) {
+    return
+  }
+
+  isArticleDetailOfflineCacheDiagnosticRunning.value = true
+  openDiagnosticResultDialog({
+    title: '单篇离线缓存结果',
+    message: '正在启动单篇离线缓存测试...',
+    tone: 'info',
+    items: [
+      { label: '流程', value: '单篇离线缓存测试' },
+      {
+        label: '跳过已采集记录',
+        value: articleDetailOfflineCacheSkipCollectedRecords.value ? '开启' : '关闭',
+      },
+      {
+        label: '带状态（bate）',
+        value: articleDetailOfflineCacheStateful.value ? '开启' : '关闭',
+      },
+      { label: '存储文章详情', value: '开启（锁定）' },
+      { label: '离线归档内容', value: '开启（锁定）' },
+      { label: '状态', value: '启动中' },
+    ],
+  })
+
+  try {
+    const started = await startArticleDetailOfflineCacheDiagnostic({
+      skipCollectedRecords: articleDetailOfflineCacheSkipCollectedRecords.value,
+      statefulOfflineCache: articleDetailOfflineCacheStateful.value,
+      storeArticleDetail: articleDetailOfflineCacheStoreArticleDetail.value,
+      archiveOfflineContent: articleDetailOfflineCacheArchiveContent.value,
+    })
+    applyArticleDetailDiagnosticResult(started)
+    const jobId = started.jobId
+    let latest: ArticleDetailDiagnosticResult = started
+
+    while (latest.status === 'running') {
+      await delay(500)
+      latest = await getArticleDetailOfflineCacheDiagnostic(jobId)
+      applyArticleDetailDiagnosticResult(latest)
+    }
+
+    showConfigNotice(
+      latest.message ?? '单篇离线缓存测试已完成。',
+      latest.ok ? 'success' : 'warning',
+    )
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '单篇离线缓存测试失败。'
+    openDiagnosticResultDialog({
+      title: '单篇离线缓存结果',
+      message,
+      tone: 'error',
+      items: [
+        { label: '流程', value: '单篇离线缓存测试' },
+        { label: '失败原因', value: message },
+      ],
+    })
+    showConfigNotice(message, 'error')
+  } finally {
+    isArticleDetailOfflineCacheDiagnosticRunning.value = false
   }
 }
 
@@ -1606,6 +1695,10 @@ function normalizeWindowDiagnosticScrollSteps(value = windowDiagnosticScrollStep
 function handleWindowDiagnosticScrollStepsInput(event: Event) {
   const input = event.target as HTMLInputElement
   input.value = String(normalizeWindowDiagnosticScrollSteps(input.valueAsNumber))
+}
+
+function handleWindowDiagnosticScrollStepsNumberChange(value: number | string | null) {
+  normalizeWindowDiagnosticScrollSteps(Number(value))
 }
 
 async function handleWindowDiagnosticAction(action: WindowDiagnosticAction) {
@@ -1746,8 +1839,12 @@ function formatSwitchValue(enabled: boolean) {
 }
 
 function buildRuntimeConfigValuesPayload() {
+  const editableRuntimeConfigValues = Object.fromEntries(
+    Object.entries(runtimeConfigValues).filter(([key]) => !readonlyRangeConfigKeys.has(key)),
+  )
+
   return {
-    ...runtimeConfigValues,
+    ...editableRuntimeConfigValues,
     ...Object.fromEntries(
       Object.entries(settingsNumberValues).map(([key, value]) => [key, String(value)]),
     ),
@@ -2568,67 +2665,59 @@ onMounted(() => {
                   <code v-if="control.configKey" class="settings-config-keyline">{{ getSettingsConfigKeyPath(control.configKey) }}</code>
 
                   <div :class="['settings-config-control', getSettingsControlLayoutClass(control)]">
-                    <VxeSelect
+                    <ASelect
                       v-if="control.kind === 'log-level'"
-                      v-model="configForm.logLevel"
-                      class="settings-vxe-control"
+                      v-model:value="configForm.logLevel"
+                      class="settings-ant-control"
                       :options="logLevelOptions"
-                      :popup-config="selectPopupConfig"
+                      popup-class-name="settings-select-panel"
                     />
-                    <VxeInput
+                    <AInput
                       v-else-if="control.kind === 'proxy-host'"
-                      v-model="configForm.proxyHost"
-                      class="settings-vxe-control"
+                      v-model:value="configForm.proxyHost"
+                      class="settings-ant-control"
                       placeholder="127.0.0.1"
                     />
-                    <VxeInput
+                    <AInput
                       v-else-if="control.kind === 'verification-url'"
-                      v-model="configForm.trafficCheckUrl"
-                      class="settings-vxe-control"
+                      v-model:value="configForm.trafficCheckUrl"
+                      class="settings-ant-control"
                       placeholder="https://mitm.it/"
                     />
-                    <div
+                    <AInputNumber
                       v-else-if="control.kind === 'proxy-port'"
-                      class="settings-number-stepper proxy-number-input"
-                      :style="{ width: getStepperWidth(configForm.proxyPort) }"
-                    >
-                      <button type="button" aria-label="减少代理端口" @click="adjustNumericConfig('proxyPort', -1)">−</button>
-                      <input
-                        type="number"
-                        :value="configForm.proxyPort"
-                        :min="numericConfigLimits.proxyPort.min"
-                        :max="numericConfigLimits.proxyPort.max"
-                        :step="numericConfigLimits.proxyPort.step"
-                        @input="handleNumericConfigInput('proxyPort', $event)"
-                      >
-                      <button type="button" aria-label="增加代理端口" @click="adjustNumericConfig('proxyPort', 1)">+</button>
-                    </div>
-                    <div
+                      class="settings-ant-number proxy-number-input"
+                      :value="configForm.proxyPort"
+                      :min="numericConfigLimits.proxyPort.min"
+                      :max="numericConfigLimits.proxyPort.max"
+                      :step="numericConfigLimits.proxyPort.step"
+                      :precision="0"
+                      :controls="true"
+                      aria-label="代理端口"
+                      @change="handleNumericConfigNumberChange('proxyPort', $event)"
+                    />
+                    <AInputNumber
                       v-else-if="control.kind === 'startup-delay'"
-                      class="settings-number-stepper proxy-number-input"
-                      :style="{ width: getStepperWidth(configForm.startupDelaySeconds) }"
-                    >
-                      <button type="button" aria-label="减少端口等待时间" @click="adjustNumericConfig('startupDelaySeconds', -1)">−</button>
-                      <input
-                        type="number"
-                        :value="configForm.startupDelaySeconds"
-                        :min="numericConfigLimits.startupDelaySeconds.min"
-                        :max="numericConfigLimits.startupDelaySeconds.max"
-                        :step="numericConfigLimits.startupDelaySeconds.step"
-                        @input="handleNumericConfigInput('startupDelaySeconds', $event)"
-                      >
-                      <button type="button" aria-label="增加端口等待时间" @click="adjustNumericConfig('startupDelaySeconds', 1)">+</button>
-                    </div>
+                      class="settings-ant-number proxy-number-input"
+                      :value="configForm.startupDelaySeconds"
+                      :min="numericConfigLimits.startupDelaySeconds.min"
+                      :max="numericConfigLimits.startupDelaySeconds.max"
+                      :step="numericConfigLimits.startupDelaySeconds.step"
+                      :precision="0"
+                      :controls="true"
+                      aria-label="端口等待时间"
+                      @change="handleNumericConfigNumberChange('startupDelaySeconds', $event)"
+                    />
                     <div v-else-if="control.kind === 'auto-clean'" class="control-switch-line">
-                      <VxeSwitch v-model="settings.autoCleanTempFiles" class="settings-vxe-switch" open-label="开" close-label="关" />
+                      <ASwitch v-model:checked="settings.autoCleanTempFiles" class="settings-ant-switch" checked-children="开" un-checked-children="关" />
                       <span>{{ settings.autoCleanTempFiles ? '开启' : '关闭' }}</span>
                     </div>
                     <div v-else-if="control.kind === 'system-proxy'" class="control-switch-line">
-                      <VxeSwitch v-model="settings.enableSystemProxy" class="settings-vxe-switch" open-label="开" close-label="关" />
+                      <ASwitch v-model:checked="settings.enableSystemProxy" class="settings-ant-switch" checked-children="开" un-checked-children="关" />
                       <span>{{ settings.enableSystemProxy ? '允许接管' : '禁止接管' }}</span>
                     </div>
                     <div v-else-if="control.kind === 'mitm-proxy'" class="control-switch-line">
-                      <VxeSwitch :model-value="settings.autoStartProxy" class="settings-vxe-switch" open-label="开" close-label="关" disabled />
+                      <ASwitch :checked="settings.autoStartProxy" class="settings-ant-switch" checked-children="开" un-checked-children="关" disabled />
                       <span>{{ settings.autoStartProxy ? '采集中运行' : '当前未运行' }}</span>
                     </div>
                   </div>
@@ -2648,26 +2737,49 @@ onMounted(() => {
                   <code class="settings-config-keyline">{{ getSettingsConfigKeyPath(field.configKey) }}</code>
                   <div :class="['settings-config-control', getSettingsFieldLayoutClass(field)]">
                     <div v-if="field.inputType === 'switch'" class="control-switch-line">
-                      <VxeSwitch v-model="settingsToggleValues[field.configKey]" class="settings-vxe-switch" open-label="开" close-label="关" />
+                      <ASwitch v-model:checked="settingsToggleValues[field.configKey]" class="settings-ant-switch" checked-children="开" un-checked-children="关" />
                       <span>{{ settingsToggleValues[field.configKey] ? '开启' : '关闭' }}</span>
                     </div>
-                    <div
-                      v-else-if="field.inputType === 'number-stepper'"
-                      class="settings-number-stepper settings-field-stepper"
-                      :style="{ width: getStepperWidth(getSettingsNumberValue(field)) }"
-                    >
-                      <button type="button" :aria-label="'减少' + field.label" @click="adjustSettingsNumberField(field, -1)">−</button>
-                      <input
-                        type="number"
-                        :value="getSettingsNumberValue(field)"
-                        :min="field.min ?? 0"
-                        :max="field.max ?? 999999"
-                        :step="field.step ?? 1"
-                        @input="handleSettingsNumberFieldInput(field, $event)"
-                        @blur="handleSettingsNumberFieldInput(field, $event)"
-                      >
-                      <button type="button" :aria-label="'增加' + field.label" @click="adjustSettingsNumberField(field, 1)">+</button>
+                    <div v-else-if="field.inputType === 'readonly-range'" class="settings-range-readonly">
+                      <label>
+                        <span>{{ getSettingsRangeValue(field).startLabel }}</span>
+                        <input
+                          class="settings-inline-input"
+                          type="text"
+                          :value="getSettingsRangeValue(field).start"
+                          readonly
+                          :aria-label="field.label + getSettingsRangeValue(field).startLabel"
+                          @focus="selectReadonlyInputText"
+                          @click="selectReadonlyInputText"
+                        >
+                      </label>
+                      <span class="settings-range-separator">~</span>
+                      <label>
+                        <span>{{ getSettingsRangeValue(field).endLabel }}</span>
+                        <input
+                          class="settings-inline-input"
+                          type="text"
+                          :value="getSettingsRangeValue(field).end"
+                          readonly
+                          :aria-label="field.label + getSettingsRangeValue(field).endLabel"
+                          @focus="selectReadonlyInputText"
+                          @click="selectReadonlyInputText"
+                        >
+                      </label>
+                      <span v-if="field.unit" class="settings-range-unit">{{ field.unit }}</span>
                     </div>
+                    <AInputNumber
+                      v-else-if="field.inputType === 'number-stepper'"
+                      class="settings-ant-number settings-field-stepper"
+                      :value="getSettingsNumberValue(field)"
+                      :min="field.min ?? 0"
+                      :max="field.max ?? 999999"
+                      :step="field.step ?? 1"
+                      :precision="getSettingsNumberPrecision(field)"
+                      :controls="true"
+                      :aria-label="field.label"
+                      @change="handleSettingsNumberFieldNumberChange(field, $event)"
+                    />
                     <input
                       v-else
                       class="settings-inline-input"
@@ -2681,14 +2793,14 @@ onMounted(() => {
                       @cut.prevent
                       @drop.prevent
                     >
-                    <VxeButton
+                    <AButton
                       v-if="field.browseAction"
-                      class="settings-vxe-button settings-row-button ghost"
-                      type="button"
+                      class="settings-ant-button settings-row-button ghost"
+                      html-type="button"
                       @click="handlePendingBrowseAction(field)"
                     >
                       {{ field.browseLabel ?? '浏览' }}
-                    </VxeButton>
+                    </AButton>
                   </div>
                 </article>
               </div>
@@ -2715,51 +2827,42 @@ onMounted(() => {
                         <small>{{ action.description }}</small>
                         <span v-if="action.detail" class="diagnostic-action-detail">{{ action.detail }}</span>
                       </div>
-                      <VxeButton
-                        :class="['settings-vxe-button', 'settings-row-button', 'diagnostic-action-button', action.tone ?? 'ghost']"
-                        type="button"
+                      <AButton
+                        :class="['settings-ant-button', 'settings-row-button', 'diagnostic-action-button', action.tone ?? 'ghost']"
+                        html-type="button"
                         :disabled="action.disabled?.() ?? false"
                         @click="action.run()"
                       >
-                        <AppIcon class="diagnostic-action-icon" :icon="action.icon" />
+                        <template #icon>
+                          <AppIcon class="diagnostic-action-icon" :icon="action.icon" />
+                        </template>
                         {{ action.buttonLabel ?? action.label }}
-                      </VxeButton>
+                      </AButton>
                     </div>
                     <div class="window-click-flow-fields">
                       <label class="window-click-flow-field window-click-flow-field--mode">
                         <span>日期筛选</span>
-                        <VxeSelect
-                          v-model="windowClickFlowDateFilterMode"
-                          class="settings-vxe-control window-click-flow-select"
+                        <ASelect
+                          v-model:value="windowClickFlowDateFilterMode"
+                          class="settings-ant-control window-click-flow-select"
                           :options="windowClickFlowDateFilterOptions"
-                          :popup-config="selectPopupConfig"
+                          popup-class-name="settings-select-panel"
                           :disabled="isWindowClickFlowDiagnosticRunning"
                         />
                       </label>
                       <label class="window-click-flow-field window-click-flow-field--count">
                         <span>任务数量</span>
-                        <div class="settings-number-stepper window-click-flow-stepper">
-                          <button
-                            type="button"
-                            aria-label="减少窗口测试任务数量"
-                            :disabled="isWindowClickFlowDiagnosticRunning || windowClickFlowUsesUnlimitedRecords"
-                            @click="adjustWindowClickFlowMaxRecords(-1)"
-                          >−</button>
-                          <input
-                            v-model.number="windowClickFlowMaxRecords"
-                            type="number"
-                            :min="windowClickFlowUsesUnlimitedRecords ? 0 : 1"
-                            max="20"
-                            :disabled="isWindowClickFlowDiagnosticRunning || windowClickFlowUsesUnlimitedRecords"
-                            aria-label="窗口测试任务数量"
-                          >
-                          <button
-                            type="button"
-                            aria-label="增加窗口测试任务数量"
-                            :disabled="isWindowClickFlowDiagnosticRunning || windowClickFlowUsesUnlimitedRecords"
-                            @click="adjustWindowClickFlowMaxRecords(1)"
-                          >+</button>
-                        </div>
+                        <AInputNumber
+                          class="settings-ant-number window-click-flow-stepper"
+                          :value="windowClickFlowMaxRecords"
+                          :min="windowClickFlowUsesUnlimitedRecords ? 0 : 1"
+                          :max="20"
+                          :precision="0"
+                          :controls="true"
+                          :disabled="isWindowClickFlowDiagnosticRunning || windowClickFlowUsesUnlimitedRecords"
+                          aria-label="窗口测试任务数量"
+                          @change="handleWindowClickFlowMaxRecordsChange"
+                        />
                       </label>
                       <label
                         v-if="windowClickFlowDateFilterMode === 'range' || windowClickFlowDateFilterMode === 'after'"
@@ -2771,33 +2874,28 @@ onMounted(() => {
                       >
                         <span v-if="windowClickFlowDateFilterMode === 'range'">日期范围</span>
                         <span v-else>起始日期</span>
-                        <VxeDateRangePicker
+                        <ARangePicker
                           v-if="windowClickFlowDateFilterMode === 'range'"
-                          v-model:start-value="windowClickFlowStartDate"
-                          v-model:end-value="windowClickFlowEndDate"
-                          class="settings-vxe-control window-click-flow-date-range-picker"
-                          type="date"
-                          clearable
-                          auto-close
-                          placeholder="选择起始 ~ 截止日期"
+                          v-model:value="windowClickFlowDateRangeValue"
+                          class="settings-ant-control window-click-flow-date-range-picker"
+                          :allow-clear="true"
+                          :placeholder="['选择起始日期', '选择截止日期']"
                           separator=" ~ "
-                          value-format="yyyy-MM-dd"
-                          label-format="yyyy-MM-dd"
-                          :popup-config="windowClickFlowDateRangePopupConfig"
+                          format="YYYY-MM-DD"
+                          value-format="YYYY-MM-DD"
+                          popup-class-name="window-click-flow-date-range-picker-panel"
                           :disabled="isWindowClickFlowDiagnosticRunning"
                           aria-label="窗口测试起始日期和截止日期"
                         />
-                        <VxeDatePicker
+                        <ADatePicker
                           v-else
-                          v-model="windowClickFlowStartDate"
-                          class="settings-vxe-control window-click-flow-date-picker"
-                          type="date"
-                          clearable
-                          auto-close
+                          v-model:value="windowClickFlowStartDate"
+                          class="settings-ant-control window-click-flow-date-picker"
+                          :allow-clear="true"
                           placeholder="选择起始日期"
-                          value-format="yyyy-MM-dd"
-                          label-format="yyyy-MM-dd"
-                          :popup-config="windowClickFlowDatePopupConfig"
+                          format="YYYY-MM-DD"
+                          value-format="YYYY-MM-DD"
+                          popup-class-name="window-click-flow-date-picker-panel"
                           :disabled="isWindowClickFlowDiagnosticRunning"
                           aria-label="窗口测试起始日期"
                         />
@@ -2807,16 +2905,14 @@ onMounted(() => {
                         class="window-click-flow-field window-click-flow-field--date"
                       >
                         <span>截止日期</span>
-                        <VxeDatePicker
-                          v-model="windowClickFlowEndDate"
-                          class="settings-vxe-control window-click-flow-date-picker"
-                          type="date"
-                          clearable
-                          auto-close
+                        <ADatePicker
+                          v-model:value="windowClickFlowEndDate"
+                          class="settings-ant-control window-click-flow-date-picker"
+                          :allow-clear="true"
                           placeholder="选择截止日期"
-                          value-format="yyyy-MM-dd"
-                          label-format="yyyy-MM-dd"
-                          :popup-config="windowClickFlowDatePopupConfig"
+                          format="YYYY-MM-DD"
+                          value-format="YYYY-MM-DD"
+                          popup-class-name="window-click-flow-date-picker-panel"
                           :disabled="isWindowClickFlowDiagnosticRunning"
                           aria-label="窗口测试截止日期"
                         />
@@ -2834,32 +2930,140 @@ onMounted(() => {
                       'settings-config-control',
                       'action-control',
                       'compact-control',
-                      { 'scroll-step-action-control': action.showScrollStepInput },
+                      {
+                        'scroll-step-action-control': action.showScrollStepInput,
+                        'article-detail-option-action-control': action.showArticleDetailSkipCollectedOption,
+                        'initial-content-storage-option-action-control': action.showInitialContentStorageOptions,
+                        'article-detail-comments-option-action-control': action.showArticleDetailCommentsOptions || action.showArticleDetailOfflineCacheOptions,
+                        'article-detail-offline-cache-option-action-control': action.showArticleDetailOfflineCacheOptions,
+                      },
                     ]"
                   >
                     <label v-if="action.showScrollStepInput" class="window-diagnostic-scroll-step">
                       <span>滚动步长</span>
-                      <input
-                        type="number"
+                      <AInputNumber
+                        class="settings-ant-number window-diagnostic-scroll-step-input"
                         :value="windowDiagnosticScrollSteps"
-                        min="1"
-                        max="200"
-                        step="1"
+                        :min="1"
+                        :max="200"
+                        :step="1"
+                        :precision="0"
+                        :controls="true"
                         :disabled="action.disabled?.() ?? false"
                         aria-label="滚动页面步长"
-                        @input="handleWindowDiagnosticScrollStepsInput"
-                        @blur="handleWindowDiagnosticScrollStepsInput"
-                      >
+                        @change="handleWindowDiagnosticScrollStepsNumberChange"
+                      />
                     </label>
-                    <VxeButton
-                      :class="['settings-vxe-button', 'settings-row-button', 'diagnostic-action-button', action.tone ?? 'ghost']"
-                      type="button"
+                    <ACheckbox
+                      v-if="action.showArticleDetailSkipCollectedOption"
+                      v-model:checked="articleDetailSkipCollectedRecords"
+                      class="article-detail-skip-option"
+                      :disabled="action.disabled?.() ?? false"
+                      aria-label="详情获取跳过已采集记录"
+                    >
+                      跳过已采集记录
+                    </ACheckbox>
+                    <ACheckbox
+                      v-if="action.showInitialContentStorageOptions"
+                      v-model:checked="initialContentStorageSkipCollectedRecords"
+                      class="article-detail-skip-option"
+                      :disabled="action.disabled?.() ?? false"
+                      aria-label="初始内容存储跳过已采集记录"
+                    >
+                      跳过已采集记录
+                    </ACheckbox>
+                    <ACheckbox
+                      v-if="action.showInitialContentStorageOptions"
+                      v-model:checked="initialContentStorageStoreArticleDetail"
+                      class="article-detail-skip-option"
+                      disabled
+                      aria-label="初始内容存储文章详情"
+                    >
+                      存储文章详情
+                    </ACheckbox>
+                    <ACheckbox
+                      v-if="action.showArticleDetailCommentsOptions"
+                      v-model:checked="articleDetailCommentsSkipCollectedRecords"
+                      class="article-detail-skip-option"
+                      :disabled="action.disabled?.() ?? false"
+                      aria-label="详情评论跳过已采集记录"
+                    >
+                      跳过已采集记录
+                    </ACheckbox>
+                    <div
+                      v-if="action.showArticleDetailCommentsOptions"
+                      class="article-detail-comments-option-stack"
+                    >
+                      <ACheckbox
+                        v-model:checked="articleDetailCommentsStoreArticleDetail"
+                        class="article-detail-skip-option"
+                        disabled
+                        aria-label="详情评论存储文章详情"
+                      >
+                        存储文章详情
+                      </ACheckbox>
+                      <ACheckbox
+                        v-model:checked="articleDetailCommentsStoreCommentInfo"
+                        class="article-detail-skip-option"
+                        disabled
+                        aria-label="详情评论存储评论信息"
+                      >
+                        存储评论信息
+                      </ACheckbox>
+                    </div>
+                    <div
+                      v-if="action.showArticleDetailOfflineCacheOptions"
+                      class="article-detail-offline-cache-option-stack"
+                    >
+                      <ACheckbox
+                        v-model:checked="articleDetailOfflineCacheSkipCollectedRecords"
+                        class="article-detail-skip-option"
+                        :disabled="action.disabled?.() ?? false"
+                        aria-label="离线缓存跳过已采集记录"
+                      >
+                        跳过已采集记录
+                      </ACheckbox>
+                      <ACheckbox
+                        v-model:checked="articleDetailOfflineCacheStateful"
+                        class="article-detail-skip-option"
+                        :disabled="action.disabled?.() ?? false"
+                        aria-label="离线缓存带状态"
+                      >
+                        带状态（beta）
+                      </ACheckbox>
+                    </div>
+                    <div
+                      v-if="action.showArticleDetailOfflineCacheOptions"
+                      class="article-detail-comments-option-stack"
+                    >
+                      <ACheckbox
+                        v-model:checked="articleDetailOfflineCacheStoreArticleDetail"
+                        class="article-detail-skip-option"
+                        disabled
+                        aria-label="离线缓存存储文章详情"
+                      >
+                        存储文章详情
+                      </ACheckbox>
+                      <ACheckbox
+                        v-model:checked="articleDetailOfflineCacheArchiveContent"
+                        class="article-detail-skip-option"
+                        disabled
+                        aria-label="离线缓存归档内容"
+                      >
+                        离线归档内容
+                      </ACheckbox>
+                    </div>
+                    <AButton
+                      :class="['settings-ant-button', 'settings-row-button', 'diagnostic-action-button', action.tone ?? 'ghost']"
+                      html-type="button"
                       :disabled="action.disabled?.() ?? false"
                       @click="action.run()"
                     >
-                      <AppIcon class="diagnostic-action-icon" :icon="action.icon" />
+                      <template #icon>
+                        <AppIcon class="diagnostic-action-icon" :icon="action.icon" />
+                      </template>
                       {{ action.buttonLabel ?? action.label }}
-                    </VxeButton>
+                    </AButton>
                   </div>
                 </article>
               </div>
@@ -2874,8 +3078,8 @@ onMounted(() => {
                   <small>对应 basic_settings.project_storage.article_storage_root。</small>
                 </label>
                 <div class="browse-line">
-                  <VxeInput id="storage-dir" v-model="configForm.storageDir" class="settings-vxe-control browse-input" readonly />
-                  <VxeButton class="settings-vxe-button ghost browse-action" type="button" @click="handleOpenRuntimePath('storageDir')">浏览</VxeButton>
+                  <AInput id="storage-dir" v-model:value="configForm.storageDir" class="settings-ant-control browse-input" readonly />
+                  <AButton class="settings-ant-button ghost browse-action" html-type="button" @click="handleOpenRuntimePath('storageDir')">浏览</AButton>
                 </div>
               </div>
               <p class="detail-note">归档根目录用于保存文章 HTML、评论 JSON、离线网页和下载资源。当前页面读取后端实际解析路径，避免相对路径和运行目录不一致。</p>
@@ -2906,8 +3110,8 @@ onMounted(() => {
                   <small>程序运行根目录，只读展示。</small>
                 </label>
                 <div class="browse-line">
-                  <VxeInput id="project-dir" v-model="configForm.projectDir" class="settings-vxe-control browse-input" readonly />
-                  <VxeButton class="settings-vxe-button ghost browse-action" type="button" @click="handleOpenRuntimePath('projectDir')">浏览</VxeButton>
+                  <AInput id="project-dir" v-model:value="configForm.projectDir" class="settings-ant-control browse-input" readonly />
+                  <AButton class="settings-ant-button ghost browse-action" html-type="button" @click="handleOpenRuntimePath('projectDir')">浏览</AButton>
                 </div>
               </div>
               <div class="form-row detail-row">
@@ -2916,8 +3120,8 @@ onMounted(() => {
                   <small>对应 basic_settings.project_storage.log_dir。</small>
                 </label>
                 <div class="browse-line">
-                  <VxeInput id="log-dir" v-model="configForm.logDir" class="settings-vxe-control browse-input" readonly />
-                  <VxeButton class="settings-vxe-button ghost browse-action" type="button" @click="handleOpenRuntimePath('logDir')">浏览</VxeButton>
+                  <AInput id="log-dir" v-model:value="configForm.logDir" class="settings-ant-control browse-input" readonly />
+                  <AButton class="settings-ant-button ghost browse-action" html-type="button" @click="handleOpenRuntimePath('logDir')">浏览</AButton>
                 </div>
               </div>
               <div class="config-field-grid">
@@ -2967,45 +3171,43 @@ onMounted(() => {
                   <strong>端口设置</strong>
                   <small>保存后，新的代理启动会使用该端口。</small>
                 </label>
-                <div class="settings-number-stepper proxy-number-input" :style="{ width: getStepperWidth(configForm.proxyPort) }">
-                  <button type="button" aria-label="减少代理端口" @click="adjustNumericConfig('proxyPort', -1)">−</button>
-                  <input
-                    id="proxy-port"
-                    :value="configForm.proxyPort"
-                    type="number"
-                    :min="numericConfigLimits.proxyPort.min"
-                    :max="numericConfigLimits.proxyPort.max"
-                    @input="handleNumericConfigInput('proxyPort', $event)"
-                    @blur="handleNumericConfigInput('proxyPort', $event)"
-                  />
-                  <button type="button" aria-label="增加代理端口" @click="adjustNumericConfig('proxyPort', 1)">+</button>
-                </div>
+                <AInputNumber
+                  id="proxy-port"
+                  class="settings-ant-number proxy-number-input"
+                  :value="configForm.proxyPort"
+                  :min="numericConfigLimits.proxyPort.min"
+                  :max="numericConfigLimits.proxyPort.max"
+                  :step="numericConfigLimits.proxyPort.step"
+                  :precision="0"
+                  :controls="true"
+                  aria-label="代理端口"
+                  @change="handleNumericConfigNumberChange('proxyPort', $event)"
+                />
               </div>
               <div class="form-row detail-row">
                 <label class="settings-label" for="startup-delay">
                   <strong>启动延迟（秒）</strong>
                   <small>通常为 0，由 ready 检测判断可用。</small>
                 </label>
-                <div class="settings-number-stepper proxy-number-input" :style="{ width: getStepperWidth(configForm.startupDelaySeconds) }">
-                  <button type="button" aria-label="减少启动延迟" @click="adjustNumericConfig('startupDelaySeconds', -1)">−</button>
-                  <input
-                    id="startup-delay"
-                    :value="configForm.startupDelaySeconds"
-                    type="number"
-                    :min="numericConfigLimits.startupDelaySeconds.min"
-                    :max="numericConfigLimits.startupDelaySeconds.max"
-                    @input="handleNumericConfigInput('startupDelaySeconds', $event)"
-                    @blur="handleNumericConfigInput('startupDelaySeconds', $event)"
-                  />
-                  <button type="button" aria-label="增加启动延迟" @click="adjustNumericConfig('startupDelaySeconds', 1)">+</button>
-                </div>
+                <AInputNumber
+                  id="startup-delay"
+                  class="settings-ant-number proxy-number-input"
+                  :value="configForm.startupDelaySeconds"
+                  :min="numericConfigLimits.startupDelaySeconds.min"
+                  :max="numericConfigLimits.startupDelaySeconds.max"
+                  :step="numericConfigLimits.startupDelaySeconds.step"
+                  :precision="0"
+                  :controls="true"
+                  aria-label="启动延迟"
+                  @change="handleNumericConfigNumberChange('startupDelaySeconds', $event)"
+                />
               </div>
               <div class="form-row detail-row">
                 <label class="settings-label" for="traffic-check-url">
                   <strong>代理验证地址</strong>
                   <small>仅用于预检和异常排查。</small>
                 </label>
-                <VxeInput id="traffic-check-url" v-model="configForm.trafficCheckUrl" class="settings-vxe-control" />
+                <AInput id="traffic-check-url" v-model:value="configForm.trafficCheckUrl" class="settings-ant-control" />
               </div>
               <div class="form-row detail-row">
                 <span class="settings-label">
@@ -3013,7 +3215,7 @@ onMounted(() => {
                   <small>这是运行态开关，不是长期静态配置。</small>
                 </span>
                 <div class="switch-line proxy-switch-line">
-                  <VxeSwitch :model-value="settings.autoStartProxy" class="settings-vxe-switch" open-label="开" close-label="关" disabled />
+                  <ASwitch :checked="settings.autoStartProxy" class="settings-ant-switch" checked-children="开" un-checked-children="关" disabled />
                   <span>{{ settings.autoStartProxy ? '采集中运行' : '当前未运行' }}</span>
                 </div>
               </div>
@@ -3028,7 +3230,7 @@ onMounted(() => {
                   <small>对应 proxy_settings.basic_info.enable_system_proxy。</small>
                 </span>
                 <div class="switch-line proxy-switch-line">
-                  <VxeSwitch v-model="settings.enableSystemProxy" class="settings-vxe-switch" open-label="开" close-label="关" />
+                  <ASwitch v-model:checked="settings.enableSystemProxy" class="settings-ant-switch" checked-children="开" un-checked-children="关" />
                   <span>{{ settings.enableSystemProxy ? '采集时允许接管' : '禁止接管系统代理' }}</span>
                 </div>
               </div>
@@ -3068,19 +3270,21 @@ onMounted(() => {
                 <div class="certificate-line">
                   <span :class="['certificate-status', caCertificateTone]">{{ caCertificateLabel }}</span>
                   <div class="certificate-actions">
-                    <VxeButton class="settings-vxe-button ghost certificate-action secondary" type="button" :disabled="isCheckingCaCertificate" @click="handleCheckCaCertificate">
+                    <AButton class="settings-ant-button ghost certificate-action secondary" html-type="button" :disabled="isCheckingCaCertificate" @click="handleCheckCaCertificate">
                       {{ isCheckingCaCertificate ? '检测中' : '检测状态' }}
-                    </VxeButton>
-                    <VxeButton class="settings-vxe-button primary certificate-action install" type="button" :disabled="isInstallingCaCertificate" @click="openInstallCaCertificateDialog">
+                    </AButton>
+                    <AButton class="settings-ant-button primary certificate-action install" html-type="button" :disabled="isInstallingCaCertificate" @click="openInstallCaCertificateDialog">
                       {{ isInstallingCaCertificate ? '安装中' : '一键安装' }}
-                    </VxeButton>
+                    </AButton>
                   </div>
                 </div>
               </div>
-              <VxeButton class="settings-vxe-button danger detail-wide-action" type="button" :disabled="isListingMitmCertificates || isDeletingMitmCertificates" @click="handleOpenMitmCertificateDialog">
-                <AppIcon icon="fa-solid fa-certificate" />
+              <AButton class="settings-ant-button danger detail-wide-action" html-type="button" :disabled="isListingMitmCertificates || isDeletingMitmCertificates" @click="handleOpenMitmCertificateDialog">
+                <template #icon>
+                  <AppIcon icon="fa-solid fa-certificate" />
+                </template>
                 {{ isListingMitmCertificates ? '检索中' : '清除 MITM 证书' }}
-              </VxeButton>
+              </AButton>
             </div>
           </section>
 
@@ -3131,11 +3335,6 @@ onMounted(() => {
                 <strong>30 秒</strong>
                 <small>Playwright 打开文章后最长滚动加载时间。</small>
               </article>
-              <article class="config-field-card">
-                <span class="config-field-key">data_acquisition.offline_cache.max_scroll_count</span>
-                <strong>30 次</strong>
-                <small>Playwright 最多滚动次数。</small>
-              </article>
             </div>
           </section>
 
@@ -3171,12 +3370,12 @@ onMounted(() => {
                   <strong>日志等级</strong>
                   <small>对应 basic_settings.runtime_maintenance.log_level。</small>
                 </label>
-                <VxeSelect
+                <ASelect
                   id="log-level"
-                  v-model="configForm.logLevel"
-                  class="settings-vxe-control"
+                  v-model:value="configForm.logLevel"
+                  class="settings-ant-control"
                   :options="logLevelOptions"
-                  :popup-config="selectPopupConfig"
+                  popup-class-name="settings-select-panel"
                 />
               </div>
             </div>
@@ -3190,7 +3389,7 @@ onMounted(() => {
                   <small>对应 basic_settings.runtime_maintenance.auto_clean_temp_files。</small>
                 </span>
                 <div class="switch-line">
-                  <VxeSwitch v-model="settings.autoCleanTempFiles" class="settings-vxe-switch" open-label="开" close-label="关" />
+                  <ASwitch v-model:checked="settings.autoCleanTempFiles" class="settings-ant-switch" checked-children="开" un-checked-children="关" />
                   <span>{{ settings.autoCleanTempFiles ? '开启' : '关闭' }}</span>
                 </div>
               </div>
@@ -3269,39 +3468,39 @@ onMounted(() => {
           </div>
         </header>
         <div class="config-action-grid">
-          <VxeButton class="settings-vxe-button config-action-button success" type="button" :disabled="isSavingConfig || isApplyingDefaults" @click="handleSaveConfig">
-            <AppIcon class="config-action-inline-icon" icon="fa-regular fa-floppy-disk" />
+          <AButton class="settings-ant-button config-action-button success" html-type="button" :loading="isSavingConfig" :disabled="isApplyingDefaults" @click="handleSaveConfig">
+            <template #icon>
+              <AppIcon class="config-action-inline-icon" icon="fa-regular fa-floppy-disk" />
+            </template>
             {{ isSavingConfig ? '保存中' : '保存配置' }}
-          </VxeButton>
-          <VxeButton class="settings-vxe-button config-action-button primary" type="button" :disabled="isApplyingDefaults || isSavingConfig || isRuntimeCacheBusy" @click="handleResetDefaults">
-            <AppIcon class="config-action-inline-icon" icon="fa-solid fa-rotate-right" />
+          </AButton>
+          <AButton class="settings-ant-button config-action-button primary" html-type="button" :loading="isApplyingDefaults" :disabled="isSavingConfig || isRuntimeCacheBusy" @click="handleResetDefaults">
+            <template #icon>
+              <AppIcon class="config-action-inline-icon" icon="fa-solid fa-rotate-right" />
+            </template>
             {{ isApplyingDefaults ? '恢复中' : '恢复默认' }}
-          </VxeButton>
-          <VxeButton class="settings-vxe-button config-action-button orange" type="button" :disabled="isClearingCache || isRuntimeCacheBusy" @click="handleClearCache">
-            <AppIcon class="config-action-inline-icon" icon="fa-solid fa-broom" />
+          </AButton>
+          <AButton class="settings-ant-button config-action-button orange" html-type="button" :loading="isClearingCache" :disabled="isRuntimeCacheBusy" @click="handleClearCache">
+            <template #icon>
+              <AppIcon class="config-action-inline-icon" icon="fa-solid fa-broom" />
+            </template>
             {{ isClearingCache ? '清理中' : cacheCleaned ? '已清理' : '清理缓存' }}
-          </VxeButton>
-          <VxeButton class="settings-vxe-button config-action-button ghost" type="button" :disabled="isTestingProxyConnection" @click="handleTestProxyConnection">
-            <AppIcon class="config-action-inline-icon" icon="fa-solid fa-tower-broadcast" />
+          </AButton>
+          <AButton class="settings-ant-button config-action-button ghost" html-type="button" :loading="isTestingProxyConnection" @click="handleTestProxyConnection">
+            <template #icon>
+              <AppIcon class="config-action-inline-icon" icon="fa-solid fa-tower-broadcast" />
+            </template>
             {{ isTestingProxyConnection ? '测试中' : '测试代理连接' }}
-          </VxeButton>
-          <VxeButton class="settings-vxe-button config-action-button ghost" type="button" :disabled="isRunningStartupSelfCheck" @click="handleRunStartupSelfCheck">
-            <AppIcon class="config-action-inline-icon" icon="fa-solid fa-list-check" />
+          </AButton>
+          <AButton class="settings-ant-button config-action-button ghost" html-type="button" :loading="isRunningStartupSelfCheck" @click="handleRunStartupSelfCheck">
+            <template #icon>
+              <AppIcon class="config-action-inline-icon" icon="fa-solid fa-list-check" />
+            </template>
             {{ isRunningStartupSelfCheck ? '自检中' : '重新自检' }}
-          </VxeButton>
+          </AButton>
         </div>
       </section>
     </section>
-
-    <transition name="settings-toast-fade">
-      <div
-        v-if="configToast.visible"
-        :class="['settings-toast', `settings-toast--${configToast.tone}`]"
-        role="status"
-      >
-        {{ configToast.message }}
-      </div>
-    </transition>
 
     <teleport to="body">
       <transition name="mitm-cert-dialog-fade">
@@ -3357,79 +3556,57 @@ onMounted(() => {
             </dl>
 
             <footer class="mitm-cert-dialog-actions">
-              <VxeButton
+              <AButton
                 v-if="isWindowClickFlowDiagnosticRunning"
-                class="settings-vxe-button config-action-button orange"
-                type="button"
+                class="settings-ant-button config-action-button orange"
+                html-type="button"
                 @click="stopActiveWindowClickFlowDiagnostic"
               >
                 立即停止
-              </VxeButton>
-              <VxeButton
-                class="settings-vxe-button config-action-button primary"
-                type="button"
+              </AButton>
+              <AButton
+                class="settings-ant-button config-action-button primary"
+                html-type="button"
                 @click="closeDiagnosticResultDialog"
               >
                 知道了
-              </VxeButton>
+              </AButton>
             </footer>
           </section>
         </div>
       </transition>
     </teleport>
 
-    <teleport to="body">
-      <transition name="mitm-cert-dialog-fade">
-        <div
-          v-if="resetDefaultsDialogVisible"
-          class="mitm-cert-dialog-backdrop reset-defaults-dialog-backdrop"
-          role="presentation"
-          @click.self="closeResetDefaultsDialog"
-        >
-          <section
-            class="diagnostic-result-dialog reset-defaults-dialog"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="reset-defaults-dialog-title"
-          >
-            <header class="diagnostic-result-dialog-header">
-              <span class="diagnostic-result-dialog-icon reset-defaults-dialog-icon" aria-hidden="true">
-                <AppIcon icon="fa-solid fa-rotate-right" />
-              </span>
-              <div>
-                <h3 id="reset-defaults-dialog-title">恢复系统默认配置</h3>
-                <p>确认后将使用 src/config/system.yaml 覆盖 data/custom.yaml。</p>
-              </div>
-            </header>
-
-            <div class="reset-defaults-dialog-notice">
-              <strong>当前自定义配置会先备份</strong>
-              <span>备份文件保存为 data/custom.yaml.bak，恢复完成后页面将立即同步系统默认值。</span>
-            </div>
-
-            <footer class="mitm-cert-dialog-actions">
-              <VxeButton
-                class="settings-vxe-button config-action-button ghost"
-                type="button"
-                :disabled="isApplyingDefaults"
-                @click="closeResetDefaultsDialog"
-              >
-                取消
-              </VxeButton>
-              <VxeButton
-                class="settings-vxe-button config-action-button orange"
-                type="button"
-                :disabled="isApplyingDefaults"
-                @click="confirmResetDefaults"
-              >
-                <AppIcon icon="fa-solid fa-rotate-right" />
-                {{ isApplyingDefaults ? '恢复中' : '确认恢复' }}
-              </VxeButton>
-            </footer>
-          </section>
+    <AModal
+      v-model:open="resetDefaultsDialogVisible"
+      class="reset-defaults-modal"
+      title="恢复系统默认配置"
+      centered
+      ok-text="确认恢复"
+      cancel-text="取消"
+      :confirm-loading="isApplyingDefaults"
+      :closable="!isApplyingDefaults"
+      :mask-closable="!isApplyingDefaults"
+      :cancel-button-props="{ disabled: isApplyingDefaults }"
+      @ok="confirmResetDefaults"
+      @cancel="closeResetDefaultsDialog"
+    >
+      <div class="reset-defaults-modal-content">
+        <div class="diagnostic-result-dialog-header">
+          <span class="diagnostic-result-dialog-icon reset-defaults-dialog-icon" aria-hidden="true">
+            <AppIcon icon="fa-solid fa-rotate-right" />
+          </span>
+          <div>
+            <p>确认后将使用 src/config/system.yaml 覆盖 data/custom.yaml。</p>
+          </div>
         </div>
-      </transition>
-    </teleport>
+
+        <div class="reset-defaults-dialog-notice">
+          <strong>当前自定义配置会先备份</strong>
+          <span>备份文件保存为 data/custom.yaml.bak，恢复完成后页面将立即同步系统默认值。</span>
+        </div>
+      </div>
+    </AModal>
 
     <teleport to="body">
       <transition name="mitm-cert-dialog-fade">
@@ -3565,34 +3742,38 @@ onMounted(() => {
             </section>
 
             <footer class="mitm-cert-dialog-actions">
-              <VxeButton
-                class="settings-vxe-button config-action-button ghost"
-                type="button"
+              <AButton
+                class="settings-ant-button config-action-button ghost"
+                html-type="button"
                 :disabled="isCaCertificateDialogBusy"
                 @click="closeMitmCertificateDialog"
               >
                 {{ caCertificateDialogCloseText }}
-              </VxeButton>
-              <VxeButton
+              </AButton>
+              <AButton
                 v-if="caCertificateDialogCanConfirmInstall"
-                class="settings-vxe-button config-action-button primary"
-                type="button"
+                class="settings-ant-button config-action-button primary"
+                html-type="button"
                 :disabled="isInstallingCaCertificate"
                 @click="confirmInstallCaCertificate"
               >
-                <AppIcon icon="fa-solid fa-certificate" />
+                <template #icon>
+                  <AppIcon icon="fa-solid fa-certificate" />
+                </template>
                 确认安装
-              </VxeButton>
-              <VxeButton
+              </AButton>
+              <AButton
                 v-if="caCertificateDialogCanConfirmDelete"
-                class="settings-vxe-button config-action-button danger"
-                type="button"
+                class="settings-ant-button config-action-button danger"
+                html-type="button"
                 :disabled="isDeletingMitmCertificates"
                 @click="handleConfirmDeleteMitmCertificates"
               >
-                <AppIcon icon="fa-solid fa-trash-can" />
+                <template #icon>
+                  <AppIcon icon="fa-solid fa-trash-can" />
+                </template>
                 确认删除
-              </VxeButton>
+              </AButton>
             </footer>
           </section>
         </div>
@@ -3979,6 +4160,41 @@ onMounted(() => {
   user-select: text;
 }
 
+.settings-range-readonly {
+  display: grid;
+  grid-template-columns: minmax(86px, 1fr) auto minmax(86px, 1fr) auto;
+  align-items: end;
+  gap: 8px;
+  width: min(360px, 100%);
+}
+
+.settings-range-readonly label {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.settings-range-readonly label > span,
+.settings-range-unit,
+.settings-range-separator {
+  color: var(--settings-muted);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.settings-range-readonly .settings-inline-input {
+  width: 100%;
+  text-align: center;
+}
+
+.settings-range-separator,
+.settings-range-unit {
+  align-self: center;
+  padding-top: 18px;
+}
+
 .settings-config-control.compact-control .settings-inline-input {
   width: 156px;
   max-width: 100%;
@@ -4099,6 +4315,49 @@ onMounted(() => {
   gap: 12px;
 }
 
+.settings-config-control.compact-control.article-detail-option-action-control {
+  grid-template-columns: max-content max-content;
+  gap: 12px;
+}
+
+.settings-config-control.compact-control.initial-content-storage-option-action-control {
+  grid-template-columns: max-content max-content max-content;
+  gap: 12px;
+}
+
+.settings-config-control.compact-control.article-detail-comments-option-action-control {
+  grid-template-columns: max-content max-content max-content;
+  gap: 12px;
+}
+
+.settings-config-control.compact-control.article-detail-offline-cache-option-action-control {
+  grid-template-columns: max-content max-content max-content;
+  align-items: center;
+  gap: 18px;
+}
+
+.article-detail-comments-option-stack {
+  display: grid;
+  gap: 4px;
+}
+
+.article-detail-offline-cache-option-stack {
+  display: grid;
+  gap: 4px;
+}
+
+.article-detail-skip-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 34px;
+  color: var(--settings-muted);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  user-select: none;
+}
+
 .window-diagnostic-scroll-step {
   display: grid;
   grid-template-columns: auto 76px;
@@ -4110,27 +4369,8 @@ onMounted(() => {
   white-space: nowrap;
 }
 
-.window-diagnostic-scroll-step input {
+.window-diagnostic-scroll-step-input {
   width: 76px;
-  height: 34px;
-  padding: 0 9px;
-  color: var(--settings-ink);
-  border: 1px solid rgba(104, 141, 181, 0.32);
-  border-radius: 6px;
-  outline: none;
-  background: var(--settings-surface, #fff);
-  font: inherit;
-  text-align: center;
-}
-
-.window-diagnostic-scroll-step input:focus {
-  border-color: var(--settings-brand);
-  box-shadow: 0 0 0 2px rgba(47, 110, 189, 0.12);
-}
-
-.window-diagnostic-scroll-step input:disabled {
-  cursor: not-allowed;
-  opacity: 0.56;
 }
 
 .settings-config-row.window-click-flow-row {
@@ -4239,7 +4479,7 @@ onMounted(() => {
   height: 38px;
 }
 
-.window-click-flow-description-line > .settings-vxe-button {
+.window-click-flow-description-line > .settings-ant-button {
   flex: 0 0 168px;
 }
 
@@ -4383,14 +4623,13 @@ onMounted(() => {
   background: #FFF1F1;
 }
 
-.diagnostic-action-grid :deep(.diagnostic-action-button .vxe-button--content) {
-  display: grid;
-  grid-template-columns: 22px minmax(0, 1fr);
+.diagnostic-action-grid :deep(.diagnostic-action-button .ant-btn-icon) {
+  display: inline-flex;
   align-items: center;
-  gap: 8px;
-  width: 100%;
-  min-width: 0;
-  justify-items: center;
+  justify-content: center;
+  width: 22px;
+  margin-inline-end: 8px;
+  line-height: 1;
 }
 
 .diagnostic-action-icon {
@@ -4593,7 +4832,7 @@ onMounted(() => {
   align-items: center;
 }
 
-.settings-vxe-control {
+.settings-ant-control {
   width: 100%;
   min-width: 0;
 }
@@ -4603,150 +4842,148 @@ onMounted(() => {
   justify-self: start;
 }
 
-.settings-page :deep(.settings-vxe-control.vxe-input),
-.settings-page :deep(.settings-vxe-control.vxe-input--readonly),
-.settings-page :deep(.settings-vxe-control.vxe-select),
-.settings-page :deep(.settings-vxe-control.vxe-date-picker),
-.settings-page :deep(.settings-vxe-control.vxe-date-range-picker) {
+.settings-page :deep(.settings-ant-control.ant-input),
+.settings-page :deep(.settings-ant-control.ant-select),
+.settings-page :deep(.settings-ant-control.ant-picker),
+.settings-page :deep(.settings-ant-number.ant-input-number) {
   width: 100%;
-  height: 38px !important;
+  height: 38px;
   color: var(--settings-ink);
   font-size: 14px;
   font-weight: 600;
 }
 
-.settings-page :deep(.settings-vxe-control.vxe-input--readonly) {
-  display: flex;
-  align-items: center;
-  padding: 0 12px;
-  overflow: hidden;
-  border: 1px solid var(--settings-line);
-  border-radius: 8px;
-  background: #ffffff;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.6);
-  line-height: 38px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.settings-page :deep(.settings-vxe-control .vxe-input--wrapper),
-.settings-page :deep(.settings-vxe-control.vxe-select),
-.settings-page :deep(.settings-vxe-control.vxe-date-picker),
-.settings-page :deep(.settings-vxe-control.vxe-date-range-picker) {
+.settings-page :deep(.settings-ant-control.ant-input),
+.settings-page :deep(.settings-ant-control.ant-select .ant-select-selector),
+.settings-page :deep(.settings-ant-control.ant-picker),
+.settings-page :deep(.settings-ant-number.ant-input-number) {
   border-color: var(--settings-line);
   border-radius: 8px;
   background: #ffffff;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.6);
 }
 
-.settings-page :deep(.settings-vxe-control .vxe-input--inner),
-.settings-page :deep(.settings-vxe-control .vxe-date-picker--inner),
-.settings-page :deep(.settings-vxe-control .vxe-date-range-picker--inner) {
+.settings-page :deep(.settings-ant-control.ant-input) {
+  padding: 0 12px;
+  line-height: 36px;
+}
+
+.settings-page :deep(.settings-ant-control.ant-input[readonly]) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: text;
+}
+
+.settings-page :deep(.settings-ant-control.ant-select .ant-select-selector) {
+  align-items: center;
+  height: 38px !important;
+  padding: 0 12px;
+}
+
+.settings-page :deep(.settings-ant-control.ant-select .ant-select-selection-item),
+.settings-page :deep(.settings-ant-control.ant-select .ant-select-selection-placeholder),
+.settings-page :deep(.settings-ant-control.ant-picker input),
+.settings-page :deep(.settings-ant-control.ant-picker .ant-picker-input > input),
+.settings-page :deep(.settings-ant-control.ant-picker .ant-picker-separator),
+.settings-page :deep(.settings-ant-control.ant-picker .ant-picker-suffix),
+.settings-page :deep(.settings-ant-control.ant-picker .ant-picker-clear) {
   color: var(--settings-ink);
+  font-size: 14px;
   font-weight: 600;
 }
 
-.settings-page :deep(.window-click-flow-date-picker .vxe-date-picker--prefix),
-.settings-page :deep(.window-click-flow-date-picker .vxe-date-picker--suffix),
-.settings-page :deep(.window-click-flow-date-picker .vxe-date-picker--inner) {
-  background: transparent;
+.settings-page :deep(.settings-ant-control.ant-picker input::placeholder),
+.settings-page :deep(.settings-ant-control.ant-select .ant-select-selection-placeholder) {
+  color: rgba(21, 56, 111, 0.55);
 }
 
-.settings-page :deep(.window-click-flow-date-range-picker .vxe-date-range-picker--prefix),
-.settings-page :deep(.window-click-flow-date-range-picker .vxe-date-range-picker--suffix),
-.settings-page :deep(.window-click-flow-date-range-picker .vxe-date-range-picker--inner) {
-  background: transparent;
-}
-
-.settings-page :deep(.window-click-flow-date-range-picker .vxe-date-range-picker--inner) {
+.settings-page :deep(.window-click-flow-date-range-picker.ant-picker .ant-picker-input > input) {
   text-align: center;
 }
 
-:global(.window-click-flow-date-picker-panel.vxe-date-picker--panel),
-:global(.window-click-flow-date-range-picker-panel.vxe-date-range-picker--panel) {
+:global(.settings-select-panel),
+:global(.window-click-flow-date-picker-panel .ant-picker-panel-container),
+:global(.window-click-flow-date-range-picker-panel .ant-picker-panel-container) {
   color: var(--ink);
   font-family: 'Microsoft YaHei', 'PingFang SC', 'Segoe UI', system-ui, sans-serif;
   font-size: 14px;
 }
 
-.settings-config-control.compact-control :deep(.settings-vxe-control.vxe-input),
-.settings-config-control.compact-control :deep(.settings-vxe-control.vxe-select) {
+.settings-config-control.compact-control :deep(.settings-ant-control.ant-input),
+.settings-config-control.compact-control :deep(.settings-ant-control.ant-select) {
   width: min(180px, 100%);
 }
 
-.proxy-number-input {
+.proxy-number-input,
+.settings-field-stepper,
+.window-click-flow-stepper {
   width: 154px;
   justify-self: end;
 }
 
-.settings-number-stepper {
-  display: grid;
-  grid-template-columns: 36px minmax(0, 1fr) 36px;
+.settings-page :deep(.settings-ant-number.ant-input-number) {
   min-width: 148px;
   max-width: 244px;
-  height: 40px;
-  border: 1px solid var(--settings-line);
+  border-color: var(--settings-line);
   border-radius: 8px;
   background: #ffffff;
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.84),
     0 2px 6px rgba(0, 114, 239, 0.06);
-  overflow: hidden;
 }
 
-.settings-number-stepper button,
-.settings-number-stepper input {
-  min-width: 0;
-  border: 0;
+.settings-page :deep(.settings-ant-number .ant-input-number-input-wrap) {
+  height: 100%;
+}
+
+.settings-page :deep(.settings-ant-number .ant-input-number-input) {
+  height: 36px;
   color: var(--settings-ink);
-  background: transparent;
+  font-size: 14px;
+  font-weight: 600;
   text-align: center;
-  font: inherit;
 }
 
-.settings-number-stepper button {
-  display: grid;
-  place-items: center;
-  width: 36px;
+.settings-page :deep(.settings-ant-number .ant-input-number-handler-wrap) {
+  opacity: 1;
+  border-start-end-radius: 8px;
+  border-end-end-radius: 8px;
+}
+
+.settings-page :deep(.settings-ant-number .ant-input-number-handler) {
   color: var(--settings-muted);
-  font-size: 18px;
-  font-weight: 600;
-  cursor: pointer;
-  transition:
-    color 160ms ease,
-    background-color 160ms ease;
 }
 
-.settings-number-stepper button:hover {
+.settings-page :deep(.settings-ant-number .ant-input-number-handler:hover) {
   color: var(--settings-action-ink);
-  background: var(--settings-action-tint);
 }
 
-.settings-number-stepper input {
-  width: 100%;
-  border-left: 1px solid var(--settings-line);
-  border-right: 1px solid var(--settings-line);
-  color: var(--settings-ink);
-  font-weight: 600;
-  outline: 0;
-}
-
-.settings-number-stepper input::-webkit-outer-spin-button,
-.settings-number-stepper input::-webkit-inner-spin-button {
-  margin: 0;
-  appearance: none;
-  -webkit-appearance: none;
-}
-
-.settings-vxe-switch {
+.settings-ant-switch {
   flex-shrink: 0;
 }
 
-.settings-page :deep(.settings-vxe-switch.vxe-switch.is--on) {
-  --vxe-ui-switch-open-background-color: var(--settings-action);
+.settings-page :deep(.settings-ant-switch.ant-switch-checked) {
+  background: var(--settings-action);
 }
 
-.settings-vxe-button {
+.settings-page :deep(.article-detail-skip-option.ant-checkbox-wrapper) {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 30px;
+  margin-inline-end: 0;
+  color: var(--settings-ink);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.settings-page :deep(.article-detail-skip-option.ant-checkbox-wrapper .ant-checkbox + span) {
+  padding-inline-start: 0;
+  padding-inline-end: 0;
+}
+
+.settings-ant-button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -4768,68 +5005,68 @@ onMounted(() => {
     background-color 160ms ease;
 }
 
-.settings-page :deep(.settings-vxe-button .vxe-button--content) {
+.settings-page :deep(.settings-ant-button .ant-btn-icon),
+.settings-page :deep(.settings-ant-button .ant-btn-icon > *) {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
 }
 
-.settings-vxe-button.primary {
+.settings-ant-button.primary {
   color: #ffffff;
   border-color: var(--settings-action);
   background: var(--settings-action);
 }
 
-.settings-vxe-button.success {
+.settings-ant-button.success {
   color: #ffffff;
   border-color: var(--settings-action);
   background: var(--settings-action);
 }
 
-.settings-vxe-button.orange {
+.settings-ant-button.orange {
   color: #946012;
   border-color: rgba(215, 154, 48, 0.36);
   background: #FFF8EA;
 }
 
-.settings-vxe-button.danger {
+.settings-ant-button.danger {
   color: #ffffff;
   border-color: rgba(194, 59, 55, 0.72);
   background: #C9424D;
 }
 
-.settings-vxe-button.ghost {
+.settings-ant-button.ghost {
   color: var(--settings-action-ink);
   background: var(--settings-action-tint);
 }
 
-.settings-vxe-button:not(.is--disabled):hover {
+.settings-ant-button:not(:disabled):hover {
   color: var(--settings-action-ink);
   border-color: rgba(74, 174, 159, 0.5);
   background: var(--settings-action-soft);
   box-shadow: none;
 }
 
-.settings-vxe-button.primary:not(.is--disabled):hover {
+.settings-ant-button.primary:not(:disabled):hover {
   color: #ffffff;
   border-color: var(--settings-action-hover);
   background: var(--settings-action-hover);
 }
 
-.settings-vxe-button.success:not(.is--disabled):hover {
+.settings-ant-button.success:not(:disabled):hover {
   color: #ffffff;
   border-color: var(--settings-action-hover);
   background: var(--settings-action-hover);
 }
 
-.settings-vxe-button.orange:not(.is--disabled):hover {
+.settings-ant-button.orange:not(:disabled):hover {
   color: #7A4D0D;
   border-color: rgba(215, 154, 48, 0.48);
   background: #FFF3D5;
 }
 
-.settings-vxe-button.danger:not(.is--disabled):hover {
+.settings-ant-button.danger:not(:disabled):hover {
   color: #ffffff;
   border-color: rgba(180, 35, 46, 0.82);
   background: #B4232E;
@@ -5159,7 +5396,6 @@ onMounted(() => {
   min-width: 0;
   height: 100% !important;
   min-height: 56px;
-  margin-left: 0 !important;
   padding: 6px 14px;
   color: var(--config-action-color);
   border-color: var(--config-action-border);
@@ -5175,16 +5411,16 @@ onMounted(() => {
     background-color 180ms ease;
 }
 
-.config-action-grid :deep(.config-action-button .vxe-button--content) {
-  display: flex;
+.config-action-grid :deep(.config-action-button .ant-btn-icon+span),
+.config-action-grid :deep(.config-action-button span+.ant-btn-icon) {
+  margin-inline-start: 9px;
+}
+
+.config-action-grid :deep(.config-action-button .ant-btn-icon) {
+  display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 9px;
-  width: 100%;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  flex: 0 0 auto;
 }
 
 .config-action-inline-icon {
@@ -5249,7 +5485,7 @@ onMounted(() => {
   --config-action-shadow-color: transparent;
 }
 
-.config-action-grid :deep(.vxe-button.type--button.config-action-button:not(.is--disabled):hover) {
+.config-action-grid :deep(.ant-btn.config-action-button:not(:disabled):hover) {
   transform: none;
   color: var(--config-action-hover-color);
   border-color: var(--config-action-hover-border);
@@ -5257,7 +5493,7 @@ onMounted(() => {
   box-shadow: none;
 }
 
-.config-action-grid :deep(.vxe-button.type--button.config-action-button:not(.is--disabled):active) {
+.config-action-grid :deep(.ant-btn.config-action-button:not(:disabled):active) {
   transform: translateY(0);
   color: var(--config-action-hover-color);
   border-color: var(--config-action-hover-border);
@@ -5266,18 +5502,18 @@ onMounted(() => {
   filter: none;
 }
 
-.config-action-grid :deep(.vxe-button.type--button.config-action-button:focus) {
+.config-action-grid :deep(.ant-btn.config-action-button:focus) {
   color: var(--config-action-color);
   border-color: var(--config-action-border);
   background: var(--config-action-bg);
 }
 
-.config-action-grid :deep(.vxe-button.type--button.config-action-button:focus-visible) {
+.config-action-grid :deep(.ant-btn.config-action-button:focus-visible) {
   outline: 3px solid rgba(53, 127, 217, 0.24);
   outline-offset: 2px;
 }
 
-.config-action-grid :deep(.vxe-button.type--button.config-action-button.is--disabled) {
+.config-action-grid :deep(.ant-btn.config-action-button:disabled) {
   transform: none;
   color: var(--config-action-disabled-color);
   opacity: 0.58;
@@ -5381,58 +5617,6 @@ onMounted(() => {
   color: var(--green);
 }
 
-.settings-toast {
-  position: fixed;
-  right: 24px;
-  bottom: 24px;
-  z-index: 80;
-  display: inline-flex;
-  align-items: center;
-  max-width: min(360px, calc(100vw - 48px));
-  min-height: 38px;
-  padding: 0 14px;
-  border: 1px solid rgba(104, 141, 181, 0.24);
-  border-radius: 8px;
-  color: var(--ink-strong);
-  background: rgba(251, 253, 255, 0.94);
-  box-shadow: 0 8px 18px rgba(35, 69, 111, 0.14);
-  font-size: 13px;
-  font-weight: 600;
-  line-height: 1.35;
-  text-align: left;
-}
-
-.settings-toast--success {
-  color: #0f684f;
-  border-color: rgba(31, 143, 105, 0.24);
-  background: rgba(223, 243, 232, 0.96);
-}
-
-.settings-toast--warning {
-  color: #9a5415;
-  border-color: rgba(223, 122, 53, 0.28);
-  background: rgba(250, 235, 218, 0.96);
-}
-
-.settings-toast--error {
-  color: #a93634;
-  border-color: rgba(217, 65, 63, 0.28);
-  background: rgba(253, 226, 224, 0.96);
-}
-
-.settings-toast-fade-enter-active,
-.settings-toast-fade-leave-active {
-  transition:
-    opacity 160ms ease,
-    transform 160ms ease;
-}
-
-.settings-toast-fade-enter-from,
-.settings-toast-fade-leave-to {
-  opacity: 0;
-  transform: translateY(8px);
-}
-
 @media (prefers-reduced-motion: reduce) {
   .config-action-grid :deep(.config-action-button) {
     transition: none;
@@ -5445,15 +5629,6 @@ onMounted(() => {
     filter: none;
   }
 
-  .settings-toast-fade-enter-active,
-  .settings-toast-fade-leave-active {
-    transition: opacity 80ms ease;
-  }
-
-  .settings-toast-fade-enter-from,
-.settings-toast-fade-leave-to {
-  transform: none;
-}
 }
 
 .mitm-cert-dialog-backdrop {
@@ -5927,7 +6102,7 @@ onMounted(() => {
   border-top: 1px solid #D7E3F0;
 }
 
-.diagnostic-result-dialog :deep(.vxe-button.type--button.config-action-button.primary) {
+.diagnostic-result-dialog :deep(.ant-btn.config-action-button.primary) {
   --config-action-color: #ffffff;
   --config-action-border: #357FD9;
   --config-action-bg: #357FD9;
@@ -5943,13 +6118,13 @@ onMounted(() => {
   opacity: 1;
 }
 
-.diagnostic-result-dialog :deep(.vxe-button.type--button.config-action-button.primary:not(.is--disabled):hover) {
+.diagnostic-result-dialog :deep(.ant-btn.config-action-button.primary:not(:disabled):hover) {
   color: #ffffff;
   border-color: #2267B8;
   background: #2267B8;
 }
 
-.diagnostic-result-dialog :deep(.vxe-button.type--button.config-action-button.primary:not(.is--disabled):active) {
+.diagnostic-result-dialog :deep(.ant-btn.config-action-button.primary:not(:disabled):active) {
   color: #ffffff;
   border-color: #1D579C;
   background: #1D579C;
@@ -6083,98 +6258,99 @@ onMounted(() => {
 }
 
 :global(.collector-app.dark) .settings-inline-input,
-:global(.collector-app.dark) .settings-page :deep(.settings-vxe-control.vxe-input--readonly),
-:global(.collector-app.dark) .settings-page :deep(.settings-vxe-control .vxe-input--wrapper),
-:global(.collector-app.dark) .settings-page :deep(.settings-vxe-control.vxe-select),
-:global(.collector-app.dark) .settings-page :deep(.settings-vxe-control.vxe-date-picker),
-:global(.collector-app.dark) .settings-page :deep(.settings-vxe-control.vxe-date-range-picker),
-:global(.collector-app.dark) .settings-number-stepper {
+:global(.collector-app.dark) .settings-page :deep(.settings-ant-control.ant-input),
+:global(.collector-app.dark) .settings-page :deep(.settings-ant-control.ant-select .ant-select-selector),
+:global(.collector-app.dark) .settings-page :deep(.settings-ant-control.ant-picker),
+:global(.collector-app.dark) .settings-page :deep(.settings-ant-number.ant-input-number) {
   color: #cbd8ea;
   border-color: rgba(128, 153, 188, 0.2);
   background: rgba(15, 24, 39, 0.62);
   box-shadow: inset 0 1px 0 rgba(214, 226, 244, 0.045);
 }
 
-:global(.collector-app.dark) .settings-page :deep(.settings-vxe-control .vxe-input--inner),
-:global(.collector-app.dark) .settings-page :deep(.settings-vxe-control .vxe-date-picker--inner),
-:global(.collector-app.dark) .settings-page :deep(.settings-vxe-control .vxe-date-picker--prefix),
-:global(.collector-app.dark) .settings-page :deep(.settings-vxe-control .vxe-date-picker--suffix),
-:global(.collector-app.dark) .settings-page :deep(.settings-vxe-control .vxe-date-range-picker--inner),
-:global(.collector-app.dark) .settings-page :deep(.settings-vxe-control .vxe-date-range-picker--prefix),
-:global(.collector-app.dark) .settings-page :deep(.settings-vxe-control .vxe-date-range-picker--suffix),
-:global(.collector-app.dark) .settings-number-stepper input,
+:global(.collector-app.dark) .settings-page :deep(.settings-ant-control.ant-select .ant-select-selection-item),
+:global(.collector-app.dark) .settings-page :deep(.settings-ant-control.ant-select .ant-select-selection-placeholder),
+:global(.collector-app.dark) .settings-page :deep(.settings-ant-control.ant-picker input),
+:global(.collector-app.dark) .settings-page :deep(.settings-ant-control.ant-picker .ant-picker-input > input),
+:global(.collector-app.dark) .settings-page :deep(.settings-ant-control.ant-picker .ant-picker-separator),
+:global(.collector-app.dark) .settings-page :deep(.settings-ant-control.ant-picker .ant-picker-suffix),
+:global(.collector-app.dark) .settings-page :deep(.settings-ant-control.ant-picker .ant-picker-clear),
+:global(.collector-app.dark) .settings-page :deep(.settings-ant-number .ant-input-number-input),
 :global(.collector-app.dark) .settings-inline-input[readonly] {
   color: #dce7f5;
 }
 
-:global(.collector-app.dark) .settings-number-stepper button {
-  color: #9db1cc;
+:global(.collector-app.dark) .settings-page :deep(.settings-ant-number .ant-input-number-handler-wrap) {
   background: rgba(28, 43, 65, 0.46);
 }
 
-:global(.collector-app.dark) .settings-number-stepper button:hover {
+:global(.collector-app.dark) .settings-page :deep(.settings-ant-number .ant-input-number-handler) {
+  color: #9db1cc;
+  border-color: rgba(128, 153, 188, 0.2);
+}
+
+:global(.collector-app.dark) .settings-page :deep(.settings-ant-number .ant-input-number-handler:hover) {
   color: #dceaff;
-  background: rgba(36, 56, 84, 0.48);
 }
 
 :global(.collector-app.dark) .settings-row-button,
-:global(.collector-app.dark) .settings-vxe-button {
+:global(.collector-app.dark) .settings-ant-button {
   color: #BFE9E3;
   border-color: rgba(112, 198, 186, 0.32);
   background: rgba(35, 70, 65, 0.62);
   box-shadow: none;
 }
 
-:global(.collector-app.dark) .settings-vxe-button.primary {
+:global(.collector-app.dark) .settings-ant-button.primary {
   color: #f0f6ff;
   border-color: #2F8D82;
   background: #2F8D82;
 }
 
-:global(.collector-app.dark) .settings-vxe-button.success {
+:global(.collector-app.dark) .settings-ant-button.success {
   color: #f0f6ff;
   border-color: #2F8D82;
   background: #2F8D82;
 }
 
-:global(.collector-app.dark) .settings-vxe-button.orange {
+:global(.collector-app.dark) .settings-ant-button.orange {
   color: #f7d99a;
   border-color: rgba(216, 180, 95, 0.26);
   background: rgba(69, 50, 31, 0.72);
 }
 
-:global(.collector-app.dark) .settings-vxe-button.danger {
+:global(.collector-app.dark) .settings-ant-button.danger {
   color: #fff1f0;
   border-color: rgba(181, 83, 84, 0.34);
   background: rgba(105, 64, 70, 0.8);
 }
 
-:global(.collector-app.dark) .settings-vxe-button.ghost {
+:global(.collector-app.dark) .settings-ant-button.ghost {
   color: #BFE9E3;
   background: rgba(35, 70, 65, 0.62);
 }
 
-:global(.collector-app.dark) .settings-vxe-button:not(.is--disabled):hover {
+:global(.collector-app.dark) .settings-ant-button:not(:disabled):hover {
   color: #BFE9E3;
   border-color: rgba(112, 198, 186, 0.5);
   background: rgba(43, 86, 79, 0.72);
   box-shadow: none;
 }
 
-:global(.collector-app.dark) .settings-vxe-button.primary:not(.is--disabled):hover,
-:global(.collector-app.dark) .settings-vxe-button.success:not(.is--disabled):hover {
+:global(.collector-app.dark) .settings-ant-button.primary:not(:disabled):hover,
+:global(.collector-app.dark) .settings-ant-button.success:not(:disabled):hover {
   color: #f0f6ff;
   border-color: #3B9C90;
   background: #3B9C90;
 }
 
-:global(.collector-app.dark) .settings-vxe-button.orange:not(.is--disabled):hover {
+:global(.collector-app.dark) .settings-ant-button.orange:not(:disabled):hover {
   color: #ffe4aa;
   border-color: rgba(216, 180, 95, 0.38);
   background: rgba(84, 61, 36, 0.82);
 }
 
-:global(.collector-app.dark) .settings-vxe-button.danger:not(.is--disabled):hover {
+:global(.collector-app.dark) .settings-ant-button.danger:not(:disabled):hover {
   color: #fff1f0;
   border-color: rgba(181, 83, 84, 0.44);
   background: rgba(116, 70, 75, 0.86);
@@ -6495,7 +6671,7 @@ onMounted(() => {
   border-top-color: #2E405A;
 }
 
-:global(.collector-app.dark) .diagnostic-result-dialog :deep(.vxe-button.type--button.config-action-button.primary) {
+:global(.collector-app.dark) .diagnostic-result-dialog :deep(.ant-btn.config-action-button.primary) {
   --config-action-color: #ffffff;
   --config-action-border: #3D7FCC;
   --config-action-bg: #3D7FCC;
@@ -6509,7 +6685,7 @@ onMounted(() => {
   opacity: 1;
 }
 
-:global(.collector-app.dark) .diagnostic-result-dialog :deep(.vxe-button.type--button.config-action-button.primary:not(.is--disabled):hover) {
+:global(.collector-app.dark) .diagnostic-result-dialog :deep(.ant-btn.config-action-button.primary:not(:disabled):hover) {
   color: #ffffff;
   border-color: #4B8DDB;
   background: #4B8DDB;

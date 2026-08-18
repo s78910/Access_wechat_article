@@ -9,9 +9,9 @@ const pageSource = readFileSync(resolve(currentDir, '../pages/HistoryPage.vue'),
 const apiSource = readFileSync(resolve(currentDir, '../bridge/pythonApi.ts'), 'utf8')
 
 test('采集历史状态筛选使用数据库允许的 success 和 failed', () => {
-  assert.match(pageSource, /label:\s*'成功',\s*value:\s*'success'/)
-  assert.match(pageSource, /label:\s*'失败',\s*value:\s*'failed'/)
-  assert.doesNotMatch(pageSource, /label:\s*'成功',\s*value:\s*'saved'/)
+  assert.match(pageSource, /\[HISTORY_FILTER_STATUS_SUCCESS_KEY\]:\s*'success'/)
+  assert.match(pageSource, /\[HISTORY_FILTER_STATUS_FAILED_KEY\]:\s*'failed'/)
+  assert.doesNotMatch(pageSource, /\[HISTORY_FILTER_STATUS_SUCCESS_KEY\]:\s*'saved'/)
 })
 
 test('顶部指标绑定历史任务、成功率、yyyy-mm-dd 最近日期和去重文章数', () => {
@@ -63,7 +63,7 @@ test('关键词查询使用 250ms 防抖并忽略过期响应', () => {
 })
 
 test('统计加载失败被单独捕获，不中断列表和候选加载', () => {
-  const summaryFunction = pageSource.match(
+  const summaryFunction = pageSource.replace(/\r\n/g, '\n').match(
     /async function loadHistorySummary\(\)[\s\S]*?\n\}\n\nasync function loadHistorySuggestions/,
   )
 

@@ -170,15 +170,67 @@ test('顶部状态块和工具按钮使用纸质资料标签 surface，避免强
 })
 
 test('首页局部控件使用同一套轻纸质 surface，不再保留局部玻璃模糊', () => {
-  const numberStepperRule = extractRule(appVue, '.number-stepper')
+  const taskCountInputRule = extractRule(appVue, '.task-count-input')
   const downloadOptionRule = extractRule(appVue, '.download-option')
   const noticeRule = extractRule(appVue, '.notice')
   const envItemRule = extractRule(appVue, '.env-item')
 
-  for (const rule of [numberStepperRule, downloadOptionRule, noticeRule, envItemRule]) {
+  for (const rule of [taskCountInputRule, downloadOptionRule, noticeRule, envItemRule]) {
     assert.match(rule, /box-shadow:\s*var\(--paper-shadow-sm\);/)
     assert.doesNotMatch(rule, /backdrop-filter|linear-gradient\(135deg/)
   }
+})
+
+test('使用须知的操作说明和合规提示使用 Ant Design Card Meta 展示', () => {
+  const rightColumnRule = extractRule(appVue, '.right-column')
+  const guideCardRule = extractRule(appVue, '.guide-card')
+  const envGridRule = extractRule(appVue, '.env-grid')
+  const envItemRule = extractRule(appVue, '.env-item')
+  const envHoverRule = extractRule(appVue, '.env-item.ant-card-hoverable:hover')
+  const envCardBodyRule = extractRule(appVue, '.env-item :deep(.ant-card-body)')
+  const envItemContentRule = extractRule(appVue, '.env-item-content')
+  const noticeInfoRule = extractRule(appVue, '.notice.info')
+  const noticeHoverRule = extractRule(appVue, '.notice.ant-card-hoverable:hover')
+  const noticeMetaTitleRule = extractRule(appVue, '.notice :deep(.ant-card-meta-title)')
+  const noticeMetaDescriptionRule = extractRule(appVue, '.notice :deep(.ant-card-meta-description)')
+
+  assert.match(appVue, /<ACard\s+class="notice info"[^>]*hoverable[\s\S]*?<ACardMeta title="操作说明">[\s\S]*?<template #description>[\s\S]*?usageTips/)
+  assert.match(appVue, /<ACard\s+class="notice warning"[^>]*hoverable[\s\S]*?<ACardMeta title="合规提示">[\s\S]*?<template #description>[\s\S]*?complianceTips/)
+  assert.match(appVue, /<ACard\s+v-for="item in envItems"[\s\S]*?class="env-item"[\s\S]*?:bordered="false"[\s\S]*hoverable[\s\S]*?<div class="env-item-content">/)
+  assert.doesNotMatch(appVue, /<div class="notice info">[\s\S]*?<h3>操作说明<\/h3>/)
+  assert.doesNotMatch(appVue, /<div class="notice warning">[\s\S]*?<h3>合规提示<\/h3>/)
+  assert.match(rightColumnRule, /grid-template-rows:\s*170px 344px 212px;/)
+  assert.match(guideCardRule, /gap:\s*6px;/)
+  assert.match(noticeInfoRule, /margin-top:\s*0;/)
+  assert.match(envGridRule, /gap:\s*10px 8px;/)
+  assert.match(envGridRule, /margin-top:\s*10px;/)
+  assert.match(envItemRule, /min-height:\s*62px;/)
+  assert.match(envItemRule, /transition:[\s\S]*?transform 180ms ease/)
+  assert.match(envHoverRule, /transform:\s*translateY\(-2px\);/)
+  assert.match(envHoverRule, /box-shadow:[\s\S]*?0 5px 14px rgba\(28, 55, 82, 0\.12\)/)
+  assert.match(envCardBodyRule, /align-items:\s*center;/)
+  assert.match(envCardBodyRule, /justify-content:\s*flex-start;/)
+  assert.match(envItemContentRule, /justify-items:\s*start;/)
+  assert.match(envItemContentRule, /text-align:\s*left;/)
+  assert.match(noticeHoverRule, /transform:\s*translateY\(-2px\);/)
+  assert.match(noticeHoverRule, /box-shadow:[\s\S]*?0 5px 14px rgba\(28, 55, 82, 0\.12\)/)
+  assert.match(noticeMetaTitleRule, /font-weight:\s*500;/)
+  assert.match(noticeMetaDescriptionRule, /color:\s*inherit;/)
+})
+
+test('home page action status stats and log controls use Ant Design Vue components', () => {
+  assert.match(appVue, /<AButton\s+[\s\S]*?class="run-button"[\s\S]*?html-type="button"[\s\S]*?<AppIcon icon="fa-solid fa-play"/)
+  assert.match(appVue, /<AButton\s+[\s\S]*?class="stop-button"[\s\S]*?html-type="button"[\s\S]*?<AppIcon icon="fa-solid fa-stop"/)
+  assert.match(appVue, /<ATag\s+[\s\S]*?:class="\['status-pill', item\.tone\]"/)
+  assert.match(appVue, /<AProgress\s+[\s\S]*?class="progress-line"/)
+  assert.match(appVue, /<AProgress\s+[\s\S]*?:stroke-color="progressStrokeColor"/)
+  assert.match(appVue, /<AProgress\s+[\s\S]*?:status="progressLineStatus"/)
+  assert.match(appVue, /<ACard\s+v-for="item in stats"[\s\S]*?:class="\['stat-item', item\.tone\]"[\s\S]*?<AStatistic/)
+  assert.match(appVue, /<ASegmented\s+[\s\S]*?class="log-tabs"/)
+  assert.match(appVue, /<AButton\s+class="log-folder-button"[\s\S]*?Open Log Folder/)
+  assert.doesNotMatch(appVue, /<div class="log-tabs"[\s\S]*?<button/)
+  assert.doesNotMatch(appVue, /<button[^>]*class="run-button"/)
+  assert.doesNotMatch(appVue, /<button[^>]*class="stop-button"/)
 })
 
 test('右侧信息卡片标题图标使用统一视觉尺寸', () => {
@@ -216,6 +268,7 @@ test('运行日志使用独立阅读底色，纸质纹理和插画不进入文�
   const logCornerRule = extractRule(appVue, '.log-corner-image')
 
   assert.match(logHeaderRule, /padding-bottom:\s*8px;/)
+  assert.match(logTableRule, /height:\s*200px;/)
   assert.match(logTableRule, /margin-top:\s*8px;/)
   assert.match(logTableRule, /background:\s*rgba\(252, 254, 255, 0\.56\);/)
   assert.match(logTableRule, /border:\s*1px solid rgba\(104, 141, 181, 0\.2\);/)

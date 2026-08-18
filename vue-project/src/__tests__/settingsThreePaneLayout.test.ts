@@ -155,10 +155,25 @@ test('系统配置页关键文本降低字重，避免中文标题和说明挤�
   assert.match(settingsPageSource, /\.settings-config-copy strong \{[\s\S]*?font-weight:\s*600;/)
   assert.match(settingsPageSource, /\.settings-config-copy small \{[\s\S]*?font-weight:\s*500;/)
   assert.match(settingsPageSource, /\.settings-config-keyline \{[\s\S]*?font-weight:\s*600;/)
-  assert.match(settingsPageSource, /\.settings-number-stepper button \{[\s\S]*?font-weight:\s*600;/)
-  assert.match(settingsPageSource, /\.settings-number-stepper input \{[\s\S]*?font-weight:\s*600;/)
-  assert.match(settingsPageSource, /\.settings-vxe-button \{[\s\S]*?font-weight:\s*600;/)
+  assert.match(settingsPageSource, /\.settings-page :deep\(\.settings-ant-number \.ant-input-number-input\) \{[\s\S]*?font-weight:\s*600;/)
+  assert.match(settingsPageSource, /\.settings-ant-button \{[\s\S]*?font-weight:\s*600;/)
   assert.match(settingsPageSource, /\.config-action-grid :deep\(\.config-action-button\) \{[\s\S]*?font-weight:\s*600;/)
+})
+
+test('系统配置页表单控件统一迁移到 Ant Design Vue，不再保留 VXE 和手写数字步进器', () => {
+  assert.match(settingsPageSource, /<ASelect\b[\s\S]*?class="settings-ant-control"/)
+  assert.match(settingsPageSource, /<AInput\b[\s\S]*?class="settings-ant-control"/)
+  assert.match(settingsPageSource, /<ASwitch\b[\s\S]*?class="settings-ant-switch"/)
+  assert.match(settingsPageSource, /<AInputNumber\b[\s\S]*?class="settings-ant-number[^"]*"/)
+  assert.match(settingsPageSource, /<ACheckbox\b[\s\S]*?class="article-detail-skip-option"/)
+  assert.match(settingsPageSource, /function handleWindowDiagnosticScrollStepsNumberChange/)
+  assert.match(settingsPageSource, /\.settings-page :deep\(\.settings-ant-control\.ant-select \.ant-select-selector\)/)
+  assert.match(settingsPageSource, /\.settings-page :deep\(\.settings-ant-number\.ant-input-number\)/)
+  assert.match(settingsPageSource, /\.settings-page :deep\(\.article-detail-skip-option\.ant-checkbox-wrapper\)/)
+  assert.match(settingsPageSource, /\.settings-page :deep\(\.settings-ant-switch\.ant-switch-checked\)/)
+
+  assert.doesNotMatch(settingsPageSource, /<Vxe(?:Select|Input|Switch|DatePicker|DateRangePicker)\b/)
+  assert.doesNotMatch(settingsPageSource, /settings-vxe-control|settings-vxe-switch|settings-number-stepper/)
 })
 
 test('快速操作按钮使用 2x2 居中文本布局并清除默认错位间距', () => {
@@ -168,7 +183,7 @@ test('快速操作按钮使用 2x2 居中文本布局并清除默认错位间距
   )
   assert.match(
     settingsPageSource,
-    /\.config-action-grid :deep\(\.config-action-button\) \{[\s\S]*?justify-content:\s*center;[\s\S]*?margin-left:\s*0 !important;[\s\S]*?text-align:\s*center;/,
+    /\.config-action-grid :deep\(\.config-action-button\) \{[\s\S]*?justify-content:\s*center;[\s\S]*?text-align:\s*center;/,
   )
   assert.match(settingsPageSource, /class="config-action-inline-icon"/)
   assert.match(settingsPageSource, /class="config-action-heading-icon"[\s\S]*?fa-solid fa-file-shield/)
@@ -187,10 +202,10 @@ test('快速操作按钮使用 2x2 居中文本布局并清除默认错位间距
   assert.match(settingsPageSource, /\.config-action-grid \{[\s\S]*?grid-auto-rows:\s*minmax\(56px, 1fr\);/)
   assert.match(settingsPageSource, /\.config-action-grid :deep\(\.config-action-button\) \{[\s\S]*?min-height:\s*56px;/)
   const configActionBlock = settingsPageSource.match(/<section class="config-actions page-panel"[\s\S]*?<\/section>/)?.[0] ?? ''
-  assert.equal((configActionBlock.match(/class="settings-vxe-button config-action-button/g) ?? []).length, 5)
+  assert.equal((configActionBlock.match(/<AButton[\s\S]*?class="settings-ant-button config-action-button/g) ?? []).length, 5)
   assert.match(
     settingsPageSource,
-    /\.config-action-grid :deep\(\.config-action-button \.vxe-button--content\) \{[\s\S]*?gap:\s*9px;/,
+    /\.config-action-grid :deep\(\.config-action-button \.ant-btn-icon\+span\),[\s\S]*?\.config-action-grid :deep\(\.config-action-button span\+\.ant-btn-icon\) \{[\s\S]*?margin-inline-start:\s*9px;/,
   )
   assert.match(
     settingsPageSource,
@@ -263,7 +278,7 @@ test('设置详情区使用一行一块的配置表单样式', () => {
   assert.match(settingsPageSource, /class="settings-config-keyline"/)
   assert.match(settingsPageSource, /settings-config-control/)
   assert.match(settingsPageSource, /class="settings-inline-input"/)
-  assert.match(settingsPageSource, /class="settings-vxe-button settings-row-button ghost"/)
+  assert.match(settingsPageSource, /class="settings-ant-button settings-row-button ghost"/)
   assert.match(settingsPageSource, /browseLabel: '浏览'/)
   assert.match(
     settingsPageSource,
@@ -273,6 +288,20 @@ test('设置详情区使用一行一块的配置表单样式', () => {
     settingsPageSource,
     /\.diagnostic-action-grid \{[\s\S]*?grid-template-columns:\s*minmax\(0, 1fr\);/,
   )
+})
+
+test('窗口区间设置使用只读起止输入框并在说明中展示使用区间', () => {
+  assert.match(settingsPageSource, /inputType\?: 'text' \| 'number' \| 'number-stepper' \| 'switch' \| 'readonly-range'/)
+  assert.match(settingsPageSource, /type SettingsDetailRangeValue/)
+  assert.match(settingsPageSource, /class="settings-range-readonly"/)
+  assert.match(settingsPageSource, /readonly/)
+  assert.match(settingsPageSource, /article_title_poll_interval_seconds_range/)
+  assert.match(settingsPageSource, /scroll_probe_interval_seconds_range/)
+  assert.match(settingsPageSource, /date_seek_scroll_steps_range/)
+  assert.match(settingsPageSource, /使用区间/)
+  assert.match(settingsPageSource, /0\.05 秒 ~ 0\.15 秒/)
+  assert.match(settingsPageSource, /0\.1 秒 ~ 0\.4 秒/)
+  assert.match(settingsPageSource, /3 步 ~ 18 步/)
 })
 
 test('已选择二级设置时不再渲染顶部说明提示块', () => {
@@ -286,7 +315,7 @@ test('诊断工具按钮使用统一宽度、低高度圆角和主题配色', ()
   )
   assert.match(
     settingsPageSource,
-    /\.diagnostic-action-grid :deep\(\.diagnostic-action-button \.vxe-button--content\) \{[\s\S]*?grid-template-columns:\s*22px minmax\(0, 1fr\);[\s\S]*?gap:\s*8px;/,
+    /\.diagnostic-action-grid :deep\(\.diagnostic-action-button \.ant-btn-icon\) \{[\s\S]*?width:\s*22px;[\s\S]*?margin-inline-end:\s*8px;/,
   )
   assert.match(
     settingsPageSource,
@@ -398,7 +427,7 @@ test('系统配置诊断结果弹窗使用清晰的状态色和可见操作按�
   )
   assert.match(
     settingsPageSource,
-    /\.diagnostic-result-dialog :deep\(\.vxe-button\.type--button\.config-action-button\.primary\) \{[\s\S]*?--config-action-bg:\s*#357FD9;[\s\S]*?--config-action-hover-bg:\s*#2267B8;/,
+    /\.diagnostic-result-dialog :deep\(\.ant-btn\.config-action-button\.primary\) \{[\s\S]*?--config-action-bg:\s*#357FD9;[\s\S]*?--config-action-hover-bg:\s*#2267B8;/,
   )
   assert.match(
     settingsPageSource,
@@ -501,10 +530,68 @@ test('流程测试按钮使用流程名称作为标题，并用说明表达执�
   assert.doesNotMatch(flowDiagnosticsBlock, /handlePendingDiagnosticAction\('单篇文章流程'\)/)
   assert.match(flowDiagnosticsBlock, /label: '单篇文章详情流程'/)
   assert.match(flowDiagnosticsBlock, /buttonLabel: '详情获取'/)
-  assert.match(flowDiagnosticsBlock, /description: '单篇文章详情获取（包含 MITM 子进程）'/)
-  assert.match(flowDiagnosticsBlock, /label: '单篇文章全内容'/)
-  assert.match(flowDiagnosticsBlock, /buttonLabel: '详情评论'/)
+  assert.match(flowDiagnosticsBlock, /description: '激活主页窗口并读取当前可视区第一篇文章卡片'/)
+  assert.match(flowDiagnosticsBlock, /showArticleDetailSkipCollectedOption: true/)
+  assert.match(flowDiagnosticsBlock, /label: '初始内容存储测试'/)
+  assert.match(flowDiagnosticsBlock, /buttonLabel: '初始内容存储'/)
+  assert.match(flowDiagnosticsBlock, /showInitialContentStorageOptions: true/)
+  assert.match(settingsPageSource, /const articleDetailSkipCollectedRecords = ref\(false\)/)
+  assert.match(settingsPageSource, /const initialContentStorageSkipCollectedRecords = ref\(false\)/)
+  assert.match(settingsPageSource, /const initialContentStorageStoreArticleDetail = ref\(true\)/)
+  assert.match(settingsPageSource, /const articleDetailCommentsSkipCollectedRecords = ref\(false\)/)
+  assert.match(settingsPageSource, /const articleDetailCommentsStoreArticleDetail = ref\(true\)/)
+  assert.match(settingsPageSource, /const articleDetailCommentsStoreCommentInfo = ref\(true\)/)
+  assert.match(settingsPageSource, /const articleDetailOfflineCacheStateful = ref\(false\)/)
+  assert.match(settingsPageSource, /class="article-detail-skip-option"/)
+  assert.match(settingsPageSource, /v-model:checked="articleDetailSkipCollectedRecords"/)
+  assert.match(settingsPageSource, /v-model:checked="initialContentStorageSkipCollectedRecords"/)
+  assert.match(settingsPageSource, /v-model:checked="initialContentStorageStoreArticleDetail"/)
+  assert.match(settingsPageSource, /aria-label="初始内容存储文章详情"/)
+  assert.match(settingsPageSource, /storeArticleDetail: initialContentStorageStoreArticleDetail\.value/)
+  assert.match(pythonApiSource, /export type InitialContentStorageDiagnosticOptions = \{/)
+  assert.match(pythonApiSource, /skipCollectedRecords\?: boolean/)
+  assert.match(pythonApiSource, /storeArticleDetail\?: boolean/)
+  assert.match(flowDiagnosticsBlock, /label: '单篇评论存储测试'/)
+  assert.match(flowDiagnosticsBlock, /buttonLabel: '评论信息存储'/)
   assert.match(flowDiagnosticsBlock, /description: '复用初始内容存储，随后启动独立评论子进程采集评论'/)
+  assert.match(flowDiagnosticsBlock, /showArticleDetailCommentsOptions: true/)
+  assert.match(settingsPageSource, /v-model:checked="articleDetailCommentsSkipCollectedRecords"/)
+  assert.match(settingsPageSource, /v-model:checked="articleDetailCommentsStoreArticleDetail"/)
+  assert.match(settingsPageSource, /v-model:checked="articleDetailCommentsStoreCommentInfo"/)
+  assert.match(settingsPageSource, /aria-label="详情评论跳过已采集记录"/)
+  assert.match(settingsPageSource, /aria-label="详情评论存储文章详情"/)
+  assert.match(settingsPageSource, /aria-label="详情评论存储评论信息"/)
+  assert.match(settingsPageSource, /v-model:checked="articleDetailCommentsStoreArticleDetail"[\s\S]*?\n\s+disabled\n[\s\S]*?aria-label="详情评论存储文章详情"/)
+  assert.match(settingsPageSource, /v-model:checked="articleDetailCommentsStoreCommentInfo"[\s\S]*?\n\s+disabled\n[\s\S]*?aria-label="详情评论存储评论信息"/)
+  assert.match(settingsPageSource, /class="article-detail-comments-option-stack"/)
+  assert.match(settingsPageSource, /article-detail-comments-option-action-control/)
+  assert.match(flowDiagnosticsBlock, /label: '单篇离线缓存测试'/)
+  assert.match(flowDiagnosticsBlock, /buttonLabel: '离线缓存'/)
+  assert.match(flowDiagnosticsBlock, /showArticleDetailOfflineCacheOptions: true/)
+  assert.match(settingsPageSource, /startArticleDetailOfflineCacheDiagnostic/)
+  assert.match(settingsPageSource, /getArticleDetailOfflineCacheDiagnostic/)
+  assert.match(settingsPageSource, /v-model:checked="articleDetailOfflineCacheSkipCollectedRecords"/)
+  assert.match(settingsPageSource, /v-model:checked="articleDetailOfflineCacheStateful"/)
+  assert.match(settingsPageSource, /class="article-detail-offline-cache-option-stack"[\s\S]*?v-model:checked="articleDetailOfflineCacheSkipCollectedRecords"[\s\S]*?v-model:checked="articleDetailOfflineCacheStateful"/)
+  assert.match(settingsPageSource, /article-detail-offline-cache-option-action-control/)
+  assert.match(
+    settingsPageSource,
+    /\.settings-config-control\.compact-control\.article-detail-offline-cache-option-action-control \{[\s\S]*?grid-template-columns:\s*max-content max-content max-content;/,
+  )
+  assert.match(settingsPageSource, /v-model:checked="articleDetailOfflineCacheStoreArticleDetail"/)
+  assert.match(settingsPageSource, /v-model:checked="articleDetailOfflineCacheArchiveContent"/)
+  assert.match(settingsPageSource, /aria-label="离线缓存跳过已采集记录"/)
+  assert.match(settingsPageSource, /aria-label="离线缓存带状态"/)
+  assert.match(settingsPageSource, />\s*带状态（beta）\s*</)
+  assert.match(settingsPageSource, /aria-label="离线缓存存储文章详情"/)
+  assert.match(settingsPageSource, /aria-label="离线缓存归档内容"/)
+  assert.match(settingsPageSource, /statefulOfflineCache: articleDetailOfflineCacheStateful\.value/)
+  assert.match(settingsPageSource, /archiveOfflineContent: articleDetailOfflineCacheArchiveContent\.value/)
+  assert.match(pythonApiSource, /export type ArticleDetailOfflineCacheDiagnosticOptions = \{/)
+  assert.match(pythonApiSource, /archiveOfflineContent\?: boolean/)
+  assert.match(pythonApiSource, /statefulOfflineCache\?: boolean/)
+  assert.match(pythonApiSource, /article-detail-offline-cache/)
+  assert.doesNotMatch(flowDiagnosticsBlock, /label: '单篇文章全内容'/)
   assert.doesNotMatch(flowDiagnosticsBlock, /label: '单次主流程全量获取'/)
   assert.doesNotMatch(flowDiagnosticsBlock, /buttonLabel: '主流程获取'/)
   assert.doesNotMatch(flowDiagnosticsBlock, /handlePendingDiagnosticAction\('单次主流程全量获取'\)/)
@@ -736,8 +823,6 @@ test('单篇标签操作使用 windows_command 键、开关和带单位的加减
   for (const [configKey, unit] of [
     ['windows_command.single_article_tab.article_title_stable_delay_seconds', '秒'],
     ['windows_command.single_article_tab.article_open_timeout_seconds', '秒'],
-    ['windows_command.single_article_tab.article_title_poll_initial_interval_seconds', '秒'],
-    ['windows_command.single_article_tab.article_title_poll_interval_seconds', '秒'],
     ['windows_command.single_article_tab.article_title_poll_growth_factor', '倍'],
     ['windows_command.single_article_tab.article_close_confirm_timeout_seconds', '秒'],
     ['windows_command.single_article_tab.article_close_title_poll_interval_seconds', '秒'],
@@ -745,6 +830,7 @@ test('单篇标签操作使用 windows_command 键、开关和带单位的加减
     const escapedKey = configKey.replaceAll('.', '\\.')
     assert.match(singleTabBlock, new RegExp("configKey: '" + escapedKey + "'[^}]*inputType: 'number-stepper'[^}]*unit: '" + unit + "'"))
   }
+  assert.match(singleTabBlock, /configKey: 'windows_command\.single_article_tab\.article_title_poll_interval_seconds_range'[\s\S]*?inputType: 'readonly-range'[\s\S]*?unit: '秒'/)
 })
 
 test('主页窗口操作使用 windows_command 键和秒单位加减数字框', () => {
@@ -760,13 +846,13 @@ test('主页窗口操作使用 windows_command 键和秒单位加减数字框', 
     'windows_command.home_window.click_mouse_move_wait_seconds',
     'windows_command.home_window.click_mouse_down_wait_seconds',
     'windows_command.home_window.click_mouse_up_wait_seconds',
-    'windows_command.home_window.screen_click_wait_seconds',
     'windows_command.home_window.uia_control_click_wait_seconds',
   ]) {
     const escapedKey = configKey.replaceAll('.', '\\.')
     assert.match(homeWindowBlock, new RegExp("configKey: '" + escapedKey + "'[^}]*inputType: 'number-stepper'[^}]*unit: '秒'"))
   }
-  assert.match(homeWindowBlock, /configKey: 'windows_command\.home_window\.home_find_use_article_probe'[^}]*inputType: 'switch'/)
+  assert.doesNotMatch(homeWindowBlock, /windows_command\.home_window\.home_find_use_article_probe/)
+  assert.doesNotMatch(homeWindowBlock, /windows_command\.home_window\.screen_click_wait_seconds/)
 })
 
 test('主页滚动操作使用 windows_command 键、开关和步数/次数/秒单位', () => {
@@ -775,17 +861,9 @@ test('主页滚动操作使用 windows_command 键、开关和步数/次数/秒�
   assert.match(homeScrollBlock, /configKey: 'windows_command\.home_scroll\.bounce_enabled'[^}]*inputType: 'switch'/)
 
   for (const [configKey, unit] of [
-    ['windows_command.home_scroll.max_scroll_attempts', '次'],
-    ['windows_command.home_scroll.scroll_wheel_steps', '步'],
-    ['windows_command.home_scroll.date_seek_max_steps', '步'],
     ['windows_command.home_scroll.scroll_initial_delay_seconds', '秒'],
-    ['windows_command.home_scroll.scroll_probe_interval_seconds', '秒'],
-    ['windows_command.home_scroll.scroll_probe_max_interval_seconds', '秒'],
-    ['windows_command.home_scroll.scroll_probe_growth_factor', '倍'],
-    ['windows_command.home_scroll.scroll_settle_timeout_seconds', '秒'],
     ['windows_command.home_scroll.unchanged_before_bounce_seconds', '秒'],
     ['windows_command.home_scroll.lazy_load_timeout_seconds', '秒'],
-    ['windows_command.home_scroll.visible_snapshot_max_age_seconds', '秒'],
     ['windows_command.home_scroll.bounce_up_steps', '步'],
     ['windows_command.home_scroll.bounce_pause_seconds', '秒'],
     ['windows_command.home_scroll.bounce_down_steps', '步'],
@@ -794,6 +872,11 @@ test('主页滚动操作使用 windows_command 键、开关和步数/次数/秒�
     const escapedKey = configKey.replaceAll('.', '\\.')
     assert.match(homeScrollBlock, new RegExp("configKey: '" + escapedKey + "'[^}]*inputType: 'number-stepper'[^}]*unit: '" + unit + "'"))
   }
+  assert.match(homeScrollBlock, /configKey: 'windows_command\.home_scroll\.date_seek_scroll_steps_range'[\s\S]*?inputType: 'readonly-range'[\s\S]*?unit: '步'/)
+  assert.match(homeScrollBlock, /configKey: 'windows_command\.home_scroll\.scroll_probe_interval_seconds_range'[\s\S]*?inputType: 'readonly-range'[\s\S]*?unit: '秒'/)
+  assert.doesNotMatch(homeScrollBlock, /windows_command\.home_scroll\.max_scroll_attempts/)
+  assert.doesNotMatch(homeScrollBlock, /windows_command\.home_scroll\.scroll_probe_growth_factor/)
+  assert.doesNotMatch(homeScrollBlock, /windows_command\.home_scroll\.scroll_settle_timeout_seconds/)
 })
 
 test('数据获取设置中的开关和数值项使用统一控件样式', () => {
@@ -811,7 +894,6 @@ test('数据获取设置中的开关和数值项使用统一控件样式', () =>
   assert.match(commentBlock, /configKey: 'data_acquisition\.comment_collection\.max_concurrent_processes'[^}]*inputType: 'number-stepper'[^}]*unit: '个'/)
   assert.match(offlineBlock, /configKey: 'data_acquisition\.offline_cache\.enabled_by_default'[^}]*inputType: 'switch'/)
   assert.match(offlineBlock, /configKey: 'data_acquisition\.offline_cache\.max_scroll_seconds'[^}]*inputType: 'number-stepper'[^}]*unit: '秒'/)
-  assert.match(offlineBlock, /configKey: 'data_acquisition\.offline_cache\.max_scroll_count'[^}]*inputType: 'number-stepper'[^}]*unit: '次'/)
   assert.match(offlineBlock, /configKey: 'data_acquisition\.offline_cache\.resource_timeout_seconds'[^}]*inputType: 'number-stepper'[^}]*unit: '秒'/)
   assert.match(offlineBlock, /configKey: 'data_acquisition\.offline_cache\.max_concurrent_processes'[^}]*inputType: 'number-stepper'[^}]*unit: '个'/)
 })
@@ -933,6 +1015,7 @@ test('恢复默认按钮先确认，再使用 system.yaml 覆盖 custom.yaml', (
   assert.match(settingsPageSource, /resetDefaultsDialogVisible/)
   assert.match(settingsPageSource, /function handleResetDefaults\(\)[\s\S]*?resetDefaultsDialogVisible\.value = true/)
   assert.match(settingsPageSource, /async function confirmResetDefaults\(\)[\s\S]*?resetRuntimeConfig\(\)/)
+  assert.match(settingsPageSource, /<AModal[\s\S]*?v-model:open="resetDefaultsDialogVisible"/)
   assert.match(settingsPageSource, /恢复系统默认配置/)
   assert.match(settingsPageSource, /确认恢复/)
   assert.match(settingsPageSource, /data\/custom\.yaml\.bak/)
@@ -944,26 +1027,31 @@ test('数据获取设置展示 system.yaml 中的原 HTML 请求超时', () => {
   assert.match(settingsPageSource, /data_acquisition\.reference_request\.request_timeout_seconds/)
 })
 
-test('快速操作按钮覆盖 VXE 默认悬浮特效并补齐交互状态', () => {
-  assert.match(
-    settingsPageSource,
-    /\.config-action-grid :deep\(\.vxe-button\.type--button\.config-action-button:not\(\.is--disabled\):hover\) \{[\s\S]*?transform:\s*none;[\s\S]*?color:\s*var\(--config-action-hover-color\);[\s\S]*?background:\s*var\(--config-action-hover-bg\);[\s\S]*?box-shadow:\s*none;/,
+test('快速操作按钮使用 Ant Design Vue 并补齐交互状态', () => {
+  assert.match(settingsPageSource, /<AButton[\s\S]*?class="settings-ant-button config-action-button success"/)
+  assert.doesNotMatch(
+    settingsPageSource.match(/<section class="config-actions page-panel"[\s\S]*?<\/section>/)?.[0] ?? '',
+    /<VxeButton/,
   )
   assert.match(
     settingsPageSource,
-    /\.config-action-grid :deep\(\.vxe-button\.type--button\.config-action-button:not\(\.is--disabled\):active\) \{[\s\S]*?transform:\s*translateY\(0\);[\s\S]*?background:\s*var\(--config-action-active-bg\);/,
+    /\.config-action-grid :deep\(\.ant-btn\.config-action-button:not\(:disabled\):hover\) \{[\s\S]*?transform:\s*none;[\s\S]*?color:\s*var\(--config-action-hover-color\);[\s\S]*?background:\s*var\(--config-action-hover-bg\);[\s\S]*?box-shadow:\s*none;/,
   )
   assert.match(
     settingsPageSource,
-    /\.config-action-grid :deep\(\.vxe-button\.type--button\.config-action-button:focus\) \{[\s\S]*?color:\s*var\(--config-action-color\);[\s\S]*?border-color:\s*var\(--config-action-border\);[\s\S]*?background:\s*var\(--config-action-bg\);/,
+    /\.config-action-grid :deep\(\.ant-btn\.config-action-button:not\(:disabled\):active\) \{[\s\S]*?transform:\s*translateY\(0\);[\s\S]*?background:\s*var\(--config-action-active-bg\);/,
   )
   assert.match(
     settingsPageSource,
-    /\.config-action-grid :deep\(\.vxe-button\.type--button\.config-action-button:focus-visible\) \{[\s\S]*?outline:\s*3px solid rgba\(53, 127, 217, 0\.24\);[\s\S]*?outline-offset:\s*2px;/,
+    /\.config-action-grid :deep\(\.ant-btn\.config-action-button:focus\) \{[\s\S]*?color:\s*var\(--config-action-color\);[\s\S]*?border-color:\s*var\(--config-action-border\);[\s\S]*?background:\s*var\(--config-action-bg\);/,
   )
   assert.match(
     settingsPageSource,
-    /\.config-action-grid :deep\(\.vxe-button\.type--button\.config-action-button\.is--disabled\) \{[\s\S]*?transform:\s*none;[\s\S]*?opacity:\s*0\.58;[\s\S]*?box-shadow:\s*none;/,
+    /\.config-action-grid :deep\(\.ant-btn\.config-action-button:focus-visible\) \{[\s\S]*?outline:\s*3px solid rgba\(53, 127, 217, 0\.24\);[\s\S]*?outline-offset:\s*2px;/,
+  )
+  assert.match(
+    settingsPageSource,
+    /\.config-action-grid :deep\(\.ant-btn\.config-action-button:disabled\) \{[\s\S]*?transform:\s*none;[\s\S]*?opacity:\s*0\.58;[\s\S]*?box-shadow:\s*none;/,
   )
   assert.match(settingsPageSource, /\.config-action-button\.success \{[\s\S]*?--config-action-hover-color:\s*#ffffff;/)
   assert.match(settingsPageSource, /\.config-action-button\.success \{[\s\S]*?--config-action-bg:\s*#35B889;/i)
@@ -977,4 +1065,11 @@ test('快速操作按钮覆盖 VXE 默认悬浮特效并补齐交互状态', () 
     settingsPageSource,
     /@media \(prefers-reduced-motion: reduce\) \{[\s\S]*?\.config-action-grid :deep\(\.config-action-button\)[\s\S]*?transition:\s*none;[\s\S]*?transform:\s*none;/,
   )
+})
+
+test('系统配置页普通提示统一使用 Ant Design Vue Notification', () => {
+  assert.match(settingsPageSource, /import \{ notification \} from 'ant-design-vue'/)
+  assert.match(settingsPageSource, /notification\[tone\]\(\{/)
+  assert.doesNotMatch(settingsPageSource, /settings-toast-fade/)
+  assert.doesNotMatch(settingsPageSource, /class="\['settings-toast'/)
 })

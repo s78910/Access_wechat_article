@@ -23,8 +23,14 @@ test('数据档案页筛选区并入标题行且表格保持轻纸质感容器',
     dataFilesPageVue,
     '.file-list .table-wrap,\n.record-table-wrap,\n.batch-export-table-wrap',
   )
-  const tableHeaderRule = extractRule(dataFilesPageVue, '.files-page .data-table th')
-  const tableCellRule = extractRule(dataFilesPageVue, '.files-page .data-table td')
+  const tableHeaderRule = extractRule(
+    dataFilesPageVue,
+    '.files-page :deep(.archive-ant-table .ant-table-thead > tr > th)',
+  )
+  const tableCellRule = extractRule(
+    dataFilesPageVue,
+    '.files-page :deep(.archive-ant-table .ant-table-tbody > tr > td)',
+  )
 
   assert.match(fileFiltersRule, /padding:\s*0;/)
   assert.match(fileFiltersRule, /margin-top:\s*0;/)
@@ -66,8 +72,11 @@ test('数据档案页详情区和空状态降低字重并保持纸质层次', ()
   const headingRule = extractRule(dataFilesPageVue, '.files-page .section-heading')
   const selectionSummaryRule = extractRule(dataFilesPageVue, '.record-selection-summary')
   const emptyRule = extractRule(dataFilesPageVue, '.record-empty')
-  const emptyStrongRule = extractRule(dataFilesPageVue, '.record-empty strong')
-  const emptySpanRule = extractRule(dataFilesPageVue, '.record-empty span')
+  const firstRunDescriptionRule = extractRule(dataFilesPageVue, '.record-empty-first-run p')
+  const overviewGuideRule = extractRule(dataFilesPageVue, '.archive-overview-guide')
+  const overviewGuideTitleRule = extractRule(dataFilesPageVue, '.archive-overview-guide strong')
+  const overviewGuideStepsRule = extractRule(dataFilesPageVue, '.archive-overview-guide-steps')
+  const overviewGuideStepRule = extractRule(dataFilesPageVue, '.archive-overview-guide-steps span')
 
   assert.match(headingRule, /font-weight:\s*500;/)
   assert.match(selectionSummaryRule, /border:\s*1px solid var\(--line-soft\);/)
@@ -75,8 +84,22 @@ test('数据档案页详情区和空状态降低字重并保持纸质层次', ()
   assert.match(selectionSummaryRule, /font-weight:\s*400;/)
   assert.match(emptyRule, /border:\s*1px dashed rgba\(104, 141, 181, 0\.26\);/)
   assert.match(emptyRule, /background:\s*rgba\(255, 255, 255, 0\.26\);/)
-  assert.match(emptyStrongRule, /font-weight:\s*500;/)
-  assert.match(emptySpanRule, /font-weight:\s*400;/)
+  assert.match(firstRunDescriptionRule, /font-weight:\s*400;/)
+  assert.match(overviewGuideRule, /grid-template-columns:\s*32px minmax\(0, 1fr\) auto;/)
+  assert.match(overviewGuideRule, /grid-column:\s*1 \/ -1;/)
+  assert.match(overviewGuideRule, /background:\s*rgba\(235, 246, 253, 0\.72\);/)
+  assert.match(overviewGuideRule, /white-space:\s*normal;/)
+  assert.match(overviewGuideTitleRule, /font-size:\s*16px;/)
+  assert.match(overviewGuideTitleRule, /font-weight:\s*500;/)
+  assert.match(overviewGuideStepsRule, /display:\s*flex;/)
+  assert.match(overviewGuideStepsRule, /justify-content:\s*flex-end;/)
+  assert.match(overviewGuideStepsRule, /flex-wrap:\s*wrap;/)
+  assert.match(overviewGuideStepRule, /background:\s*rgba\(255, 255, 255, 0\.62\);/)
+  assert.match(overviewGuideStepRule, /white-space:\s*nowrap;/)
+  assert.match(dataFilesPageVue, /<ASkeleton[\s\S]*active/)
+  assert.match(dataFilesPageVue, /<AResult[\s\S]*title="读取归档数据失败"/)
+  assert.match(dataFilesPageVue, /<ArchiveDistributionChart[\s\S]*:data="archiveDistributionData"/)
+  assert.doesNotMatch(dataFilesPageVue, /<AEmpty/)
 })
 
 test('数据档案页表格内操作链接收敛为轻量按钮样式', () => {
@@ -113,4 +136,48 @@ test('数据档案页暗色主题同步使用低刺激纸质层', () => {
     dataFilesPageVue,
     /:global\(\.collector-app\.dark\) \.record-empty\s*\{[\s\S]*?background:\s*rgba\(15, 24, 39, 0\.36\);/,
   )
+  assert.match(
+    dataFilesPageVue,
+    /:global\(\.collector-app\.dark\) \.record-empty-result :deep\(\.ant-result-title\),[\s\S]*?color:\s*#dce7f5;/,
+  )
+  assert.match(
+    dataFilesPageVue,
+    /:global\(\.collector-app\.dark\) \.record-empty-first-run p,[\s\S]*?\.archive-overview-guide-copy > span,[\s\S]*?color:\s*#9fb2cc;/,
+  )
+  assert.match(
+    dataFilesPageVue,
+    /:global\(\.collector-app\.dark\) \.record-overview-empty\s*\{[\s\S]*?background:\s*transparent;/,
+  )
+  assert.match(
+    dataFilesPageVue,
+    /:global\(\.collector-app\.dark\) \.archive-overview-guide\s*\{[\s\S]*?background:\s*rgba\(31, 52, 80, 0\.54\);/,
+  )
+  assert.match(
+    dataFilesPageVue,
+    /:global\(\.collector-app\.dark\) \.archive-overview-guide-steps span\s*\{[\s\S]*?background:\s*rgba\(15, 24, 39, 0\.5\);/,
+  )
+})
+
+test('archive metric cards keep the original article layout', () => {
+  const cardRule = extractRule(dataFilesPageVue, '.files-metrics > .metric-card')
+
+  assert.match(dataFilesPageVue, /<article v-for="item in archiveMetrics"/)
+  assert.match(cardRule, /height:\s*72px;/)
+  assert.match(cardRule, /min-width:\s*0;/)
+  assert.match(cardRule, /overflow:\s*hidden;/)
+  assert.doesNotMatch(dataFilesPageVue, /\.files-metrics[^\n]*ant-card-body/)
+})
+
+test('archive filters reserve a compact first column for the refresh button', () => {
+  const filtersRule = extractRule(dataFilesPageVue, '.file-filters')
+  const refreshButtonRule = extractRule(dataFilesPageVue, '.file-refresh-button')
+
+  assert.match(
+    filtersRule,
+    /grid-template-columns:\s*72px minmax\(0, 110px\) minmax\(0, 1fr\);/,
+  )
+  assert.match(filtersRule, /width:\s*min\(100%, 520px\);/)
+  assert.match(refreshButtonRule, /width:\s*72px;/)
+  assert.match(refreshButtonRule, /height:\s*32px;/)
+  assert.match(refreshButtonRule, /justify-content:\s*center;/)
 })

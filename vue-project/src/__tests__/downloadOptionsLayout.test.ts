@@ -15,13 +15,13 @@ test('download options are compact and right aligned', () => {
   assert.match(match.groups.body, /width:\s*min\(100%,\s*190px\);/)
 })
 
-test('指定记录总量插画保留水平位置并单独向上移动 5px', () => {
+test('指定记录总量插画向右移动 5px并保留纵向位置', () => {
   const listArtRule = appVue.match(/\.task-art-list\s*\{(?<body>[\s\S]*?)\}/)
   const heartArtRule = appVue.match(/\.task-card-content \.task-art-heart\s*\{(?<body>[\s\S]*?)\}/)
 
   assert.ok(listArtRule?.groups?.body, 'missing .task-art-list style block')
   assert.ok(heartArtRule?.groups?.body, 'missing .task-card-content .task-art-heart style block')
-  assert.match(listArtRule.groups.body, /transform:\s*translate\(20px,\s*-5px\);/)
+  assert.match(listArtRule.groups.body, /transform:\s*translate\(25px,\s*-15px\);/)
   assert.match(heartArtRule.groups.body, /transform:\s*translate\(-14px,\s*12px\);/)
 })
 
@@ -40,10 +40,15 @@ test('获取指定内容把文章详情移到插画下方并在右侧加入离�
   const contentCard = contentCardMatch[0]
 
   assert.match(contentCard, /<div class="task-art-column">[\s\S]*<img class="task-art task-art-heart"/)
+  assert.match(contentCard, /<ACheckbox[\s\S]*?v-model:checked="downloadSelections\[mandatoryDownloadOption\.key\]"/)
   assert.match(contentCard, /class="\[\s*'download-option',\s*'article-detail-option'/)
   assert.match(contentCard, /mandatoryDownloadOption\.label/)
-  assert.match(contentCard, /v-for="option in downloadOptions"[\s\S]*<span>\{\{ option\.label \}\}<\/span>/)
+  assert.match(contentCard, /<ACheckbox[\s\S]*?v-for="option in downloadOptions"/)
+  assert.match(contentCard, /v-model:checked="downloadSelections\[option\.key\]"/)
+  assert.match(contentCard, /v-for="option in downloadOptions"[\s\S]*\{\{ option\.label \}\}[\s\S]*<\/ACheckbox>/)
   assert.doesNotMatch(contentCard, /v-for="option in downloadOptions"[\s\S]*文章详情/)
+  assert.doesNotMatch(contentCard, /role="checkbox"|class="option-box"/)
+  assert.doesNotMatch(contentCard, /<button[\s\S]*?download-option/)
 })
 
 test('获取指定内容插画下方按钮使用左侧独立布局区域', () => {

@@ -203,17 +203,14 @@ flowchart LR
 
 开源不易，若此项目有帮到你，望你能动用你的发财小手 **Star** ☆ 一下。
 
-如在使用或阅读代码时遇到问题，欢迎一起讨论。你的鼓励，是这个项目继续更新的最大动力！
+十分感谢大家对于本项目的关注,如在使用或阅读代码时遇到问题，欢迎一起讨论。
+
+你的鼓励，是这个项目持续更新的最大动力！
 
 <p align="center">
   <img src="./README/qrcode_1749894334903.jpg" alt="项目交流二维码" width="300" />
 </p>
 
-另外，十分感谢大家对于本项目的关注。
-
-[![Stargazers repo roster for @yeximm/Access_wechat_article](http://reporoster.com/stars/yeximm/Access_wechat_article)](https://github.com/yeximm/Access_wechat_article/stargazers)
-
-[![Forkers repo roster for @yeximm/Access_wechat_article](http://reporoster.com/forks/yeximm/Access_wechat_article)](https://github.com/yeximm/Access_wechat_article/network/members)
 
 ---
 
@@ -227,11 +224,3 @@ flowchart LR
 - 基于本仓库内容进行的修改、扩展、部署、分发或二次开发，均属于使用者或第三方的自主行为，由此产生的后果由相关使用者自行承担。
 - 本仓库中涉及的第三方软件、硬件、平台或工具，仅用于说明项目运行环境或技术背景，不代表本项目作者对其进行推荐、背书或提供使用保证。
 - 使用任何第三方软件、硬件、平台或工具所产生的风险、责任和后果，均由实际使用者自行承担，与本项目作者无关。
-
-## ⭐ Star History
-
- <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=yeximm/Access_wechat_article&type=date&theme=dark&legend=top-left&sealed_token=sHVZXrVhIaOKM2MT3nkUSR9xY3E2LjUkSgaadVvfNEb_XulAtc7642ognANFrOYtVnrQnK57Lb2WtzfnEUr-Z4Gr6OmlP_1w-HApsE1g8v7mlEX6vHKY8g1mALRq4hhBxGqLb9tyS5n1DTbZOW1R5jMjeUAfB8Ha8U_yzfJHhDLpFgC7v9oDUaDdopXc" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=yeximm/Access_wechat_article&type=date&legend=top-left&sealed_token=sHVZXrVhIaOKM2MT3nkUSR9xY3E2LjUkSgaadVvfNEb_XulAtc7642ognANFrOYtVnrQnK57Lb2WtzfnEUr-Z4Gr6OmlP_1w-HApsE1g8v7mlEX6vHKY8g1mALRq4hhBxGqLb9tyS5n1DTbZOW1R5jMjeUAfB8Ha8U_yzfJHhDLpFgC7v9oDUaDdopXc" />
-   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=yeximm/Access_wechat_article&type=date&legend=top-left&sealed_token=sHVZXrVhIaOKM2MT3nkUSR9xY3E2LjUkSgaadVvfNEb_XulAtc7642ognANFrOYtVnrQnK57Lb2WtzfnEUr-Z4Gr6OmlP_1w-HApsE1g8v7mlEX6vHKY8g1mALRq4hhBxGqLb9tyS5n1DTbZOW1R5jMjeUAfB8Ha8U_yzfJHhDLpFgC7v9oDUaDdopXc" />
- </picture>

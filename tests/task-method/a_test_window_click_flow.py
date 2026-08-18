@@ -84,9 +84,7 @@ def main() -> int:
     cursor: HomeArticleCursor | None = None
     try:
         report["error_stage"] = "find_home_window"
-        home_window = find_wechat_home_window(
-            article_counter=lambda window: len(reader.read(window))
-        )
+        home_window = find_wechat_home_window()
         if home_window is None:
             raise RuntimeError("未找到可操作的微信公众号主页窗口")
 

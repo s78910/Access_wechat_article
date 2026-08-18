@@ -4,7 +4,6 @@ from datetime import date
 import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from threading import Lock
 from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
@@ -29,10 +28,15 @@ from src.modules.window.article_date_filter import (
 from src.services.runtime.window_click_flow_diagnostic_service import (
     WindowClickFlowDiagnosticService,
 )
+from src.services.task.window_click_flow_huey_service import (
+    WindowClickFlowConflictError,
+)
 from dev_server import (
     WindowClickFlowDiagnosticPayload,
-    _run_window_click_flow_diagnostic_job,
     _start_window_click_flow_diagnostic_job,
+    _stop_window_click_flow_diagnostic_job,
+    _window_click_flow_diagnostic_job_payload,
+    shutdown_backend,
 )
 
 
@@ -802,7 +806,6 @@ class _LegacyWindowClickFlowDateSelectionTests:
         )
         window_config = SimpleNamespace(
             home_find_timeout_seconds=1,
-            home_find_use_article_probe=True,
         )
 
         result = WindowClickFlowDiagnosticService(
@@ -847,7 +850,6 @@ class _LegacyWindowClickFlowDateSelectionTests:
         updates: list[dict[str, object]] = []
         window_config = SimpleNamespace(
             home_find_timeout_seconds=1,
-            home_find_use_article_probe=True,
         )
 
         result = WindowClickFlowDiagnosticService(
@@ -897,7 +899,6 @@ class _LegacyWindowClickFlowDateSelectionTests:
         )
         window_config = SimpleNamespace(
             home_find_timeout_seconds=1,
-            home_find_use_article_probe=True,
         )
 
         result = WindowClickFlowDiagnosticService(
@@ -930,7 +931,6 @@ class _LegacyWindowClickFlowDateSelectionTests:
         factory = _FakeWindowFactory(targets)
         window_config = SimpleNamespace(
             home_find_timeout_seconds=1,
-            home_find_use_article_probe=True,
             article_open_timeout_seconds=1,
             article_title_poll_interval_seconds=0.01,
             article_title_stable_delay_seconds=0,
@@ -1023,52 +1023,80 @@ class WindowClickFlowTraceStoreTests(unittest.TestCase):
             self.assertEqual(result["records"][0]["title"], "测试文章")
             self.assertEqual(result["events"][0]["kind"], "article")
 
-    def test_start_payload_is_empty_and_exposes_trace_paths(self) -> None:
+    def test_start_get_and_stop_are_forwarded_to_huey_service(self) -> None:
         with TemporaryDirectory() as temp_dir:
-            backend = _trace_backend(Path(temp_dir))
-            with patch("dev_server.Thread") as thread_type:
-                initial = _start_window_click_flow_diagnostic_job(
-                    backend,
-                    WindowClickFlowDiagnosticPayload(maxRecords=3),
-                )
+            huey_service = _FakeWindowClickFlowHueyService(Path(temp_dir))
+            backend = _trace_backend(Path(temp_dir), huey_service)
+            initial = _start_window_click_flow_diagnostic_job(
+                backend,
+                WindowClickFlowDiagnosticPayload(maxRecords=3),
+            )
+            current = _window_click_flow_diagnostic_job_payload(
+                backend,
+                initial["jobId"],
+            )
+            stopped = _stop_window_click_flow_diagnostic_job(
+                backend,
+                initial["jobId"],
+            )
 
-            thread_type.return_value.start.assert_called_once_with()
             self.assertEqual(initial["items"], [])
+            self.assertEqual(current["status"], "running")
+            self.assertEqual(stopped["status"], "stop-requested")
+            self.assertEqual(
+                huey_service.start_calls,
+                [
+                    {
+                        "max_records": 3,
+                        "date_filter_mode": "all",
+                        "start_date": None,
+                        "end_date": None,
+                    }
+                ],
+            )
+            self.assertEqual(huey_service.get_calls, [initial["jobId"]])
+            self.assertEqual(huey_service.stop_calls, [initial["jobId"]])
             trace_dir = Path(initial["traceDir"])
             self.assertTrue(trace_dir.is_relative_to(Path(temp_dir).resolve()))
             self.assertEqual(Path(initial["executionLogPath"]).name, "execution.jsonl")
             self.assertEqual(Path(initial["resultPath"]).name, "result.json")
 
-    def test_job_runner_writes_custom_runner_result_to_result_json(self) -> None:
+    def test_conflict_and_missing_job_keep_http_error_contract(self) -> None:
         with TemporaryDirectory() as temp_dir:
-            backend = _trace_backend(Path(temp_dir))
-            options = WindowClickFlowDiagnosticPayload(maxRecords=1)
-            job_id = "window-click-flow-test002"
-            backend.window_click_flow_diagnostic_jobs[job_id] = {"status": "running"}
-            backend.window_click_flow_diagnostic_stop_flags[job_id] = SimpleNamespace(
-                is_set=lambda: False
+            huey_service = _FakeWindowClickFlowHueyService(Path(temp_dir))
+            huey_service.start_error = WindowClickFlowConflictError("已有任务")
+            backend = _trace_backend(Path(temp_dir), huey_service)
+
+            conflict = _start_window_click_flow_diagnostic_job(
+                backend,
+                WindowClickFlowDiagnosticPayload(maxRecords=1),
             )
-            backend.window_click_flow_diagnostic_runner = lambda *_args: {
-                "ok": True,
-                "status": "completed",
-                "message": "读取完成",
-                "tone": "success",
-                "items": [{"kind": "article", "label": "第 1 条文章", "value": "已识别"}],
-                "records": [{"title": "测试文章"}],
-                "events": [{"kind": "article", "value": "已识别"}],
-                "recognizedCount": 1,
-                "skippedCount": 0,
-                "stoppedByUser": False,
-            }
+            missing_get = _window_click_flow_diagnostic_job_payload(
+                backend,
+                "window-click-flow-missing",
+            )
+            missing_stop = _stop_window_click_flow_diagnostic_job(
+                backend,
+                "window-click-flow-missing",
+            )
 
-            _run_window_click_flow_diagnostic_job(backend, job_id, options)
+            self.assertEqual(conflict.status_code, 409)
+            self.assertEqual(missing_get.status_code, 404)
+            self.assertEqual(missing_stop.status_code, 404)
 
-            final = backend.window_click_flow_diagnostic_jobs[job_id]
-            result_path = Path(final["resultPath"])
-            self.assertTrue(result_path.is_file())
-            saved = json.loads(result_path.read_text(encoding="utf-8"))
-            self.assertEqual(saved["records"][0]["title"], "测试文章")
-            self.assertEqual(saved["status"], "completed")
+    def test_backend_shutdown_stops_huey_service(self) -> None:
+        huey_service = _FakeWindowClickFlowHueyService(Path.cwd())
+        backend = SimpleNamespace(
+            offline_cache_service=None,
+            window_click_flow_huey_service=huey_service,
+            diagnostic_mitm_listener=None,
+            active_task_id=None,
+            append_log=lambda *_args, **_kwargs: None,
+        )
+
+        shutdown_backend(backend)
+
+        self.assertEqual(huey_service.shutdown_calls, 1)
 
 
 def _target(title: str, published_date: str) -> ArticleTarget:
@@ -1086,14 +1114,62 @@ def _target(title: str, published_date: str) -> ArticleTarget:
     )
 
 
-def _trace_backend(temp_dir: Path) -> SimpleNamespace:
+class _FakeWindowClickFlowHueyService:
+    def __init__(self, temp_dir: Path) -> None:
+        self.temp_dir = temp_dir.resolve()
+        self.start_calls: list[dict] = []
+        self.get_calls: list[str] = []
+        self.stop_calls: list[str] = []
+        self.shutdown_calls = 0
+        self.start_error: Exception | None = None
+        self._job_id = "window-click-flow-test001"
+
+    def start(self, **options) -> dict:
+        self.start_calls.append(dict(options))
+        if self.start_error is not None:
+            raise self.start_error
+        return self._payload()
+
+    def _payload(self) -> dict:
+        trace_dir = self.temp_dir / "window-click-flow" / self._job_id
+        return {
+            "ok": False,
+            "status": "running",
+            "jobId": self._job_id,
+            "action": "window-click-flow",
+            "title": "主页内容读取结果",
+            "message": "正在等待Huey执行主页内容读取测试...",
+            "tone": "info",
+            "items": [],
+            "traceDir": str(trace_dir),
+            "executionLogPath": str(trace_dir / "execution.jsonl"),
+            "resultPath": str(trace_dir / "result.json"),
+        }
+
+    def get(self, job_id: str) -> dict:
+        self.get_calls.append(job_id)
+        if job_id != self._job_id:
+            raise KeyError(job_id)
+        return self._payload()
+
+    def stop(self, job_id: str) -> dict:
+        self.stop_calls.append(job_id)
+        if job_id != self._job_id:
+            raise KeyError(job_id)
+        return {**self._payload(), "status": "stop-requested"}
+
+    def shutdown(self) -> None:
+        self.shutdown_calls += 1
+
+
+def _trace_backend(
+    temp_dir: Path,
+    huey_service: _FakeWindowClickFlowHueyService,
+) -> SimpleNamespace:
     config = SimpleNamespace(storage=SimpleNamespace(temp_dir=temp_dir))
     return SimpleNamespace(
         runtime=SimpleNamespace(config=config),
-        window_click_flow_diagnostic_runner=None,
-        window_click_flow_diagnostic_jobs={},
-        window_click_flow_diagnostic_lock=Lock(),
-        window_click_flow_diagnostic_stop_flags={},
+        window_click_flow_huey_service=huey_service,
     )
 
 

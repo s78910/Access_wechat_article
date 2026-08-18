@@ -22,24 +22,23 @@ test('窗口点击流程提供任务数量和四种主页日期筛选方式', ()
   assert.match(settingsPageSource, /windowClickFlowEndDate/)
 })
 
-test('窗口点击流程使用数据档案页同体系的 VXE 日期选择组件', () => {
-  const dateRangeBlock = settingsPageSource.match(/<VxeDateRangePicker[\s\S]*?\/>/)
-  const datePickerBlocks = settingsPageSource.match(/<VxeDatePicker[\s\S]*?\/>/g) ?? []
+test('窗口点击流程使用 Ant Design Vue 日期选择组件', () => {
+  const dateRangeBlock = settingsPageSource.match(/<ARangePicker[\s\S]*?\/>/)
+  const datePickerBlocks = settingsPageSource.match(/<ADatePicker[\s\S]*?\/>/g) ?? []
 
   assert.ok(dateRangeBlock)
-  assert.match(dateRangeBlock[0], /v-model:start-value="windowClickFlowStartDate"/)
-  assert.match(dateRangeBlock[0], /v-model:end-value="windowClickFlowEndDate"/)
+  assert.match(dateRangeBlock[0], /v-model:value="windowClickFlowDateRangeValue"/)
   assert.match(dateRangeBlock[0], /separator=" ~ "/)
-  assert.match(dateRangeBlock[0], /value-format="yyyy-MM-dd"/)
-  assert.match(dateRangeBlock[0], /label-format="yyyy-MM-dd"/)
-  assert.match(dateRangeBlock[0], /:popup-config="windowClickFlowDateRangePopupConfig"/)
-  assert.match(dateRangeBlock[0], /class="settings-vxe-control window-click-flow-date-range-picker"/)
+  assert.match(dateRangeBlock[0], /value-format="YYYY-MM-DD"/)
+  assert.match(dateRangeBlock[0], /popup-class-name="window-click-flow-date-range-picker-panel"/)
+  assert.match(dateRangeBlock[0], /class="settings-ant-control window-click-flow-date-range-picker"/)
 
   assert.equal(datePickerBlocks.length, 2)
   for (const block of datePickerBlocks) {
-    assert.match(block, /value-format="yyyy-MM-dd"/)
-    assert.match(block, /label-format="yyyy-MM-dd"/)
-    assert.match(block, /:popup-config="windowClickFlowDatePopupConfig"/)
+    assert.match(block, /value-format="YYYY-MM-DD"/)
+    assert.match(block, /format="YYYY-MM-DD"/)
+    assert.match(block, /popup-class-name="window-click-flow-date-picker-panel"/)
+    assert.match(block, /class="settings-ant-control window-click-flow-date-picker"/)
   }
   assert.doesNotMatch(settingsPageSource, /<input\b[^>]*\btype="date"[^>]*>/)
 })
@@ -49,7 +48,7 @@ test('窗口点击流程控件在同一行保留完整的日期范围显示', ()
   assert.match(settingsPageSource, /\.window-click-flow-fields \{[\s\S]*?gap:\s*6px;/)
   assert.match(settingsPageSource, /\.window-click-flow-field--mode \{[\s\S]*?flex:\s*0 0 116px;/)
   assert.match(settingsPageSource, /\.window-click-flow-field--range \{[\s\S]*?flex:\s*0 0 248px;/)
-  assert.match(settingsPageSource, /\.window-click-flow-description-line > \.settings-vxe-button \{[\s\S]*?flex:\s*0 0 168px;/)
+  assert.match(settingsPageSource, /\.window-click-flow-description-line > \.settings-ant-button \{[\s\S]*?flex:\s*0 0 168px;/)
 })
 
 test('窗口点击流程配置依次展示日期筛选、任务数量和日期条件', () => {

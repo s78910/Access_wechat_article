@@ -63,10 +63,6 @@ def validate_app_config(config: AppConfig) -> None:
             "window.article_close_confirm_timeout_seconds",
             config.window.article_close_confirm_timeout_seconds,
         ),
-        (
-            "window.visible_snapshot_max_age_seconds",
-            config.window.visible_snapshot_max_age_seconds,
-        ),
         ("window.scroll_probe_interval_seconds", config.window.scroll_probe_interval_seconds),
         (
             "window.scroll_probe_max_interval_seconds",
@@ -81,13 +77,11 @@ def validate_app_config(config: AppConfig) -> None:
     non_negative_values = (
         ("proxy.startup_delay_seconds", config.proxy.startup_delay_seconds),
         ("window.activation_wait_seconds", config.window.activation_wait_seconds),
-        ("window.screen_click_wait_seconds", config.window.screen_click_wait_seconds),
         (
             "window.article_title_stable_delay_seconds",
             config.window.article_title_stable_delay_seconds,
         ),
         ("window.scroll_initial_delay_seconds", config.window.scroll_initial_delay_seconds),
-        ("window.scroll_settle_timeout_seconds", config.window.scroll_settle_timeout_seconds),
         (
             "window.unchanged_before_bounce_seconds",
             config.window.unchanged_before_bounce_seconds,
@@ -104,7 +98,6 @@ def validate_app_config(config: AppConfig) -> None:
     integer_limits = (
         ("comment.max_pages", config.comment.max_pages, 1),
         ("comment.max_concurrent_processes", config.comment.max_concurrent_processes, 1),
-        ("offline_cache.max_scroll_count", config.offline_cache.max_scroll_count, 1),
         (
             "offline_cache.max_concurrent_processes",
             config.offline_cache.max_concurrent_processes,
@@ -114,7 +107,6 @@ def validate_app_config(config: AppConfig) -> None:
         ("runtime.log_retention_days", config.runtime.log_retention_days, 0),
         ("window.scroll_wheel_steps", config.window.scroll_wheel_steps, 1),
         ("window.date_seek_max_steps", config.window.date_seek_max_steps, 1),
-        ("window.max_scroll_attempts", config.window.max_scroll_attempts, 0),
         ("window.bounce_attempts", config.window.bounce_attempts, 0),
         ("window.bounce_up_steps", config.window.bounce_up_steps, 1),
         ("window.bounce_down_steps", config.window.bounce_down_steps, 1),
@@ -141,10 +133,6 @@ def validate_app_config(config: AppConfig) -> None:
     ):
         raise ConfigValidationError(
             "window.scroll_probe_max_interval_seconds 不能小于 scroll_probe_interval_seconds"
-        )
-    if config.window.lazy_load_timeout_seconds < config.window.scroll_settle_timeout_seconds:
-        raise ConfigValidationError(
-            "window.lazy_load_timeout_seconds 不能小于 scroll_settle_timeout_seconds"
         )
     article_window_budget = (
         config.window.article_open_timeout_seconds

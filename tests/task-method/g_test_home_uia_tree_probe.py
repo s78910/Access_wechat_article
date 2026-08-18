@@ -29,8 +29,7 @@ from src.modules.window.wechat_home_window_finder import (
 
 Rect = tuple[int, int, int, int]
 
-# 本脚本只读取当前主页 UIA 树，不激活窗口、不滚动、不点击。
-CONFIG = {
+# 本脚本只读取当前主页 UIA 树，不激活窗口、不滚动、不点击�?CONFIG = {
     "window_find_timeout_seconds": 3.0,
     "max_depth": 16,
     "max_nodes": 8000,
@@ -48,14 +47,13 @@ def main() -> int:
         "status": "running",
         "startedAt": datetime.now().astimezone().isoformat(timespec="seconds"),
         "readOnly": True,
-        "actionsNotPerformed": ["激活窗口", "滚动页面", "移动鼠标", "点击", "键盘输入"],
+        "actionsNotPerformed": ["激活窗�?, "滚动页面", "移动鼠标", "点击", "键盘输入"],
         "outputDirectory": str(run_dir),
     }
 
     try:
         home_window = find_wechat_home_window(
             timeout_seconds=float(CONFIG["window_find_timeout_seconds"]),
-            use_article_probe=False,
         )
         if home_window is None:
             raise RuntimeError("未找到已打开的微信公众号主页窗口")
@@ -75,7 +73,7 @@ def main() -> int:
             max_depth=int(CONFIG["max_depth"]),
         )
         if document is None:
-            raise RuntimeError("已找到主页窗口，但没有找到 DocumentControl")
+            raise RuntimeError("已找到主页窗口，但没有找�?DocumentControl")
 
         document_rect = rect_to_tuple(_safe_get(document, "BoundingRectangle", None))
         viewport = _rect_intersection(home_window.rect, document_rect)
@@ -139,7 +137,7 @@ def main() -> int:
         report.update(
             {
                 "status": "failed",
-                "error": "检测到公众号主页窗口处于最小化状态",
+                "error": "检测到公众号主页窗口处于最小化状�?,
                 "window": {
                     "handle": exc.window.handle,
                     "title": exc.window.title,
@@ -230,8 +228,7 @@ def _attach_descendant_text(nodes: list[dict[str, Any]]) -> None:
                 for text_index in descendant_text_indexes[child_index]
             ]
 
-        # 完整索引用于分组分析，预览文本限制数量，避免 JSON 被重复内容撑大。
-        node["descendantTextIndexes"] = descendant_text_indexes[index]
+        # 完整索引用于分组分析，预览文本限制数量，避免 JSON 被重复内容撑大�?        node["descendantTextIndexes"] = descendant_text_indexes[index]
         node["descendantTextPreview"] = [
             str(nodes[text_index]["name"])
             for text_index in descendant_text_indexes[index][:30]

@@ -48,21 +48,16 @@ class MitmCaptureConfig:
 class WindowConfig:
     activation_wait_seconds: float
     home_find_timeout_seconds: float
-    home_find_use_article_probe: bool
-    screen_click_wait_seconds: float
     restore_focus_after_close: bool
     article_open_timeout_seconds: float
     article_title_poll_interval_seconds: float
     article_title_stable_delay_seconds: float
     article_close_confirm_timeout_seconds: float
-    visible_snapshot_max_age_seconds: float
     scroll_wheel_steps: int
     date_seek_max_steps: int
-    max_scroll_attempts: int
     scroll_initial_delay_seconds: float
     scroll_probe_interval_seconds: float
     scroll_probe_max_interval_seconds: float
-    scroll_settle_timeout_seconds: float
     lazy_load_timeout_seconds: float
     unchanged_before_bounce_seconds: float
     bounce_enabled: bool
@@ -91,7 +86,6 @@ class CommentConfig:
 class OfflineCacheConfig:
     enabled_by_default: bool
     max_scroll_seconds: float
-    max_scroll_count: int
     resource_timeout_seconds: float
     max_concurrent_processes: int
 

@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import AppIcon from '../components/AppIcon.vue'
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import ArchiveDistributionChart from '../components/ArchiveDistributionChart.vue'
+import { DownOutlined, ReloadOutlined } from '@ant-design/icons-vue'
+import { notification } from 'ant-design-vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { ArchiveAccountItem, ArchiveArticleItem, ArchiveCacheJob, ArchiveCacheResultItem } from '../bridge/pythonApi'
 import {
   cacheArchiveAccount,
@@ -15,9 +18,8 @@ import {
   openArchiveArticleDirectory,
   openRuntimePath,
 } from '../bridge/pythonApi'
-import ConfirmDialog from '../components/ConfirmDialog.vue'
+import { buildArchiveDistribution, buildArchiveOverview } from '../utils/archiveDistribution'
 import type { ArchiveSummaryStat } from '../utils/archiveSummaryStats'
-import { calculatePagedTableRowHeight } from '../utils/pagedTableLayout'
 
 type RecordRow = {
   id: number
@@ -38,6 +40,46 @@ type FileRow = {
   failedCount: number
 }
 
+type TableStateTone = 'default' | 'error'
+
+type ArchiveTableStateRow = {
+  rowKind: 'state'
+  tableKey: string
+  stateText: string
+  stateTone: TableStateTone
+}
+
+type ArchiveTablePlaceholderRow = {
+  rowKind: 'placeholder'
+  tableKey: string
+}
+
+type AccountTableDataRow = FileRow & {
+  rowKind: 'data'
+  tableKey: string
+  displayIndex: number
+}
+
+type RecordTableDataRow = RecordRow & {
+  rowKind: 'data'
+  tableKey: string
+  displayIndex: number
+}
+
+type AccountTableRow = AccountTableDataRow | ArchiveTableStateRow | ArchiveTablePlaceholderRow
+type RecordTableRow = RecordTableDataRow | ArchiveTableStateRow | ArchiveTablePlaceholderRow
+type ArchiveTableRow = AccountTableRow | RecordTableRow
+
+type ArchiveTableColumn = {
+  title: string
+  key: string
+  dataIndex?: string
+  width?: number | string
+  align?: 'left' | 'center' | 'right'
+  className?: string
+  customCell?: (record: ArchiveTableRow) => { colSpan?: number }
+}
+
 type DeleteDialogMode = 'records' | 'account' | 'all'
 
 type DeleteDialogState = {
@@ -55,16 +97,24 @@ type DeleteDialogState = {
   errorMessage: string
 }
 
-type CacheToastTone = 'success' | 'warning' | 'error'
+type CacheNotificationTone = 'success' | 'warning' | 'error'
 
-type CacheToast = {
-  id: string
-  message: string
-  tone: CacheToastTone
+type CheckboxChangeEvent = {
+  target: {
+    checked: boolean
+  }
 }
+
+type CollectDateRangeValue = [string, string] | null
+
+const ALL_ACCOUNT_FILTER_KEY = '__all_accounts__'
 
 const props = defineProps<{
   summaryStats: ArchiveSummaryStat[]
+}>()
+
+const emit = defineEmits<{
+  navigate: [page: 'home']
 }>()
 
 const selectedAccount = ref('')
@@ -75,7 +125,8 @@ const selectedRecordIndexes = ref<number[]>([])
 const fileListRows = ref<FileRow[]>([])
 const recordRows = ref<RecordRow[]>([])
 const recordTotal = ref(0)
-const archiveAccountsLoading = ref(false)
+const selectedAccountDropdownOpen = ref(false)
+const archiveAccountsLoading = ref(true)
 const archiveAccountsError = ref('')
 const archiveArticlesLoading = ref(false)
 const archiveArticlesError = ref('')
@@ -87,7 +138,6 @@ const cacheJobSnapshot = ref<ArchiveCacheJob | null>(null)
 const activeProcessIndex = ref(0)
 const cacheProcessRotationPaused = ref(false)
 const notifiedCacheArticleIds = ref<number[]>([])
-const cacheToasts = ref<CacheToast[]>([])
 const batchExportDialogOpen = ref(false)
 const selectedExportAccountIds = ref<number[]>([])
 const deleteDialog = ref<DeleteDialogState>({
@@ -108,14 +158,10 @@ const fileCurrentPage = ref(1)
 const filePageSize = ref(10)
 const recordCurrentPage = ref(1)
 const recordPageSize = ref(10)
-const accountTableWrapRef = ref<HTMLElement | null>(null)
-const recordTableWrapRef = ref<HTMLElement | null>(null)
-const pagerLayouts: Array<'PrevPage' | 'JumpNumber' | 'NextPage'> = ['PrevPage', 'JumpNumber', 'NextPage']
 const archiveTablePageSize = 10
 let archiveArticlesRequestId = 0
 let cachePollingTimer: number | undefined
 let cacheProcessRotationTimer: number | undefined
-let archiveTableResizeObserver: ResizeObserver | undefined
 
 type PagerChangeParams = {
   currentPage: number
@@ -132,6 +178,33 @@ const accountSelectOptions = computed(() => {
     value: account,
   }))
 })
+
+const accountFilterOptions = computed(() => [
+  { label: '全部公众号', value: ALL_ACCOUNT_FILTER_KEY },
+  ...accountSelectOptions.value,
+])
+
+const selectedAccountLabel = computed(() => selectedAccount.value || '选择公众号')
+
+const selectedAccountMenuKeys = computed(() => [selectedAccount.value || ALL_ACCOUNT_FILTER_KEY])
+
+const selectedCollectDateRange = computed<CollectDateRangeValue>({
+  get: (): CollectDateRangeValue => {
+    if (!selectedCollectStartDate.value || !selectedCollectEndDate.value) {
+      return null
+    }
+    return [selectedCollectStartDate.value, selectedCollectEndDate.value]
+  },
+  set: (value: CollectDateRangeValue) => {
+    selectedCollectStartDate.value = value?.[0] ?? ''
+    selectedCollectEndDate.value = value?.[1] ?? ''
+  },
+})
+
+function selectArchiveAccountFilter(value: string) {
+  selectedAccount.value = value === ALL_ACCOUNT_FILTER_KEY ? '' : value
+  selectedAccountDropdownOpen.value = false
+}
 
 const archiveMetricLabels = new Set(['文章数量', '存储占用'])
 
@@ -252,6 +325,10 @@ const batchExportRows = computed(() => {
   return fileListRows.value
 })
 
+const archiveDistributionData = computed(() => buildArchiveDistribution(fileListRows.value))
+
+const archiveOverview = computed(() => buildArchiveOverview(fileListRows.value))
+
 const recordPagerTotal = computed(() => {
   return selectedPreviewFile.value ? recordTotal.value : 0
 })
@@ -278,6 +355,112 @@ const recordPlaceholderRowCount = computed(() => {
   }
   return Math.max(archiveTablePageSize - visibleRecordRows.value.length, 0)
 })
+
+function makeStateCellAttrs(stateColumnKey: string, span: number) {
+  return (columnKey: string) => (record: ArchiveTableRow) => {
+    if (record.rowKind !== 'state') {
+      return {}
+    }
+
+    return columnKey === stateColumnKey ? { colSpan: span } : { colSpan: 0 }
+  }
+}
+
+const accountStateCellAttrs = makeStateCellAttrs('index', 5)
+const recordStateCellAttrs = makeStateCellAttrs('selection', 5)
+
+const accountTableColumns: ArchiveTableColumn[] = [
+  { title: '序号', key: 'index', width: 46, align: 'center', customCell: accountStateCellAttrs('index') },
+  { title: '公众号', key: 'account', dataIndex: 'account', width: '22%', align: 'center', className: 'account-name-col', customCell: accountStateCellAttrs('account') },
+  { title: '采集时间', key: 'createdAt', dataIndex: 'createdAt', width: '26%', align: 'center', className: 'account-time-col', customCell: accountStateCellAttrs('createdAt') },
+  { title: '数量', key: 'articleCount', dataIndex: 'articleCount', width: '9%', align: 'center', className: 'account-size-col', customCell: accountStateCellAttrs('articleCount') },
+  { title: '操作', key: 'actions', width: 220, align: 'center', className: 'action-cell account-action-col', customCell: accountStateCellAttrs('actions') },
+]
+
+const recordTableColumns: ArchiveTableColumn[] = [
+  { title: '', key: 'selection', width: 58, align: 'center', className: 'checkbox-cell record-action-col', customCell: recordStateCellAttrs('selection') },
+  { title: '标题', key: 'title', dataIndex: 'title', align: 'left', className: 'record-title', customCell: recordStateCellAttrs('title') },
+  { title: '文章发布时间', key: 'publishedAt', dataIndex: 'publishedAt', width: 142, align: 'center', className: 'record-time-col', customCell: recordStateCellAttrs('publishedAt') },
+  { title: '大小', key: 'size', dataIndex: 'size', width: 76, align: 'center', className: 'record-size-col', customCell: recordStateCellAttrs('size') },
+  { title: '操作', key: 'open', width: 86, align: 'center', className: 'record-open-col', customCell: recordStateCellAttrs('open') },
+]
+
+const batchExportTableColumns = [
+  { title: '', key: 'selection', width: 54, align: 'center' as const },
+  { title: '序号', key: 'index', width: 72, align: 'center' as const },
+  { title: '公众号', key: 'account', dataIndex: 'account' },
+  { title: '记录数', key: 'articleCount', dataIndex: 'articleCount', width: 116, align: 'center' as const },
+]
+
+// Ant Table 的默认空状态不会占满 10 行，这里把状态行和占位行并入数据源，保持分页表格高度稳定。
+const accountTableRows = computed<AccountTableRow[]>(() => {
+  if (archiveAccountsLoading.value) {
+    return [{ rowKind: 'state', tableKey: 'account-loading', stateText: '正在读取数据库中的公众号列表...', stateTone: 'default' }]
+  }
+  if (archiveAccountsError.value) {
+    return [{ rowKind: 'state', tableKey: 'account-error', stateText: archiveAccountsError.value, stateTone: 'error' }]
+  }
+  if (visibleFileRows.value.length === 0) {
+    return [{ rowKind: 'state', tableKey: 'account-empty', stateText: '数据库中暂无公众号记录', stateTone: 'default' }]
+  }
+
+  const pageStart = (fileCurrentPage.value - 1) * filePageSize.value
+  const rows: AccountTableRow[] = visibleFileRows.value.map((file, index) => ({
+    ...file,
+    rowKind: 'data',
+    tableKey: `account-${file.id}`,
+    displayIndex: pageStart + index + 1,
+  }))
+
+  for (let index = 0; index < filePlaceholderRowCount.value; index += 1) {
+    rows.push({ rowKind: 'placeholder', tableKey: `account-placeholder-${index + 1}` })
+  }
+
+  return rows
+})
+
+const recordTableRows = computed<RecordTableRow[]>(() => {
+  if (archiveArticlesLoading.value) {
+    return [{ rowKind: 'state', tableKey: 'record-loading', stateText: '正在读取该公众号的记录详情...', stateTone: 'default' }]
+  }
+  if (archiveArticlesError.value) {
+    return [{ rowKind: 'state', tableKey: 'record-error', stateText: archiveArticlesError.value, stateTone: 'error' }]
+  }
+  if (visibleRecordRows.value.length === 0) {
+    return [{ rowKind: 'state', tableKey: 'record-empty', stateText: '该公众号暂无文章记录', stateTone: 'default' }]
+  }
+
+  const rows: RecordTableRow[] = visibleRecordRows.value.map((record, index) => ({
+    ...record,
+    rowKind: 'data',
+    tableKey: `record-${record.id}`,
+    displayIndex: index + 1,
+  }))
+
+  for (let index = 0; index < recordPlaceholderRowCount.value; index += 1) {
+    rows.push({ rowKind: 'placeholder', tableKey: `record-placeholder-${index + 1}` })
+  }
+
+  return rows
+})
+
+function getArchiveTableRowKey(record: ArchiveTableRow) {
+  return record.tableKey
+}
+
+function getBatchExportRowKey(record: FileRow) {
+  return record.id
+}
+
+function getArchiveTableCustomRow(record: ArchiveTableRow) {
+  if (record.rowKind === 'placeholder') {
+    return { class: 'table-placeholder-row', 'aria-hidden': 'true' }
+  }
+  if (record.rowKind === 'state') {
+    return { class: 'table-state-row' }
+  }
+  return {}
+}
 
 const allRecordIndexes = computed(() => {
   const pageStartIndex = (recordCurrentPage.value - 1) * recordPageSize.value
@@ -370,9 +553,24 @@ async function loadArchiveAccounts() {
   }
 }
 
-function toggleAllRecords(event: Event) {
-  const checked = (event.target as HTMLInputElement).checked
+function toggleAllRecords(event: CheckboxChangeEvent) {
+  const checked = event.target.checked
   selectedRecordIndexes.value = checked ? [...allRecordIndexes.value] : []
+}
+
+function isRecordSelected(rowIndex: number) {
+  return selectedRecordIndexes.value.includes(rowIndex)
+}
+
+function toggleRecordSelection(rowIndex: number, event: CheckboxChangeEvent) {
+  const checked = event.target.checked
+  const nextIndexes = new Set(selectedRecordIndexes.value)
+  if (checked) {
+    nextIndexes.add(rowIndex)
+  } else {
+    nextIndexes.delete(rowIndex)
+  }
+  selectedRecordIndexes.value = Array.from(nextIndexes).sort((left, right) => left - right)
 }
 
 // 记录详情按后端分页加载；每次打开或翻页时只让后端计算当前页文章目录大小。
@@ -412,9 +610,35 @@ async function previewFile(file: FileRow) {
   await loadArchiveArticles(file, 1, recordPageSize.value)
 }
 
+// 刷新列表后按公众号 ID 重新绑定当前项，保留用户正在查看的详情页位置。
+async function handleRefreshArchiveData() {
+  const selectedFileId = selectedPreviewFile.value?.id
+  await loadArchiveAccounts()
+
+  if (selectedFileId === undefined) {
+    return
+  }
+
+  const refreshedFile = fileListRows.value.find((file) => file.id === selectedFileId)
+  if (!refreshedFile) {
+    selectedPreviewFile.value = null
+    recordRows.value = []
+    recordTotal.value = 0
+    selectedRecordIndexes.value = []
+    return
+  }
+
+  selectedPreviewFile.value = refreshedFile
+  await loadArchiveArticles(refreshedFile, recordCurrentPage.value, recordPageSize.value)
+}
+
 function handleFilePageChange({ currentPage, pageSize }: PagerChangeParams) {
   fileCurrentPage.value = currentPage
   filePageSize.value = pageSize
+}
+
+function handleAntFilePageChange(page: number, pageSize: number) {
+  handleFilePageChange({ currentPage: page, pageSize })
 }
 
 function handleRecordPageChange({ currentPage, pageSize }: PagerChangeParams) {
@@ -423,6 +647,10 @@ function handleRecordPageChange({ currentPage, pageSize }: PagerChangeParams) {
   if (selectedPreviewFile.value) {
     void loadArchiveArticles(selectedPreviewFile.value, currentPage, pageSize)
   }
+}
+
+function handleAntRecordPageChange(page: number, pageSize: number) {
+  handleRecordPageChange({ currentPage: page, pageSize })
 }
 
 async function refreshArchiveViewAfterDelete() {
@@ -452,24 +680,30 @@ function formatDeleteFailureMessage(result: Awaited<ReturnType<typeof deleteArch
   return firstFailure ? `部分本地目录删除失败：${firstFailure.path}` : '删除时存在未完成项，请查看后端日志'
 }
 
-function showCacheToast(message: string, tone: CacheToastTone = 'success') {
-  const toast: CacheToast = {
-    id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
-    message,
-    tone,
+function showCacheNotification(message: string, tone: CacheNotificationTone = 'success') {
+  const options = {
+    description: message,
+    placement: 'bottomRight' as const,
+    duration: 2.4,
   }
-  cacheToasts.value = [...cacheToasts.value, toast].slice(-4)
-  window.setTimeout(() => {
-    cacheToasts.value = cacheToasts.value.filter((item) => item.id !== toast.id)
-  }, 1800)
+
+  if (tone === 'error') {
+    notification.error({ message: '操作失败', ...options })
+    return
+  }
+  if (tone === 'warning') {
+    notification.warning({ message: '请注意', ...options })
+    return
+  }
+  notification.success({ message: '操作成功', ...options })
 }
 
 async function handleOpenStorageDirectory() {
   try {
     const result = await openRuntimePath('storageDir')
-    showCacheToast(result.message || '已打开数据归档目录。', result.ok ? 'success' : 'error')
+    showCacheNotification(result.message || '已打开数据归档目录。', result.ok ? 'success' : 'error')
   } catch (error) {
-    showCacheToast(error instanceof Error ? error.message : '打开数据归档目录失败', 'error')
+    showCacheNotification(error instanceof Error ? error.message : '打开数据归档目录失败', 'error')
   }
 }
 
@@ -483,9 +717,9 @@ function openArticleLink(record: RecordRow) {
 async function openRecordArchiveDirectory(record: RecordRow) {
   try {
     const result = await openArchiveArticleDirectory(record.id)
-    showCacheToast(result.message || '已打开文章归档目录。', result.ok ? 'success' : 'error')
+    showCacheNotification(result.message || '已打开文章归档目录。', result.ok ? 'success' : 'error')
   } catch (error) {
-    showCacheToast(error instanceof Error ? error.message : '打开文章归档目录失败', 'error')
+    showCacheNotification(error instanceof Error ? error.message : '打开文章归档目录失败', 'error')
   }
 }
 
@@ -536,9 +770,9 @@ function notifyCacheResults(results: ArchiveCacheResultItem[]) {
     }
     notified.add(item.articleId)
     if (item.ok) {
-      showCacheToast(`${item.articleTitle} 已缓存`, 'success')
+      showCacheNotification(`${item.articleTitle} 已缓存`, 'success')
     } else {
-      showCacheToast(`${item.articleTitle} 缓存失败`, 'error')
+      showCacheNotification(`${item.articleTitle} 缓存失败`, 'error')
     }
   }
   notifiedCacheArticleIds.value = Array.from(notified)
@@ -556,13 +790,13 @@ async function handleCacheJobSnapshot(job: ArchiveCacheJob) {
   archiveCaching.value = false
   activeCacheJobId.value = ''
   if (job.status === 'done' && job.total === 0) {
-    showCacheToast(job.message || '没有可缓存的文章', 'warning')
+    showCacheNotification(job.message || '没有可缓存的文章', 'warning')
   } else if (job.status === 'done' && job.skipped > 0) {
-    showCacheToast(job.message || `新增缓存 ${job.finished} 篇，跳过已有缓存 ${job.skipped} 篇。`, 'success')
+    showCacheNotification(job.message || `新增缓存 ${job.finished} 篇，跳过已有缓存 ${job.skipped} 篇。`, 'success')
   } else if (job.status === 'partial_failed') {
-    showCacheToast(job.message || '部分文章缓存失败', 'warning')
+    showCacheNotification(job.message || '部分文章缓存失败', 'warning')
   } else if (job.status === 'failed' || job.status === 'missing') {
-    showCacheToast(job.message || '缓存任务失败', 'error')
+    showCacheNotification(job.message || '缓存任务失败', 'error')
   }
   await refreshArchiveViewAfterCache()
 }
@@ -575,7 +809,7 @@ async function pollCacheJob(jobId: string) {
     clearCachePolling()
     archiveCaching.value = false
     activeCacheJobId.value = ''
-    showCacheToast(error instanceof Error ? error.message : '读取缓存任务状态失败', 'error')
+    showCacheNotification(error instanceof Error ? error.message : '读取缓存任务状态失败', 'error')
   }
 }
 
@@ -590,7 +824,7 @@ function startCachePolling(jobId: string) {
 
 async function startArchiveCacheJob(jobPromise: Promise<ArchiveCacheJob>) {
   if (archiveCaching.value) {
-    showCacheToast('已有缓存任务正在执行', 'warning')
+    showCacheNotification('已有缓存任务正在执行', 'warning')
     return
   }
   archiveCaching.value = true
@@ -608,14 +842,14 @@ async function startArchiveCacheJob(jobPromise: Promise<ArchiveCacheJob>) {
     }
   } catch (error) {
     archiveCaching.value = false
-    showCacheToast(error instanceof Error ? error.message : '创建缓存任务失败', 'error')
+    showCacheNotification(error instanceof Error ? error.message : '创建缓存任务失败', 'error')
   }
 }
 
 async function cacheSelectedRecords() {
   const articleIds = selectedRecordIds.value
   if (articleIds.length === 0) {
-    showCacheToast('请先选择要缓存的文章', 'warning')
+    showCacheNotification('请先选择要缓存的文章', 'warning')
     return
   }
   await startArchiveCacheJob(cacheArchiveArticles(articleIds))
@@ -638,14 +872,29 @@ function closeBatchExportDialog() {
   batchExportDialogOpen.value = false
 }
 
-function toggleAllExportAccounts(event: Event) {
-  const checked = (event.target as HTMLInputElement).checked
+function toggleAllExportAccounts(event: CheckboxChangeEvent) {
+  const checked = event.target.checked
   selectedExportAccountIds.value = checked ? batchExportRows.value.map((file) => file.id) : []
+}
+
+function isExportAccountSelected(accountId: number) {
+  return selectedExportAccountIds.value.includes(accountId)
+}
+
+function toggleExportAccount(accountId: number, event: CheckboxChangeEvent) {
+  const checked = event.target.checked
+  const nextIds = new Set(selectedExportAccountIds.value)
+  if (checked) {
+    nextIds.add(accountId)
+  } else {
+    nextIds.delete(accountId)
+  }
+  selectedExportAccountIds.value = Array.from(nextIds)
 }
 
 async function handleBatchExportExcel() {
   if (selectedExportAccountIds.value.length === 0) {
-    showCacheToast('请先选择要导出的公众号', 'warning')
+    showCacheNotification('请先选择要导出的公众号', 'warning')
     return
   }
   archiveExporting.value = true
@@ -653,17 +902,17 @@ async function handleBatchExportExcel() {
     const result = await exportArchiveAccountsToExcel([...selectedExportAccountIds.value])
     if (!result.ok) {
       const message = result.message || '导出 Excel 失败'
-      showCacheToast(message, 'error')
+      showCacheNotification(message, 'error')
       return
     }
     batchExportDialogOpen.value = false
-    showCacheToast(
+    showCacheNotification(
       result.message || `已导出 ${result.exportedFileCount} 个 Excel 文件，共 ${result.totalRowCount} 条记录`,
       result.status === 'partial-failed' ? 'warning' : 'success',
     )
   } catch (error) {
     const message = error instanceof Error ? error.message : '导出 Excel 失败'
-    showCacheToast(message, message.includes('取消') ? 'warning' : 'error')
+    showCacheNotification(message, message.includes('取消') ? 'warning' : 'error')
   } finally {
     archiveExporting.value = false
   }
@@ -869,35 +1118,6 @@ async function confirmDeleteDialog() {
   }
 }
 
-function updatePagedTableRowHeight(tableWrap: HTMLElement | null) {
-  if (!tableWrap) {
-    return
-  }
-
-  const tableHeader = tableWrap.querySelector('thead')
-  const headerHeight = tableHeader?.getBoundingClientRect().height ?? 0
-  const rowHeight = calculatePagedTableRowHeight(tableWrap.clientHeight, headerHeight, archiveTablePageSize)
-  if (rowHeight > 0) {
-    tableWrap.style.setProperty('--paged-table-row-height', `${rowHeight}px`)
-  }
-}
-
-function updateArchiveTableRowHeights() {
-  updatePagedTableRowHeight(accountTableWrapRef.value)
-  updatePagedTableRowHeight(recordTableWrapRef.value)
-}
-
-function observeArchiveTableWraps() {
-  archiveTableResizeObserver?.disconnect()
-  if (accountTableWrapRef.value) {
-    archiveTableResizeObserver?.observe(accountTableWrapRef.value)
-  }
-  if (recordTableWrapRef.value) {
-    archiveTableResizeObserver?.observe(recordTableWrapRef.value)
-  }
-  updateArchiveTableRowHeights()
-}
-
 watch([selectedAccount, selectedCollectStartDate, selectedCollectEndDate], () => {
   fileCurrentPage.value = 1
   selectedPreviewFile.value = null
@@ -907,10 +1127,6 @@ watch([selectedAccount, selectedCollectStartDate, selectedCollectEndDate], () =>
   archiveArticlesError.value = ''
   archiveArticlesLoading.value = false
 })
-
-watch(selectedPreviewFile, () => {
-  void nextTick(observeArchiveTableWraps)
-}, { flush: 'post' })
 
 watch(
   () => activeCacheProcesses.value.map((item) => item.articleId).join(','),
@@ -922,16 +1138,11 @@ watch(
 onMounted(() => {
   void loadArchiveAccounts()
   startCacheProcessRotation()
-  if (typeof ResizeObserver !== 'undefined') {
-    archiveTableResizeObserver = new ResizeObserver(updateArchiveTableRowHeights)
-  }
-  void nextTick(observeArchiveTableWraps)
 })
 
 onBeforeUnmount(() => {
   clearCachePolling()
   clearCacheProcessRotation()
-  archiveTableResizeObserver?.disconnect()
 })
 
 </script>
@@ -1005,121 +1216,127 @@ onBeforeUnmount(() => {
         </h2>
 
         <div class="filters-row file-filters">
-          <VxeSelect
-            v-model="selectedAccount"
-            class="file-vxe-control account-select"
-            clearable
-            filterable
-            placeholder="选择公众号"
-            :options="accountSelectOptions"
-            :option-props="{ label: 'label', value: 'value' }"
-            :popup-config="{ transfer: true, zIndex: 3000, className: 'account-select-panel' }"
-            aria-label="选择公众号"
-          />
-          <VxeDateRangePicker
-            v-model:start-value="selectedCollectStartDate"
-            v-model:end-value="selectedCollectEndDate"
-            class="file-vxe-control file-date-range-picker"
-            type="date"
-            clearable
-            auto-close
-            placeholder="采集起始日期 ~ 采集结束日期"
+          <AButton
+            class="file-refresh-button"
+            html-type="button"
+            :loading="archiveAccountsLoading || archiveArticlesLoading"
+            @click="handleRefreshArchiveData"
+          >
+            <ReloadOutlined />
+            刷新
+          </AButton>
+          <ADropdown
+            v-model:open="selectedAccountDropdownOpen"
+            :trigger="['click']"
+            placement="bottomLeft"
+            overlay-class-name="file-account-filter-dropdown"
+          >
+            <AButton class="file-select-trigger account-select-trigger" aria-label="选择公众号">
+              <span>{{ selectedAccountLabel }}</span>
+              <DownOutlined
+                :class="['file-select-chevron', { 'is-open': selectedAccountDropdownOpen }]"
+              />
+            </AButton>
+            <template #overlay>
+              <AMenu :selected-keys="selectedAccountMenuKeys">
+                <AMenuItem
+                  v-for="option in accountFilterOptions"
+                  :key="option.value"
+                  @click="selectArchiveAccountFilter(option.value)"
+                >
+                  {{ option.label }}
+                </AMenuItem>
+              </AMenu>
+            </template>
+          </ADropdown>
+          <ARangePicker
+            v-model:value="selectedCollectDateRange"
+            class="file-date-picker file-date-range-picker"
+            :allow-clear="true"
+            format="YYYY-MM-DD"
+            value-format="YYYY-MM-DD"
             separator=" ~ "
-            value-format="yyyy-MM-dd"
-            label-format="yyyy-MM-dd"
-            :popup-config="{ transfer: true, zIndex: 3000, className: 'file-date-range-picker-panel' }"
+            popup-class-name="file-date-picker-panel"
+            :placeholder="['采集起始日期', '采集结束日期']"
             aria-label="采集起始日期和采集结束日期"
           />
         </div>
       </div>
 
-      <div ref="accountTableWrapRef" class="table-wrap">
-        <table class="data-table account-table">
-          <colgroup>
-            <col class="account-index-col" />
-            <col class="account-name-col" />
-            <col class="account-time-col" />
-            <col class="account-size-col" />
-            <col class="account-action-col" />
-          </colgroup>
-          <thead>
-            <tr>
-              <th>序号</th>
-              <th>公众号</th>
-              <th>采集时间</th>
-              <th>数量</th>
-              <th class="action-cell">操作</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-if="archiveAccountsLoading">
-              <td class="table-state-cell" colspan="5">正在读取数据库中的公众号列表...</td>
-            </tr>
-            <tr v-else-if="archiveAccountsError">
-              <td class="table-state-cell error" colspan="5">{{ archiveAccountsError }}</td>
-            </tr>
-            <tr v-else-if="visibleFileRows.length === 0">
-              <td class="table-state-cell" colspan="5">数据库中暂无公众号记录</td>
-            </tr>
-            <template v-else>
-              <tr v-for="(file, index) in visibleFileRows" :key="file.id">
-                <td>{{ (fileCurrentPage - 1) * filePageSize + index + 1 }}</td>
-                <td class="account-name-cell" :title="file.account">{{ truncateAccountName(file.account) }}</td>
-                <td>{{ file.createdAt }}</td>
-                <td>{{ file.articleCount }}</td>
-                <td class="action-cell">
-                  <span class="table-actions">
-                    <button class="text-link" type="button" @click="previewFile(file)">预览</button>
-                    <button
-                      class="text-link"
-                      type="button"
-                      :disabled="archiveCaching"
-                      @click="cacheAccountArticles(file)"
-                    >
-                      一键缓存
-                    </button>
-                    <button
-                      class="text-link danger"
-                      type="button"
-                      :disabled="archiveDeleting || archiveCaching"
-                      @click="openDeleteAccountDialog(file)"
-                    >
-                      删除
-                    </button>
-                  </span>
-                </td>
-              </tr>
-              <tr
-                v-for="placeholderIndex in filePlaceholderRowCount"
-                :key="`account-placeholder-${placeholderIndex}`"
-                class="table-placeholder-row"
-                aria-hidden="true"
-              >
-                <td colspan="5"></td>
-              </tr>
+      <div class="table-wrap">
+        <ATable
+          class="archive-ant-table account-table"
+          :columns="accountTableColumns"
+          :data-source="accountTableRows"
+          :pagination="false"
+          :row-key="getArchiveTableRowKey"
+          :custom-row="getArchiveTableCustomRow"
+          :locale="{ emptyText: null }"
+          size="small"
+          table-layout="fixed"
+        >
+          <template #bodyCell="{ column, record }">
+            <span
+              v-if="record.rowKind === 'state' && column.key === 'index'"
+              :class="['table-state-cell', { error: record.stateTone === 'error' }]"
+            >
+              {{ record.stateText }}
+            </span>
+            <template v-else-if="record.rowKind === 'data'">
+              <template v-if="column.key === 'index'">
+                {{ record.displayIndex }}
+              </template>
+              <span v-else-if="column.key === 'account'" class="account-name-cell" :title="record.account">
+                {{ truncateAccountName(record.account) }}
+              </span>
+              <template v-else-if="column.key === 'createdAt'">
+                {{ record.createdAt }}
+              </template>
+              <template v-else-if="column.key === 'articleCount'">
+                {{ record.articleCount }}
+              </template>
+              <span v-else-if="column.key === 'actions'" class="table-actions">
+                <AButton class="text-link" type="link" html-type="button" @click="previewFile(record)">预览</AButton>
+                <AButton
+                  class="text-link"
+                  type="link"
+                  html-type="button"
+                  :disabled="archiveCaching"
+                  @click="cacheAccountArticles(record)"
+                >
+                  一键缓存
+                </AButton>
+                <AButton
+                  class="text-link danger"
+                  type="link"
+                  html-type="button"
+                  :disabled="archiveDeleting || archiveCaching"
+                  @click="openDeleteAccountDialog(record)"
+                >
+                  删除
+                </AButton>
+              </span>
             </template>
-          </tbody>
-        </table>
+          </template>
+        </ATable>
       </div>
 
       <div class="pagination-bar">
         <span class="account-pagination-total">共 {{ filePagerTotal }} 条</span>
-        <VxePager
-          v-model:current-page="fileCurrentPage"
-          v-model:page-size="filePageSize"
-          class-name="file-vxe-pager"
-          size="mini"
-          align="right"
-          :layouts="pagerLayouts"
-          :pager-count="7"
-          :page-sizes="[10]"
-          :total="filePagerTotal"
-          @page-change="handleFilePageChange"
-        >
-          <template #right>
-            <span class="fixed-page-size" aria-label="每页条数">{{ filePageSize }} 条/页</span>
-          </template>
-        </VxePager>
+        <div class="pagination-controls">
+          <APagination
+            v-model:current="fileCurrentPage"
+            v-model:page-size="filePageSize"
+            class="file-ant-pager"
+            size="small"
+            :total="filePagerTotal"
+            :page-size-options="[10]"
+            :show-size-changer="false"
+            :show-less-items="false"
+            @change="handleAntFilePageChange"
+          />
+          <span class="fixed-page-size" aria-label="每页条数">{{ filePageSize }} 条/页</span>
+        </div>
       </div>
     </section>
 
@@ -1138,138 +1355,196 @@ onBeforeUnmount(() => {
               <span>已选择 {{ selectedRecordCount }} 条</span>
             </div>
             <div class="record-action-buttons">
-              <button
+              <AButton
                 class="action-button primary"
-                type="button"
+                html-type="button"
                 :disabled="selectedRecordCount === 0 || archiveCaching || archiveArticlesLoading"
                 @click="cacheSelectedRecords"
               >
                 <AppIcon icon="fa-solid fa-download" />
                 {{ archiveCaching ? '缓存中' : '缓存' }}
-              </button>
-              <button
+              </AButton>
+              <AButton
                 class="action-button danger"
-                type="button"
+                html-type="button"
                 :disabled="selectedRecordCount === 0 || archiveDeleting || archiveCaching || archiveArticlesLoading"
                 @click="openDeleteSelectedRecordsDialog"
               >
                 <AppIcon icon="fa-regular fa-trash-can" />
                 删除
-              </button>
+              </AButton>
             </div>
           </div>
         </div>
 
         <template v-if="selectedPreviewFile">
 
-          <div ref="recordTableWrapRef" class="table-wrap record-table-wrap">
-            <table class="data-table record-table">
-              <colgroup>
-                <col class="record-action-col" />
-                <col />
-                <col class="record-time-col" />
-                <col class="record-size-col" />
-                <col class="record-open-col" />
-              </colgroup>
-              <thead>
-                <tr>
-                  <th class="checkbox-cell">
-                    <input
-                      class="record-checkbox"
-                      type="checkbox"
-                      :checked="isAllRecordsSelected"
-                      :indeterminate.prop="isSomeRecordsSelected"
-                      :disabled="recordPagerTotal === 0 || archiveArticlesLoading || Boolean(archiveArticlesError)"
-                      aria-label="全选记录详情列表"
-                      @change="toggleAllRecords"
-                    />
-                  </th>
-                  <th>标题</th>
-                  <th>文章发布时间</th>
-                  <th>大小</th>
-                  <th>操作</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr v-if="archiveArticlesLoading">
-                  <td class="table-state-cell" colspan="5">正在读取该公众号的记录详情...</td>
-                </tr>
-                <tr v-else-if="archiveArticlesError">
-                  <td class="table-state-cell error" colspan="5">{{ archiveArticlesError }}</td>
-                </tr>
-                <tr v-else-if="visibleRecordRows.length === 0">
-                  <td class="table-state-cell" colspan="5">该公众号暂无文章记录</td>
-                </tr>
-                <template v-else>
-                  <tr v-for="(record, index) in visibleRecordRows" :key="record.id">
-                    <td class="checkbox-cell">
-                      <input
-                        v-model="selectedRecordIndexes"
-                        class="record-checkbox"
-                        type="checkbox"
-                        :value="(recordCurrentPage - 1) * recordPageSize + index"
-                        :aria-label="`勾选第 ${index + 1} 条记录`"
-                      />
-                    </td>
-                    <td class="record-title">
-                      <button
-                        class="record-title-link"
-                        type="button"
-                        :disabled="!record.link"
-                        :title="record.link ? `${record.title}\n${record.link}` : record.title"
-                        @click="openArticleLink(record)"
-                      >
-                        {{ record.title }}
-                      </button>
-                    </td>
-                    <td class="record-time">{{ record.publishedAt }}</td>
-                    <td class="record-size">{{ record.size }}</td>
-                    <td class="record-open-cell">
-                      <button
-                        class="text-link"
-                        type="button"
-                        @click="openRecordArchiveDirectory(record)"
-                      >
-                        打开目录
-                      </button>
-                    </td>
-                  </tr>
-                  <tr
-                    v-for="placeholderIndex in recordPlaceholderRowCount"
-                    :key="`record-placeholder-${placeholderIndex}`"
-                    class="table-placeholder-row"
-                    aria-hidden="true"
+          <div class="table-wrap record-table-wrap">
+            <ATable
+              class="archive-ant-table record-table"
+              :columns="recordTableColumns"
+              :data-source="recordTableRows"
+              :pagination="false"
+              :row-key="getArchiveTableRowKey"
+              :custom-row="getArchiveTableCustomRow"
+              :locale="{ emptyText: null }"
+              size="small"
+              table-layout="fixed"
+            >
+              <template #headerCell="{ column }">
+                <ACheckbox
+                  v-if="column.key === 'selection'"
+                  class="record-checkbox"
+                  :checked="isAllRecordsSelected"
+                  :indeterminate="isSomeRecordsSelected"
+                  :disabled="recordPagerTotal === 0 || archiveArticlesLoading || Boolean(archiveArticlesError)"
+                  aria-label="全选记录详情列表"
+                  @change="toggleAllRecords"
+                />
+                <template v-else>{{ column.title }}</template>
+              </template>
+
+              <template #bodyCell="{ column, record }">
+                <span
+                  v-if="record.rowKind === 'state' && column.key === 'selection'"
+                  :class="['table-state-cell', { error: record.stateTone === 'error' }]"
+                >
+                  {{ record.stateText }}
+                </span>
+                <template v-else-if="record.rowKind === 'data'">
+                  <ACheckbox
+                    v-if="column.key === 'selection'"
+                    class="record-checkbox"
+                    :checked="isRecordSelected(record.rowIndex)"
+                    :aria-label="`勾选第 ${record.displayIndex} 条记录`"
+                    @change="toggleRecordSelection(record.rowIndex, $event)"
+                  />
+                  <AButton
+                    v-else-if="column.key === 'title'"
+                    class="record-title-link"
+                    type="link"
+                    html-type="button"
+                    :disabled="!record.link"
+                    :title="record.link ? `${record.title}\n${record.link}` : record.title"
+                    @click="openArticleLink(record)"
                   >
-                    <td colspan="5"></td>
-                  </tr>
+                    {{ record.title }}
+                  </AButton>
+                  <template v-else-if="column.key === 'publishedAt'">
+                    {{ record.publishedAt }}
+                  </template>
+                  <template v-else-if="column.key === 'size'">
+                    {{ record.size }}
+                  </template>
+                  <span v-else-if="column.key === 'open'" class="record-open-cell">
+                    <AButton
+                      class="text-link"
+                      type="link"
+                      html-type="button"
+                      @click="openRecordArchiveDirectory(record)"
+                    >
+                      打开目录
+                    </AButton>
+                  </span>
                 </template>
-              </tbody>
-            </table>
+              </template>
+            </ATable>
           </div>
 
           <div class="record-pagination" aria-label="记录详情分页">
             <span class="record-pagination-total">共 {{ recordPagerTotal }} 条</span>
-            <VxePager
-              v-model:current-page="recordCurrentPage"
-              v-model:page-size="recordPageSize"
-              class-name="file-vxe-pager record-vxe-pager"
-              size="mini"
-              align="right"
-              :layouts="pagerLayouts"
-              :pager-count="5"
-              :page-sizes="[10]"
-              :total="recordPagerTotal"
-              @page-change="handleRecordPageChange"
-            >
-              <template #right>
-                <span class="fixed-page-size" aria-label="记录每页条数">{{ recordPageSize }} 条/页</span>
-              </template>
-            </VxePager>
+            <div class="pagination-controls">
+              <APagination
+                v-model:current="recordCurrentPage"
+                v-model:page-size="recordPageSize"
+                class="file-ant-pager record-ant-pager"
+                size="small"
+                :total="recordPagerTotal"
+                :page-size-options="[10]"
+                :show-size-changer="false"
+                :show-less-items="false"
+                @change="handleAntRecordPageChange"
+              />
+              <span class="fixed-page-size" aria-label="记录每页条数">{{ recordPageSize }} 条/页</span>
+            </div>
           </div>
         </template>
-        <div v-else class="record-empty" aria-live="polite">
-          <strong>请先点击左侧“预览”</strong>
-          <span>选择一个公众号后，这里会显示对应的记录详情列表、批量操作和分页按钮。</span>
+        <div v-else class="record-empty-shell" aria-live="polite">
+          <div v-if="archiveAccountsLoading" class="record-empty record-empty-loading">
+            <ASkeleton
+              active
+              :title="{ width: '46%' }"
+              :paragraph="{ rows: 6, width: ['68%', '92%', '84%', '76%', '64%', '54%'] }"
+            />
+          </div>
+
+          <AResult
+            v-else-if="archiveAccountsError"
+            class="record-empty record-empty-result"
+            status="warning"
+            title="读取归档数据失败"
+            :sub-title="archiveAccountsError"
+          >
+            <template #extra>
+              <AButton class="record-empty-primary" html-type="button" @click="handleRefreshArchiveData">
+                重新加载
+              </AButton>
+            </template>
+          </AResult>
+
+          <div v-else-if="archiveDistributionData.length === 0" class="record-empty record-empty-first-run">
+            <span class="record-empty-icon">
+              <AppIcon icon="fa-regular fa-folder-open" />
+            </span>
+            <h3>暂无归档数据</h3>
+            <p>完成一次文章采集后，这里将展示公众号分布、文章数量和归档概览。</p>
+            <AButton class="record-empty-primary" html-type="button" @click="emit('navigate', 'home')">
+              前往主服务
+            </AButton>
+          </div>
+
+          <div v-else class="record-empty record-overview-empty">
+            <div class="archive-overview-guide" role="note">
+              <span class="archive-overview-guide-icon">
+                <AppIcon icon="fa-regular fa-hand-pointer" />
+              </span>
+              <div class="archive-overview-guide-copy">
+                <strong>选择左侧公众号查看记录详情</strong>
+                <span>点击左侧列表中的「预览」后，可查看文章标题、发布时间、归档大小和操作入口。</span>
+              </div>
+              <div class="archive-overview-guide-steps" aria-label="查看记录详情步骤">
+                <span>选择公众号</span>
+                <span>点击预览</span>
+                <span>查看详情</span>
+              </div>
+            </div>
+            <div class="archive-overview-chart-wrap">
+              <ArchiveDistributionChart
+                :data="archiveDistributionData"
+                :total="archiveOverview.articleCount"
+              />
+            </div>
+            <div class="archive-overview-copy">
+              <span class="archive-overview-label">归档内容概览</span>
+              <h3>已归档 {{ archiveOverview.articleCount }} 篇文章</h3>
+              <dl class="archive-overview-stats">
+                <div>
+                  <dt>记录最多</dt>
+                  <dd>{{ archiveOverview.topAccountName }} · {{ archiveOverview.topAccountArticleCount }} 篇</dd>
+                </div>
+                <div>
+                  <dt>最近采集</dt>
+                  <dd>{{ archiveOverview.latestCollectDate }}</dd>
+                </div>
+              </dl>
+              <div class="archive-overview-legend" aria-label="公众号文章数量占比">
+                <span v-for="item in archiveDistributionData" :key="item.name">
+                  <i :style="{ backgroundColor: item.color }"></i>
+                  {{ item.name }} {{ item.value }}
+                </span>
+              </div>
+            </div>
+          </div>
         </div>
       </section>
     </aside>
@@ -1283,153 +1558,172 @@ onBeforeUnmount(() => {
       </div>
 
       <div class="bottom-quick-grid">
-        <button class="action-button ghost" type="button" @click="handleOpenStorageDirectory">
+        <AButton class="action-button ghost" html-type="button" @click="handleOpenStorageDirectory">
           <AppIcon icon="fa-regular fa-folder-open" />
           打开目录
-        </button>
-        <button
+        </AButton>
+        <AButton
           class="action-button purple"
-          type="button"
+          html-type="button"
           :disabled="fileListRows.length === 0"
           @click="openBatchExportDialog"
         >
           <AppIcon icon="fa-regular fa-file-excel" />
           批量导出
-        </button>
-        <button
+        </AButton>
+        <AButton
           class="action-button danger"
-          type="button"
+          html-type="button"
           :disabled="archiveDeleting || archiveCaching || fileListRows.length === 0"
           @click="openDeleteAllArchivesDialog"
         >
           <AppIcon icon="fa-regular fa-trash-can" />
           全部删除
-        </button>
+        </AButton>
       </div>
     </section>
 
-    <transition name="batch-export-dialog-fade">
-      <div
-        v-if="batchExportDialogOpen"
-        class="batch-export-dialog-layer"
-        role="presentation"
-        @click.self="closeBatchExportDialog"
-      >
-        <section
-          class="batch-export-dialog"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="batch-export-dialog-title"
+    <AModal
+      v-model:open="batchExportDialogOpen"
+      class="batch-export-modal"
+      :width="680"
+      :closable="!archiveExporting"
+      :keyboard="!archiveExporting"
+      :mask-closable="!archiveExporting"
+      centered
+      @cancel="closeBatchExportDialog"
+    >
+      <template #title>
+        <div class="batch-export-head">
+          <span class="batch-export-icon" aria-hidden="true">
+            <AppIcon icon="fa-regular fa-file-excel" />
+          </span>
+          <div>
+            <h3 id="batch-export-dialog-title">已有公众号列表</h3>
+            <p>选择需要导出的公众号，下一步将把对应记录写入 Excel 文件。</p>
+          </div>
+        </div>
+      </template>
+
+      <div class="batch-export-meta" aria-live="polite">
+        已选择 {{ selectedExportCount }} 个公众号，共 {{ selectedExportRecordCount }} 条记录
+      </div>
+
+      <div class="batch-export-table-wrap">
+        <ATable
+          class="archive-ant-table batch-export-ant-table"
+          :columns="batchExportTableColumns"
+          :data-source="batchExportRows"
+          :pagination="false"
+          :row-key="getBatchExportRowKey"
+          :locale="{ emptyText: '数据库中暂无公众号记录' }"
+          size="small"
+          table-layout="fixed"
         >
-          <header class="batch-export-head">
-            <span class="batch-export-icon" aria-hidden="true">
-              <AppIcon icon="fa-regular fa-file-excel" />
+          <template #headerCell="{ column }">
+            <ACheckbox
+              v-if="column.key === 'selection'"
+              class="record-checkbox"
+              :checked="isAllExportAccountsSelected"
+              :indeterminate="isSomeExportAccountsSelected"
+              :disabled="archiveExporting"
+              aria-label="选择全部公众号"
+              @change="toggleAllExportAccounts"
+            />
+            <template v-else>{{ column.title }}</template>
+          </template>
+
+          <template #bodyCell="{ column, record, index }">
+            <ACheckbox
+              v-if="column.key === 'selection'"
+              class="record-checkbox"
+              :checked="isExportAccountSelected(record.id)"
+              :disabled="archiveExporting"
+              :aria-label="`选择公众号 ${record.account}`"
+              @change="toggleExportAccount(record.id, $event)"
+            />
+            <template v-else-if="column.key === 'index'">{{ index + 1 }}</template>
+            <span v-else-if="column.key === 'account'" class="export-account-cell" :title="record.account">
+              {{ record.account }}
             </span>
-            <div>
-              <h3 id="batch-export-dialog-title">已有公众号列表</h3>
-              <p>选择需要导出的公众号，下一步将把对应记录写入 Excel 文件。</p>
-            </div>
-          </header>
-
-          <div class="batch-export-meta" aria-live="polite">
-            已选择 {{ selectedExportCount }} 个公众号，共 {{ selectedExportRecordCount }} 条记录
-          </div>
-
-          <div class="batch-export-table-wrap">
-            <table class="data-table batch-export-table">
-              <colgroup>
-                <col class="export-check-col" />
-                <col class="export-index-col" />
-                <col />
-                <col class="export-count-col" />
-              </colgroup>
-              <thead>
-                <tr>
-                  <th class="export-check-col">
-                    <input
-                      class="record-checkbox"
-                      type="checkbox"
-                      :checked="isAllExportAccountsSelected"
-                      :indeterminate="isSomeExportAccountsSelected"
-                      :disabled="archiveExporting"
-                      aria-label="选择全部公众号"
-                      @change="toggleAllExportAccounts"
-                    />
-                  </th>
-                  <th>公众号</th>
-                  <th>记录数</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr v-if="batchExportRows.length === 0">
-                  <td class="table-state-cell" colspan="4">数据库中暂无公众号记录</td>
-                </tr>
-                <tr v-for="(file, index) in batchExportRows" :key="file.id">
-                  <td class="export-check-cell">
-                    <input
-                      v-model="selectedExportAccountIds"
-                      class="record-checkbox"
-                      type="checkbox"
-                      :value="file.id"
-                      :disabled="archiveExporting"
-                      :aria-label="`选择公众号 ${file.account}`"
-                    />
-                  </td>
-                  <td class="export-index-cell">{{ index + 1 }}</td>
-                  <td class="export-account-cell" :title="file.account">{{ file.account }}</td>
-                  <td class="export-count-cell">{{ file.articleCount }} 条</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-
-          <footer class="batch-export-actions">
-            <button class="action-button ghost" type="button" :disabled="archiveExporting" @click="closeBatchExportDialog">
-              取消
-            </button>
-            <button
-              class="action-button success"
-              type="button"
-              :disabled="selectedExportCount === 0 || archiveExporting"
-              @click="handleBatchExportExcel"
-            >
-              <AppIcon :class="{ 'spin-icon': archiveExporting }" :icon="archiveExporting ? 'fa-solid fa-rotate' : 'fa-regular fa-file-excel'" />
-              {{ archiveExporting ? '正在导出...' : '导出为excel' }}
-            </button>
-          </footer>
-        </section>
+            <template v-else-if="column.key === 'articleCount'">{{ record.articleCount }} 条</template>
+          </template>
+        </ATable>
       </div>
-    </transition>
 
-    <ConfirmDialog
+      <template #footer>
+        <div class="batch-export-actions">
+          <AButton class="action-button ghost" html-type="button" :disabled="archiveExporting" @click="closeBatchExportDialog">
+            取消
+          </AButton>
+          <AButton
+            class="action-button success"
+            type="primary"
+            html-type="button"
+            :disabled="selectedExportCount === 0"
+            :loading="archiveExporting"
+            @click="handleBatchExportExcel"
+          >
+            <AppIcon v-if="!archiveExporting" icon="fa-regular fa-file-excel" />
+            {{ archiveExporting ? '正在导出...' : '导出为excel' }}
+          </AButton>
+        </div>
+      </template>
+    </AModal>
+
+    <AModal
       :open="deleteDialog.open"
+      class="archive-delete-modal"
       :title="deleteDialog.title"
-      :description="deleteDialog.description"
-      :summary-items="deleteDialog.summaryItems"
-      :detail-title="deleteDialog.detailTitle"
-      :detail-items="deleteDialog.detailItems"
-      :warning="deleteDialog.warning"
-      :error-message="deleteDialog.errorMessage"
-      :loading="archiveDeleting"
-      :confirm-text="deleteDialog.confirmText"
-      tone="danger"
-      icon="fa-regular fa-trash-can"
-      confirm-icon="fa-regular fa-trash-can"
-      loading-text="删除中..."
+      :closable="!archiveDeleting"
+      :keyboard="!archiveDeleting"
+      :mask-closable="!archiveDeleting"
+      :confirm-loading="archiveDeleting"
+      :ok-text="deleteDialog.confirmText"
+      :ok-button-props="{ danger: deleteDialog.confirmText !== '我知道了' }"
+      cancel-text="取消"
+      centered
       @cancel="closeDeleteDialog"
-      @confirm="confirmDeleteDialog"
-    />
+      @ok="confirmDeleteDialog"
+    >
+      <div class="archive-delete-content">
+        <div class="archive-delete-intro">
+          <span class="archive-delete-icon" aria-hidden="true">
+            <AppIcon icon="fa-regular fa-trash-can" />
+          </span>
+          <p>{{ deleteDialog.description }}</p>
+        </div>
 
-    <transition-group name="archive-toast-fade" tag="div" class="archive-toast-stack" aria-live="polite">
-      <div
-        v-for="toast in cacheToasts"
-        :key="toast.id"
-        :class="['archive-toast', `archive-toast--${toast.tone}`]"
-        role="status"
-      >
-        {{ toast.message }}
+        <dl v-if="deleteDialog.summaryItems.length" class="archive-delete-summary">
+          <div v-for="item in deleteDialog.summaryItems" :key="item.label">
+            <dt>{{ item.label }}</dt>
+            <dd>{{ item.value }}</dd>
+          </div>
+        </dl>
+
+        <div v-if="deleteDialog.detailItems.length" class="archive-delete-detail">
+          <strong>{{ deleteDialog.detailTitle }}</strong>
+          <ul>
+            <li v-for="item in deleteDialog.detailItems" :key="item">{{ item }}</li>
+          </ul>
+        </div>
+
+        <AAlert
+          v-if="deleteDialog.warning"
+          class="archive-delete-alert"
+          type="warning"
+          show-icon
+          :message="deleteDialog.warning"
+        />
+        <AAlert
+          v-if="deleteDialog.errorMessage"
+          class="archive-delete-alert"
+          type="error"
+          show-icon
+          :message="deleteDialog.errorMessage"
+        />
       </div>
-    </transition-group>
+    </AModal>
   </section>
 </template>
 
@@ -1441,6 +1735,9 @@ onBeforeUnmount(() => {
     'metrics metrics'
     'list side'
     'quick quick';
+  --archive-table-header-height: 34px;
+  --archive-table-row-height: 38.2px;
+  --archive-table-body-height: calc(var(--archive-table-row-height) * 10);
 }
 
 .files-metrics {
@@ -1572,7 +1869,7 @@ onBeforeUnmount(() => {
   grid-template-columns: max-content minmax(0, 1fr);
   align-items: center;
   gap: 24px;
-  min-height: 48px;
+  min-height: 36px;
   min-width: 0;
 }
 
@@ -1587,35 +1884,67 @@ onBeforeUnmount(() => {
   box-shadow: var(--paper-shadow-sm), var(--paper-shadow-md);
 }
 
-.file-list .data-table th,
-.record-table th {
-  height: 34px;
-}
-
-.file-list .data-table td,
-.record-table td {
-  height: var(--paged-table-row-height, 34px);
-}
-
-.file-list .data-table th,
-.file-list .data-table td {
+.files-page :deep(.archive-ant-table .ant-table-thead > tr > th) {
+  height: var(--archive-table-header-height);
   padding: 0 8px;
-}
-
-.files-page .data-table th {
+  border-bottom: 1px solid rgba(104, 141, 181, 0.16);
+  color: var(--ink-strong);
   background: rgba(234, 244, 251, 0.48);
   font-weight: 500;
+  text-align: center;
 }
 
-.files-page .data-table td {
+.files-page :deep(.archive-ant-table .ant-table-tbody) {
+  height: var(--archive-table-body-height);
+}
+
+.files-page :deep(.archive-ant-table .ant-table-tbody > tr) {
+  height: var(--archive-table-row-height);
+}
+
+.files-page :deep(.archive-ant-table .ant-table-tbody > tr > td) {
+  box-sizing: border-box;
+  height: var(--archive-table-row-height);
+  padding: 0 8px;
+  border-bottom: 0;
+  box-shadow: inset 0 -1px 0 rgba(104, 141, 181, 0.09);
+  color: var(--ink-strong);
+  background: transparent;
   font-weight: 400;
+}
+
+.files-page :deep(.archive-ant-table .ant-table-tbody > tr:last-child > td) {
+  border-bottom: 0;
+  box-shadow: none;
+}
+
+.files-page :deep(.archive-ant-table .ant-table) {
+  color: var(--ink-strong);
+  background: transparent;
+  font-size: 13px;
+}
+
+.files-page :deep(.archive-ant-table .ant-table-container),
+.files-page :deep(.archive-ant-table .ant-table-content),
+.files-page :deep(.archive-ant-table table) {
+  background: transparent;
+}
+
+.files-page :deep(.archive-ant-table .ant-table-tbody > tr:hover > td) {
+  background: rgba(45, 117, 214, 0.05);
+}
+
+.files-page :deep(.archive-ant-table .ant-btn.text-link) {
+  height: 28px;
+  min-height: 28px;
+  line-height: 1;
 }
 
 .file-list .table-wrap {
   position: relative;
   z-index: 1;
-  height: auto;
   align-self: stretch;
+  height: calc(var(--archive-table-header-height) + var(--archive-table-body-height));
   min-height: 0;
   margin-top: 8px;
   overflow: hidden;
@@ -1623,6 +1952,11 @@ onBeforeUnmount(() => {
 
 .account-table {
   table-layout: fixed;
+}
+
+.account-table :deep(.ant-table table),
+.record-table :deep(.ant-table table) {
+  table-layout: fixed !important;
 }
 
 .account-index-col {
@@ -1666,6 +2000,16 @@ onBeforeUnmount(() => {
   text-overflow: ellipsis;
 }
 
+.file-list :deep(.account-table .ant-table-thead > tr > th),
+.file-list :deep(.account-table .ant-table-tbody > tr > td) {
+  text-align: center;
+}
+
+.account-table :deep(.account-name-col) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .account-name-cell {
   max-width: 100%;
   overflow: hidden;
@@ -1693,9 +2037,10 @@ onBeforeUnmount(() => {
   opacity: 0.5;
 }
 
-.file-list .data-table .table-state-cell,
-.record-detail .data-table .table-state-cell {
-  height: calc(var(--paged-table-row-height, 34px) * 10);
+.files-page .table-state-cell {
+  display: grid;
+  place-items: center;
+  height: var(--archive-table-body-height);
   color: var(--ink-muted);
   font-size: 13px;
   font-weight: 400;
@@ -1706,12 +2051,19 @@ onBeforeUnmount(() => {
   pointer-events: none;
 }
 
-.files-page .table-placeholder-row td {
+.files-page :deep(.archive-ant-table .table-placeholder-row > td) {
   padding: 0;
+  border-bottom: 0;
+  box-shadow: none;
+  background: transparent;
 }
 
-.file-list .data-table .table-state-cell.error,
-.record-detail .data-table .table-state-cell.error {
+.files-page :deep(.archive-ant-table .table-state-row > td) {
+  padding: 0;
+  box-shadow: none;
+}
+
+.files-page .table-state-cell.error {
   color: #c93e3a;
 }
 
@@ -1749,7 +2101,7 @@ onBeforeUnmount(() => {
   grid-template-columns: max-content minmax(0, 1fr);
   align-items: center;
   gap: 24px;
-  min-height: 48px;
+  min-height: 36px;
   min-width: 0;
 }
 
@@ -1804,15 +2156,49 @@ onBeforeUnmount(() => {
   min-width: 82px;
 }
 
+.record-actions .action-button.primary {
+  color: #ffffff;
+  border-color: #2d70cc;
+  background: #2d75d6;
+  box-shadow: none;
+}
+
+.record-actions .action-button.primary:hover:not(:disabled) {
+  color: #ffffff;
+  border-color: #245fae;
+  background: #245fae;
+  box-shadow: none;
+  transform: none;
+}
+
+.record-actions .action-button.danger {
+  color: #ffffff;
+  border-color: #c93e3a;
+  background: #d9413f;
+  box-shadow: none;
+}
+
+.record-actions .action-button.danger:hover:not(:disabled) {
+  color: #ffffff;
+  border-color: #b8322f;
+  background: #b8322f;
+  box-shadow: none;
+  transform: none;
+}
+
+.record-empty-shell {
+  min-width: 0;
+  min-height: 0;
+}
+
 .record-empty {
+  box-sizing: border-box;
   display: flex;
-  flex-direction: column;
   align-items: center;
   justify-content: center;
   min-height: 462px;
   margin-top: 16px;
   padding: 24px;
-  gap: 8px;
   border: 1px dashed rgba(104, 141, 181, 0.26);
   border-radius: 10px;
   color: var(--ink-muted);
@@ -1821,17 +2207,262 @@ onBeforeUnmount(() => {
   text-align: center;
 }
 
-.record-empty strong {
+.record-empty-loading {
+  padding: 64px 54px;
+  text-align: left;
+}
+
+.record-empty-loading :deep(.ant-skeleton) {
+  width: min(100%, 420px);
+}
+
+.record-empty-result {
+  display: block;
+  padding-top: 92px;
+}
+
+.record-empty-result :deep(.ant-result-title) {
   color: var(--ink-strong);
-  font-size: 15px;
+  font-size: 17px;
   font-weight: 500;
 }
 
-.record-empty span {
-  max-width: 280px;
+.record-empty-result :deep(.ant-result-subtitle) {
+  color: var(--ink-muted);
+  font-size: 13px;
+  font-weight: 400;
+}
+
+.record-empty-first-run {
+  flex-direction: column;
+  gap: 10px;
+}
+
+.record-empty-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 58px;
+  height: 58px;
+  margin-bottom: 4px;
+  border-radius: 12px;
+  color: #2d75d6;
+  background: rgba(45, 117, 214, 0.1);
+  font-size: 27px;
+}
+
+.record-empty-first-run h3,
+.archive-overview-copy h3 {
+  margin: 0;
+  color: var(--ink-strong);
+  font-size: 18px;
+  font-weight: 500;
+  letter-spacing: 0;
+}
+
+.record-empty-first-run p {
+  max-width: 330px;
+  margin: 0;
+  color: var(--ink-muted);
   font-size: 13px;
   font-weight: 400;
   line-height: 1.6;
+}
+
+.record-empty-primary {
+  min-width: 104px;
+  height: 32px;
+  margin-top: 4px;
+  border-color: #2d70cc;
+  border-radius: 6px;
+  color: #ffffff;
+  background: #2d75d6;
+  box-shadow: none;
+  font-size: 13px;
+  font-weight: 400;
+}
+
+.record-empty-primary:hover:not(:disabled) {
+  border-color: #245fae;
+  color: #ffffff;
+  background: #245fae;
+  box-shadow: none;
+}
+
+.record-overview-empty {
+  display: grid;
+  grid-template-columns: minmax(210px, 0.9fr) minmax(0, 1.1fr);
+  align-items: center;
+  gap: 22px 30px;
+  padding: 26px 22px 30px;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  text-align: left;
+}
+
+.archive-overview-chart-wrap {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+}
+
+.archive-overview-guide {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  padding: 12px 14px;
+  border: 1px solid rgba(45, 117, 214, 0.16);
+  border-radius: 8px;
+  color: #15386f;
+  background: rgba(235, 246, 253, 0.72);
+  white-space: normal;
+}
+
+.archive-overview-guide-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  color: #2d75d6;
+  background: rgba(45, 117, 214, 0.1);
+  font-size: 15px;
+}
+
+.archive-overview-guide-copy {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.archive-overview-guide strong,
+.archive-overview-guide-copy > span {
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+}
+
+.archive-overview-guide strong {
+  font-size: 16px;
+  font-weight: 500;
+  line-height: 1.35;
+}
+
+.archive-overview-guide-copy > span {
+  color: rgba(21, 56, 111, 0.74);
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 1.35;
+}
+
+.archive-overview-guide-steps {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 7px;
+  min-width: 0;
+}
+
+.archive-overview-guide-steps span {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 26px;
+  padding: 0 10px;
+  border: 1px solid rgba(45, 117, 214, 0.16);
+  border-radius: 999px;
+  color: #15386f;
+  background: rgba(255, 255, 255, 0.62);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.archive-overview-copy {
+  display: grid;
+  align-content: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.archive-overview-label {
+  color: #2d75d6;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.archive-overview-copy > p {
+  margin: 0;
+  color: var(--ink-muted);
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 1.7;
+}
+
+.archive-overview-stats {
+  display: grid;
+  gap: 7px;
+  margin: 2px 0 0;
+}
+
+.archive-overview-stats > div {
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr);
+  gap: 8px;
+  min-width: 0;
+}
+
+.archive-overview-stats dt,
+.archive-overview-stats dd {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.45;
+}
+
+.archive-overview-stats dt {
+  color: var(--ink-muted);
+}
+
+.archive-overview-stats dd {
+  overflow: hidden;
+  color: var(--ink-strong);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.archive-overview-legend {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px 12px;
+  margin-top: 4px;
+}
+
+.archive-overview-legend span {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--ink);
+  font-size: 11px;
+  font-weight: 400;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.archive-overview-legend i {
+  flex: 0 0 auto;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
 }
 
 .action-button.danger {
@@ -1843,8 +2474,8 @@ onBeforeUnmount(() => {
 }
 
 .record-table-wrap {
-  height: auto;
   align-self: stretch;
+  height: calc(var(--archive-table-header-height) + var(--archive-table-body-height));
   min-height: 0;
   margin-top: 8px;
   overflow: hidden;
@@ -1855,12 +2486,12 @@ onBeforeUnmount(() => {
   font-size: 13px;
 }
 
-.record-table th,
-.record-table td {
+.record-table :deep(.ant-table-thead > tr > th),
+.record-table :deep(.ant-table-tbody > tr > td) {
   padding: 0 9px;
 }
 
-.record-table th {
+.record-table :deep(.ant-table-thead > tr > th) {
   z-index: 2;
   text-align: center;
 }
@@ -1888,6 +2519,17 @@ onBeforeUnmount(() => {
   text-align: center;
 }
 
+.record-table :deep(.checkbox-cell),
+.record-table :deep(.record-time-col),
+.record-table :deep(.record-size-col),
+.record-table :deep(.record-open-col) {
+  text-align: center;
+}
+
+.record-table :deep(.record-title) {
+  min-width: 0;
+}
+
 .record-title {
   color: var(--ink-strong);
 }
@@ -1895,11 +2537,13 @@ onBeforeUnmount(() => {
 .record-title-link {
   display: block;
   width: 100%;
+  height: auto;
   min-width: 0;
   padding: 0;
   border: 0;
   color: var(--blue);
   background: transparent;
+  box-shadow: none;
   font: inherit;
   font-weight: 400;
   line-height: 1.2;
@@ -1966,14 +2610,18 @@ onBeforeUnmount(() => {
   padding-left: 8px;
 }
 
-.file-list .pagination-bar :deep(.file-vxe-pager.vxe-pager) {
+.file-list .pagination-bar .pagination-controls {
   flex: 0 0 auto;
   width: auto;
   min-width: 0;
   margin-left: auto;
 }
 
-.file-list .pagination-bar :deep(.file-vxe-pager .vxe-pager--wrapper) {
+.file-list .pagination-bar .pagination-controls {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
   width: auto;
 }
 
@@ -2032,8 +2680,8 @@ onBeforeUnmount(() => {
   font-weight: 400;
 }
 
-.file-list :deep(.file-vxe-pager.vxe-pager),
-.record-detail :deep(.file-vxe-pager.vxe-pager) {
+.file-list :deep(.file-ant-pager.ant-pagination),
+.record-detail :deep(.file-ant-pager.ant-pagination) {
   flex: 1 1 auto;
   min-width: 0;
   margin-left: auto;
@@ -2044,37 +2692,31 @@ onBeforeUnmount(() => {
   font-weight: 900;
 }
 
-.record-detail :deep(.record-vxe-pager.vxe-pager) {
+.record-detail :deep(.record-ant-pager.ant-pagination) {
   flex: 0 0 auto;
   width: auto;
   margin-left: auto;
 }
 
-.record-detail :deep(.record-vxe-pager .vxe-pager--wrapper) {
-  flex: 0 0 auto;
-  width: auto;
-}
-
-.file-list :deep(.file-vxe-pager .vxe-pager--wrapper),
-.record-detail :deep(.file-vxe-pager .vxe-pager--wrapper) {
+.pagination-controls {
   display: inline-flex;
   align-items: center;
   justify-content: flex-end;
   gap: 6px;
-  width: 100%;
+  width: auto;
   min-height: 32px;
 }
 
-.file-list :deep(.file-vxe-pager .vxe-pager--prev-btn),
-.file-list :deep(.file-vxe-pager .vxe-pager--next-btn),
-.file-list :deep(.file-vxe-pager .vxe-pager--num-btn),
-.file-list :deep(.file-vxe-pager .vxe-pager--jump-prev),
-.file-list :deep(.file-vxe-pager .vxe-pager--jump-next),
-.record-detail :deep(.file-vxe-pager .vxe-pager--prev-btn),
-.record-detail :deep(.file-vxe-pager .vxe-pager--next-btn),
-.record-detail :deep(.file-vxe-pager .vxe-pager--num-btn),
-.record-detail :deep(.file-vxe-pager .vxe-pager--jump-prev),
-.record-detail :deep(.file-vxe-pager .vxe-pager--jump-next) {
+.file-list :deep(.file-ant-pager .ant-pagination-prev),
+.file-list :deep(.file-ant-pager .ant-pagination-next),
+.file-list :deep(.file-ant-pager .ant-pagination-item),
+.file-list :deep(.file-ant-pager .ant-pagination-jump-prev),
+.file-list :deep(.file-ant-pager .ant-pagination-jump-next),
+.record-detail :deep(.file-ant-pager .ant-pagination-prev),
+.record-detail :deep(.file-ant-pager .ant-pagination-next),
+.record-detail :deep(.file-ant-pager .ant-pagination-item),
+.record-detail :deep(.file-ant-pager .ant-pagination-jump-prev),
+.record-detail :deep(.file-ant-pager .ant-pagination-jump-next) {
   display: inline-grid;
   place-items: center;
   min-width: 32px;
@@ -2094,66 +2736,60 @@ onBeforeUnmount(() => {
     color 150ms ease;
 }
 
-.file-list :deep(.file-vxe-pager .vxe-pager--prev-btn),
-.file-list :deep(.file-vxe-pager .vxe-pager--next-btn),
-.record-detail :deep(.file-vxe-pager .vxe-pager--prev-btn),
-.record-detail :deep(.file-vxe-pager .vxe-pager--next-btn) {
+.file-list :deep(.file-ant-pager .ant-pagination-prev),
+.file-list :deep(.file-ant-pager .ant-pagination-next),
+.record-detail :deep(.file-ant-pager .ant-pagination-prev),
+.record-detail :deep(.file-ant-pager .ant-pagination-next) {
   width: 32px;
   padding: 0;
   color: rgba(77, 108, 159, 0.78);
 }
 
-.file-list :deep(.file-vxe-pager .vxe-pager--jump-prev),
-.file-list :deep(.file-vxe-pager .vxe-pager--jump-next),
-.record-detail :deep(.file-vxe-pager .vxe-pager--jump-prev),
-.record-detail :deep(.file-vxe-pager .vxe-pager--jump-next) {
+.file-list :deep(.file-ant-pager .ant-pagination-jump-prev),
+.file-list :deep(.file-ant-pager .ant-pagination-jump-next),
+.record-detail :deep(.file-ant-pager .ant-pagination-jump-prev),
+.record-detail :deep(.file-ant-pager .ant-pagination-jump-next) {
   min-width: 24px;
   padding: 0 6px;
   color: rgba(77, 108, 159, 0.72);
 }
 
-.file-list :deep(.file-vxe-pager .vxe-pager--prev-btn:hover:not(.is--disabled)),
-.file-list :deep(.file-vxe-pager .vxe-pager--next-btn:hover:not(.is--disabled)),
-.file-list :deep(.file-vxe-pager .vxe-pager--num-btn:hover:not(.is--active)),
-.file-list :deep(.file-vxe-pager .vxe-pager--jump-prev:hover:not(.is--disabled)),
-.file-list :deep(.file-vxe-pager .vxe-pager--jump-next:hover:not(.is--disabled)),
-.record-detail :deep(.file-vxe-pager .vxe-pager--prev-btn:hover:not(.is--disabled)),
-.record-detail :deep(.file-vxe-pager .vxe-pager--next-btn:hover:not(.is--disabled)),
-.record-detail :deep(.file-vxe-pager .vxe-pager--num-btn:hover:not(.is--active)),
-.record-detail :deep(.file-vxe-pager .vxe-pager--jump-prev:hover:not(.is--disabled)),
-.record-detail :deep(.file-vxe-pager .vxe-pager--jump-next:hover:not(.is--disabled)) {
+.file-list :deep(.file-ant-pager .ant-pagination-prev:hover:not(.ant-pagination-disabled)),
+.file-list :deep(.file-ant-pager .ant-pagination-next:hover:not(.ant-pagination-disabled)),
+.file-list :deep(.file-ant-pager .ant-pagination-item:hover:not(.ant-pagination-item-active)),
+.file-list :deep(.file-ant-pager .ant-pagination-jump-prev:hover),
+.file-list :deep(.file-ant-pager .ant-pagination-jump-next:hover),
+.record-detail :deep(.file-ant-pager .ant-pagination-prev:hover:not(.ant-pagination-disabled)),
+.record-detail :deep(.file-ant-pager .ant-pagination-next:hover:not(.ant-pagination-disabled)),
+.record-detail :deep(.file-ant-pager .ant-pagination-item:hover:not(.ant-pagination-item-active)),
+.record-detail :deep(.file-ant-pager .ant-pagination-jump-prev:hover),
+.record-detail :deep(.file-ant-pager .ant-pagination-jump-next:hover) {
   border-color: rgba(45, 117, 214, 0.24);
   background: rgba(255, 255, 255, 0.86);
 }
 
-.file-list :deep(.file-vxe-pager .vxe-pager--num-btn.is--active),
-.record-detail :deep(.file-vxe-pager .vxe-pager--num-btn.is--active) {
+.file-list :deep(.file-ant-pager .ant-pagination-item-active),
+.record-detail :deep(.file-ant-pager .ant-pagination-item-active) {
   color: #ffffff;
   border-color: rgba(45, 117, 214, 0.32);
   background: linear-gradient(135deg, #4d85dc, #2d70cc);
 }
 
-.file-list :deep(.file-vxe-pager .is--disabled),
-.record-detail :deep(.file-vxe-pager .is--disabled) {
+.file-list :deep(.file-ant-pager .ant-pagination-disabled),
+.record-detail :deep(.file-ant-pager .ant-pagination-disabled) {
   cursor: not-allowed;
   color: rgba(77, 108, 159, 0.36);
   background: rgba(255, 255, 255, 0.46);
 }
 
-.file-list :deep(.file-vxe-pager .vxe-pager--btn-icon),
-.file-list :deep(.file-vxe-pager .vxe-pager--jump-icon),
-.file-list :deep(.file-vxe-pager .vxe-pager--jump-more-icon),
-.record-detail :deep(.file-vxe-pager .vxe-pager--btn-icon),
-.record-detail :deep(.file-vxe-pager .vxe-pager--jump-icon),
-.record-detail :deep(.file-vxe-pager .vxe-pager--jump-more-icon) {
+.file-list :deep(.file-ant-pager .ant-pagination-item-link),
+.record-detail :deep(.file-ant-pager .ant-pagination-item-link) {
   line-height: 1;
 }
 
-.file-list :deep(.file-vxe-pager .vxe-pager--right-wrapper),
-.record-detail :deep(.file-vxe-pager .vxe-pager--right-wrapper) {
-  display: inline-flex;
-  align-items: center;
-  margin-left: 2px;
+.file-list :deep(.file-ant-pager .ant-pagination-item a),
+.record-detail :deep(.file-ant-pager .ant-pagination-item a) {
+  color: inherit;
 }
 
 .fixed-page-size {
@@ -2231,26 +2867,28 @@ onBeforeUnmount(() => {
   transform: none;
 }
 
-.batch-export-dialog-layer {
-  position: fixed;
-  inset: 0;
-  z-index: 88;
-  display: grid;
-  place-items: center;
-  padding: 28px;
-  background: rgba(14, 31, 55, 0.28);
+.batch-export-modal :deep(.ant-modal-content),
+.archive-delete-modal :deep(.ant-modal-content) {
+  overflow: hidden;
+  border: 1px solid rgba(104, 141, 181, 0.24);
+  border-radius: 8px;
+  box-shadow: 0 10px 18px rgba(23, 52, 86, 0.16);
 }
 
-.batch-export-dialog {
-  width: min(680px, calc(100vw - 56px));
-  max-height: min(640px, calc(100vh - 56px));
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto;
-  border: 1px solid rgba(104, 141, 181, 0.28);
-  border-radius: 8px;
-  background: #fbfdff;
-  box-shadow: 0 12px 16px rgba(23, 52, 86, 0.18);
-  overflow: hidden;
+.batch-export-modal :deep(.ant-modal-header) {
+  margin: 0;
+  padding: 18px 20px 16px;
+  border-bottom: 1px solid rgba(104, 141, 181, 0.16);
+}
+
+.batch-export-modal :deep(.ant-modal-body) {
+  padding: 0;
+}
+
+.batch-export-modal :deep(.ant-modal-footer) {
+  margin: 0;
+  padding: 14px 20px 18px;
+  border-top: 1px solid rgba(104, 141, 181, 0.16);
 }
 
 .batch-export-head {
@@ -2258,9 +2896,6 @@ onBeforeUnmount(() => {
   grid-template-columns: 42px minmax(0, 1fr);
   gap: 12px;
   align-items: center;
-  padding: 18px 20px 16px;
-  border-bottom: 1px solid rgba(104, 141, 181, 0.18);
-  background: linear-gradient(180deg, rgba(244, 249, 253, 0.96), rgba(251, 253, 255, 0.96));
 }
 
 .batch-export-icon {
@@ -2277,34 +2912,31 @@ onBeforeUnmount(() => {
 
 .batch-export-head h3 {
   margin: 0;
-  color: var(--ink-strong);
   font-size: 18px;
-  font-weight: 900;
+  font-weight: 500;
   line-height: 1.2;
 }
 
 .batch-export-head p {
   margin: 6px 0 0;
-  color: var(--ink-muted);
   font-size: 13px;
-  font-weight: 800;
+  font-weight: 400;
   line-height: 1.45;
+  opacity: 0.72;
 }
 
 .batch-export-meta {
   margin: 14px 20px 0;
-  color: var(--ink-muted);
   font-size: 13px;
-  font-weight: 900;
+  font-weight: 400;
   line-height: 1.35;
+  opacity: 0.76;
 }
 
 .batch-export-table-wrap {
   min-height: 220px;
   max-height: 380px;
   margin: 10px 20px 16px;
-  border: 1px solid var(--line-soft);
-  border-radius: 7px;
   overflow: auto;
 }
 
@@ -2317,54 +2949,48 @@ onBeforeUnmount(() => {
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.58);
 }
 
-.batch-export-table {
-  table-layout: fixed;
+.batch-export-table-wrap {
+  background: transparent;
+  box-shadow: none;
 }
 
-.batch-export-table th,
-.batch-export-table td {
+.batch-export-modal :deep(.batch-export-ant-table .ant-table) {
+  background: transparent;
+  font-size: 13px;
+}
+
+.batch-export-modal :deep(.batch-export-ant-table .ant-table-thead > tr > th),
+.batch-export-modal :deep(.batch-export-ant-table .ant-table-tbody > tr > td) {
   height: 40px;
   padding: 0 12px;
 }
 
-.batch-export-table th {
-  position: sticky;
-  top: 0;
-  z-index: 1;
+.batch-export-modal :deep(.batch-export-ant-table .ant-table-thead > tr > th) {
+  font-weight: 500;
   text-align: center;
 }
 
-.batch-export-table .table-state-cell {
-  height: 160px;
-  color: var(--ink-muted);
+.batch-export-modal :deep(.batch-export-ant-table .ant-table-cell) {
+  text-align: center;
+}
+
+.batch-export-modal :deep(.batch-export-ant-table .ant-table-cell:nth-child(3)) {
+  text-align: left;
+}
+
+.batch-export-modal :deep(.batch-export-ant-table .ant-empty) {
+  margin-block: 52px;
   text-align: center;
   font-size: 13px;
-  font-weight: 900;
-}
-
-.export-check-col {
-  width: 54px;
-}
-
-.export-index-col {
-  width: 72px;
-}
-
-.export-count-col {
-  width: 116px;
-}
-
-.export-check-cell,
-.export-index-cell,
-.export-count-cell {
-  text-align: center;
+  font-weight: 400;
 }
 
 .export-account-cell {
+  display: block;
   overflow: hidden;
-  color: var(--ink-strong);
-  font-weight: 900;
+  font-weight: 400;
   text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .batch-export-actions {
@@ -2372,101 +2998,90 @@ onBeforeUnmount(() => {
   align-items: center;
   justify-content: flex-end;
   gap: 10px;
-  padding: 14px 20px 18px;
-  border-top: 1px solid rgba(104, 141, 181, 0.18);
-  background: rgba(244, 249, 253, 0.72);
 }
 
 .batch-export-actions .action-button {
   min-width: 104px;
 }
 
-.spin-icon {
-  animation: archive-export-spin 900ms linear infinite;
-}
-
-@keyframes archive-export-spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-.batch-export-dialog-fade-enter-active,
-.batch-export-dialog-fade-leave-active {
-  transition: opacity 160ms ease;
-}
-
-.batch-export-dialog-fade-enter-active .batch-export-dialog,
-.batch-export-dialog-fade-leave-active .batch-export-dialog {
-  transition: transform 160ms ease;
-}
-
-.batch-export-dialog-fade-enter-from,
-.batch-export-dialog-fade-leave-to {
-  opacity: 0;
-}
-
-.batch-export-dialog-fade-enter-from .batch-export-dialog,
-.batch-export-dialog-fade-leave-to .batch-export-dialog {
-  transform: translateY(8px);
-}
-
-.archive-toast-stack {
-  position: fixed;
-  right: 24px;
-  bottom: 24px;
-  z-index: 82;
+.archive-delete-content {
   display: grid;
-  gap: 8px;
-  width: min(360px, calc(100vw - 48px));
-  pointer-events: none;
+  gap: 14px;
 }
 
-.archive-toast {
-  display: inline-flex;
+.archive-delete-intro {
+  display: grid;
+  grid-template-columns: 38px minmax(0, 1fr);
   align-items: center;
-  min-height: 38px;
-  padding: 0 14px;
-  border: 1px solid rgba(104, 141, 181, 0.24);
+  gap: 12px;
+}
+
+.archive-delete-icon {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
   border-radius: 8px;
-  color: var(--ink-strong);
-  background: rgba(251, 253, 255, 0.94);
-  box-shadow: 0 8px 18px rgba(35, 69, 111, 0.14);
+  color: #c93e3a;
+  background: rgba(217, 65, 63, 0.1);
+}
+
+.archive-delete-intro p {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 1.55;
+}
+
+.archive-delete-summary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0;
+}
+
+.archive-delete-summary > div {
+  min-width: 0;
+  padding: 10px 12px;
+  border-radius: 7px;
+  background: rgba(45, 117, 214, 0.06);
+}
+
+.archive-delete-summary dt,
+.archive-delete-summary dd {
+  overflow: hidden;
+  margin: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.archive-delete-summary dt {
+  font-size: 12px;
+  opacity: 0.68;
+}
+
+.archive-delete-summary dd {
+  margin-top: 4px;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.archive-delete-detail strong {
   font-size: 13px;
-  font-weight: 900;
-  line-height: 1.35;
-  text-align: left;
+  font-weight: 500;
 }
 
-.archive-toast--success {
-  color: #0f684f;
-  border-color: rgba(31, 143, 105, 0.24);
-  background: rgba(223, 243, 232, 0.96);
+.archive-delete-detail ul {
+  max-height: 120px;
+  margin: 8px 0 0;
+  padding-left: 20px;
+  overflow: auto;
+  font-size: 13px;
+  line-height: 1.6;
 }
 
-.archive-toast--warning {
-  color: #9a5415;
-  border-color: rgba(223, 122, 53, 0.28);
-  background: rgba(250, 235, 218, 0.96);
-}
-
-.archive-toast--error {
-  color: #a93634;
-  border-color: rgba(217, 65, 63, 0.28);
-  background: rgba(253, 226, 224, 0.96);
-}
-
-.archive-toast-fade-enter-active,
-.archive-toast-fade-leave-active {
-  transition:
-    opacity 160ms ease,
-    transform 160ms ease;
-}
-
-.archive-toast-fade-enter-from,
-.archive-toast-fade-leave-to {
-  opacity: 0;
-  transform: translateY(8px);
+.archive-delete-alert :deep(.ant-alert-message) {
+  font-weight: 400;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -2479,32 +3094,6 @@ onBeforeUnmount(() => {
   .cache-process-slide-leave-to {
     transform: none;
   }
-
-  .batch-export-dialog-fade-enter-active,
-  .batch-export-dialog-fade-leave-active,
-  .batch-export-dialog-fade-enter-active .batch-export-dialog,
-  .batch-export-dialog-fade-leave-active .batch-export-dialog {
-    transition: opacity 80ms ease;
-  }
-
-  .batch-export-dialog-fade-enter-from .batch-export-dialog,
-  .batch-export-dialog-fade-leave-to .batch-export-dialog {
-    transform: none;
-  }
-
-  .archive-toast-fade-enter-active,
-  .archive-toast-fade-leave-active {
-    transition: opacity 80ms ease;
-  }
-
-  .archive-toast-fade-enter-from,
-  .archive-toast-fade-leave-to {
-    transform: none;
-  }
-
-  .spin-icon {
-    animation: none;
-  }
 }
 
 .data-table td i {
@@ -2514,11 +3103,11 @@ onBeforeUnmount(() => {
 
 .file-filters {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
+  grid-template-columns: 72px minmax(0, 110px) minmax(0, 1fr);
   justify-self: end;
   position: relative;
   z-index: 8;
-  width: min(100%, 600px);
+  width: min(100%, 520px);
   gap: 10px;
   margin-top: 0;
   padding: 0;
@@ -2528,151 +3117,123 @@ onBeforeUnmount(() => {
   box-shadow: none;
 }
 
-.file-vxe-control {
+.file-refresh-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  width: 72px;
+  height: 32px;
+  padding: 0 10px;
+  border-color: var(--paper-edge);
+  border-radius: 6px;
+  color: #15386f;
+  background: var(--frost-bg-strong);
+  box-shadow: none;
+  font-size: 14px;
+  font-weight: 400;
+}
+
+.file-refresh-button:hover:not(:disabled) {
+  border-color: rgba(45, 117, 214, 0.34);
+  color: #15386f;
+  background: rgba(235, 246, 253, 0.92);
+  box-shadow: none;
+  transform: none;
+}
+
+.file-select-trigger,
+.file-date-picker {
   width: 100%;
   min-width: 0;
-}
-
-.file-list :deep(.file-vxe-control.vxe-input),
-.file-list :deep(.file-vxe-control.vxe-select),
-.file-list :deep(.file-vxe-control.vxe-date-picker),
-.file-list :deep(.file-vxe-control.vxe-date-range-picker) {
-  width: 100%;
-  height: 38px;
-  color: var(--ink);
-  font-size: 14px;
-  font-weight: 400;
-}
-
-.file-list :deep(.file-vxe-control .vxe-input--wrapper) {
-  border-color: var(--line);
+  height: 32px;
+  border-color: var(--paper-edge);
   border-radius: 6px;
-  background: rgba(255, 255, 255, 0.48);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.6);
+  color: var(--ink-strong);
+  background: var(--frost-bg-strong);
+  box-shadow: var(--paper-shadow-sm);
+  font-size: 14px;
+  font-weight: 400;
 }
 
-.file-list :deep(.file-vxe-control .vxe-input--inner),
-.file-list :deep(.file-vxe-control .vxe-date-picker--inner),
-.file-list :deep(.file-vxe-control .vxe-date-range-picker--inner) {
+.file-select-trigger {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 32px;
+  padding: 0 22px 0 4px;
+  text-align: left;
+  overflow: hidden;
+}
+
+.file-select-trigger > span:first-child {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-select-chevron {
+  position: absolute;
+  top: 50%;
+  right: 8px;
+  flex: 0 0 auto;
+  color: rgba(77, 108, 159, 0.84);
+  font-size: 8px;
+  transform: translateY(-50%) rotate(0deg);
+  transition: transform 160ms ease;
+}
+
+.file-select-chevron.is-open {
+  transform: translateY(-50%) rotate(180deg);
+}
+
+.file-list :deep(.file-date-picker.ant-picker) {
+  display: inline-flex;
+  align-items: center;
+  height: 32px;
+  padding-inline: 12px;
+}
+
+.file-list :deep(.file-date-picker .ant-picker-input > input),
+.file-list :deep(.file-date-picker .ant-picker-separator),
+.file-list :deep(.file-date-picker .ant-picker-suffix),
+.file-list :deep(.file-date-picker .ant-picker-clear) {
   color: var(--ink);
   font-size: 14px;
   font-weight: 400;
 }
 
-.file-list :deep(.file-vxe-control .vxe-input--inner::placeholder),
-.file-list :deep(.file-vxe-control .vxe-date-picker--inner::placeholder),
-.file-list :deep(.file-vxe-control .vxe-date-range-picker--inner::placeholder) {
+.file-list :deep(.file-date-picker .ant-picker-input > input) {
+  text-align: center;
+}
+
+.file-list :deep(.file-date-picker .ant-picker-input > input::placeholder) {
   color: rgba(77, 108, 159, 0.72);
   font-weight: 400;
-}
-
-.file-list :deep(.file-date-picker.vxe-date-picker),
-.file-list :deep(.file-date-range-picker.vxe-date-range-picker) {
-  border-color: var(--line);
-  border-radius: 6px;
-  background: rgba(255, 255, 255, 0.48);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.6);
-}
-
-.file-list :deep(.file-date-picker .vxe-date-picker--prefix),
-.file-list :deep(.file-date-picker .vxe-date-picker--suffix),
-.file-list :deep(.file-date-picker .vxe-date-picker--inner),
-.file-list :deep(.file-date-range-picker .vxe-date-range-picker--prefix),
-.file-list :deep(.file-date-range-picker .vxe-date-range-picker--suffix),
-.file-list :deep(.file-date-range-picker .vxe-date-range-picker--inner) {
-  background: transparent;
-}
-
-.file-list :deep(.file-date-range-picker .vxe-date-range-picker--inner) {
   text-align: center;
 }
 
-.file-list :deep(.file-date-range-picker .vxe-date-range-picker--inner::placeholder) {
-  text-align: center;
+:global(.file-account-filter-dropdown.ant-dropdown .ant-dropdown-menu) {
+  min-width: calc(180px * var(--app-scale));
+  padding: calc(4px * var(--app-scale));
+  border-radius: calc(6px * var(--app-scale));
 }
 
-:global(.file-date-picker-panel.vxe-date-picker--panel),
-:global(.file-date-range-picker-panel.vxe-date-range-picker--panel) {
-  color: var(--ink);
-  font-size: 14px;
+:global(.file-account-filter-dropdown.ant-dropdown .ant-dropdown-menu .ant-dropdown-menu-item) {
+  min-height: calc(32px * var(--app-scale));
+  padding: calc(5px * var(--app-scale)) calc(12px * var(--app-scale));
+  border-radius: calc(4px * var(--app-scale));
+  font-size: calc(14px * var(--app-scale));
   font-weight: 400;
+  line-height: 1.25;
 }
 
-:global(.file-date-picker-panel .vxe-date-panel),
-:global(.file-date-range-picker-panel .vxe-date-panel) {
-  color: var(--ink);
-  font-family: 'Microsoft YaHei', 'PingFang SC', 'Segoe UI', system-ui, sans-serif;
-  font-size: 14px;
-  font-weight: 400;
-}
-
-:global(.file-date-picker-panel .vxe-date-panel--picker-label),
-:global(.file-date-picker-panel .vxe-date-panel--picker-btn),
-:global(.file-date-picker-panel .vxe-date-panel--view-header),
-:global(.file-date-picker-panel .vxe-date-panel--view-item-inner),
-:global(.file-date-picker-panel .vxe-date-panel--label),
-:global(.file-date-range-picker-panel .vxe-date-panel--picker-label),
-:global(.file-date-range-picker-panel .vxe-date-panel--picker-btn),
-:global(.file-date-range-picker-panel .vxe-date-panel--view-header),
-:global(.file-date-range-picker-panel .vxe-date-panel--view-item-inner),
-:global(.file-date-range-picker-panel .vxe-date-panel--label) {
-  color: var(--ink);
-  font-weight: 400;
-}
-
-:global(.file-date-picker-panel .vxe-date-panel--picker-type-wrapper),
-:global(.file-date-picker-panel .vxe-date-panel--picker-label),
-:global(.file-date-range-picker-panel .vxe-date-panel--picker-type-wrapper),
-:global(.file-date-range-picker-panel .vxe-date-panel--picker-label) {
-  color: var(--ink-strong);
-  font-weight: 500;
-}
-
-:global(.file-date-picker-panel .vxe-date-panel--view-item.is--prev .vxe-date-panel--view-item-inner),
-:global(.file-date-picker-panel .vxe-date-panel--view-item.is--next .vxe-date-panel--view-item-inner),
-:global(.file-date-picker-panel .vxe-date-panel--view-item.is--prev .vxe-date-panel--label),
-:global(.file-date-picker-panel .vxe-date-panel--view-item.is--next .vxe-date-panel--label),
-:global(.file-date-range-picker-panel .vxe-date-panel--view-item.is--prev .vxe-date-panel--view-item-inner),
-:global(.file-date-range-picker-panel .vxe-date-panel--view-item.is--next .vxe-date-panel--view-item-inner),
-:global(.file-date-range-picker-panel .vxe-date-panel--view-item.is--prev .vxe-date-panel--label),
-:global(.file-date-range-picker-panel .vxe-date-panel--view-item.is--next .vxe-date-panel--label) {
-  color: rgba(77, 108, 159, 0.56);
-  font-weight: 400;
-}
-
-:global(.account-select-panel.vxe-select--panel) {
-  color: var(--ink);
-  font-size: 14px;
-  font-weight: 400;
-}
-
-:global(.account-select-panel .vxe-select--panel-wrapper) {
-  border-color: var(--line);
-  border-radius: 7px;
-  background: #fbfdff;
-  box-shadow: 0 12px 22px rgba(35, 69, 111, 0.14);
-}
-
-:global(.account-select-panel .vxe-select-option),
-:global(.account-select-panel .vxe-select--empty-placeholder) {
-  min-height: 32px;
-  color: var(--ink);
-  font-weight: 400;
-}
-
-:global(.account-select-panel .vxe-select-option.is--selected) {
-  color: #1f8f69;
-  font-weight: 500;
-}
-
-:global(.account-select-panel .vxe-select-search--input .vxe-input--inner) {
-  color: var(--ink);
-  font-weight: 400;
-}
-
-.file-date-picker,
-.file-date-range-picker {
-  min-width: 0;
+:global(.file-date-picker-panel .ant-picker-panel-container) {
+  zoom: var(--app-scale);
 }
 
 :global(.collector-app.dark) .record-selection-summary,
@@ -2695,6 +3256,37 @@ onBeforeUnmount(() => {
   box-shadow: inset 0 1px 0 rgba(214, 226, 244, 0.045);
 }
 
+:global(.collector-app.dark) .files-page :deep(.archive-ant-table .ant-table),
+:global(.collector-app.dark) .files-page :deep(.archive-ant-table .ant-table-container),
+:global(.collector-app.dark) .files-page :deep(.archive-ant-table .ant-table-content),
+:global(.collector-app.dark) .files-page :deep(.archive-ant-table table) {
+  color: #dce7f5;
+  background: transparent;
+}
+
+:global(.collector-app.dark) .files-page :deep(.archive-ant-table .ant-table-thead > tr > th) {
+  border-bottom-color: rgba(128, 153, 188, 0.18);
+  color: #dce7f5;
+  background: rgba(28, 43, 64, 0.62);
+}
+
+:global(.collector-app.dark) .files-page :deep(.archive-ant-table .ant-table-tbody > tr > td) {
+  border-bottom-color: transparent;
+  box-shadow: inset 0 -1px 0 rgba(128, 153, 188, 0.12);
+  color: #dce7f5;
+  background: transparent;
+}
+
+:global(.collector-app.dark) .files-page :deep(.archive-ant-table .ant-table-tbody > tr:last-child > td),
+:global(.collector-app.dark) .files-page :deep(.archive-ant-table .table-placeholder-row > td),
+:global(.collector-app.dark) .files-page :deep(.archive-ant-table .table-state-row > td) {
+  box-shadow: none;
+}
+
+:global(.collector-app.dark) .files-page :deep(.archive-ant-table .ant-table-tbody > tr:hover > td) {
+  background: rgba(83, 132, 190, 0.12);
+}
+
 :global(.collector-app.dark) .record-selection-summary {
   border-color: rgba(128, 153, 188, 0.18);
   background: rgba(15, 24, 39, 0.44);
@@ -2707,8 +3299,68 @@ onBeforeUnmount(() => {
   box-shadow: inset 0 1px 0 rgba(214, 226, 244, 0.045);
 }
 
-:global(.collector-app.dark) .record-empty strong {
+:global(.collector-app.dark) .record-overview-empty {
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+:global(.collector-app.dark) .record-empty-loading :deep(.ant-skeleton-title),
+:global(.collector-app.dark) .record-empty-loading :deep(.ant-skeleton-paragraph > li) {
+  background: linear-gradient(90deg, rgba(128, 153, 188, 0.16), rgba(128, 153, 188, 0.28), rgba(128, 153, 188, 0.16));
+}
+
+:global(.collector-app.dark) .record-empty-result :deep(.ant-result-title),
+:global(.collector-app.dark) .record-empty-first-run h3,
+:global(.collector-app.dark) .archive-overview-copy h3,
+:global(.collector-app.dark) .archive-overview-stats dd {
   color: #dce7f5;
+}
+
+:global(.collector-app.dark) .record-empty-result :deep(.ant-result-subtitle),
+:global(.collector-app.dark) .record-empty-first-run p,
+:global(.collector-app.dark) .archive-overview-guide-copy > span,
+:global(.collector-app.dark) .archive-overview-stats dt,
+:global(.collector-app.dark) .archive-overview-legend span {
+  color: #9fb2cc;
+}
+
+:global(.collector-app.dark) .archive-overview-label {
+  color: #8fbded;
+}
+
+:global(.collector-app.dark) .archive-overview-guide {
+  border-color: rgba(111, 154, 211, 0.2);
+  color: #dce7f5;
+  background: rgba(31, 52, 80, 0.54);
+}
+
+:global(.collector-app.dark) .archive-overview-guide-icon {
+  color: #8fbded;
+  background: rgba(83, 132, 190, 0.16);
+}
+
+:global(.collector-app.dark) .archive-overview-guide-steps span {
+  color: #cbd8ea;
+  border-color: rgba(111, 154, 211, 0.18);
+  background: rgba(15, 24, 39, 0.5);
+}
+
+:global(.collector-app.dark) .record-empty-icon {
+  color: #8fbded;
+  background: rgba(83, 132, 190, 0.16);
+}
+
+:global(.collector-app.dark) .record-empty-primary {
+  color: #eef6ff;
+  border-color: #3f7fc8;
+  background: #2f6fb8;
+}
+
+:global(.collector-app.dark) .record-empty-primary:hover:not(:disabled) {
+  color: #ffffff;
+  border-color: #4d8ed8;
+  background: #397dcc;
 }
 
 :global(.collector-app.dark) .record-title-link {
@@ -2728,41 +3380,68 @@ onBeforeUnmount(() => {
   background: linear-gradient(180deg, rgba(132, 82, 80, 0.82), rgba(105, 64, 70, 0.8));
 }
 
-:global(.collector-app.dark) .file-list :deep(.file-vxe-control .vxe-input--wrapper),
-:global(.collector-app.dark) .file-list :deep(.file-vxe-control.vxe-select),
-:global(.collector-app.dark) .file-list :deep(.file-date-picker.vxe-date-picker),
-:global(.collector-app.dark) .file-list :deep(.file-date-range-picker.vxe-date-range-picker) {
+:global(.collector-app.dark) .record-actions .action-button.primary {
+  color: #eef6ff;
+  border-color: #3f7fc8;
+  background: #2f6fb8;
+  box-shadow: none;
+}
+
+:global(.collector-app.dark) .record-actions .action-button.primary:hover:not(:disabled) {
+  color: #ffffff;
+  border-color: #4d8ed8;
+  background: #397dcc;
+  box-shadow: none;
+  transform: none;
+}
+
+:global(.collector-app.dark) .record-actions .action-button.danger {
+  color: #fff3f2;
+  border-color: #b84d4a;
+  background: #a9403d;
+  box-shadow: none;
+}
+
+:global(.collector-app.dark) .record-actions .action-button.danger:hover:not(:disabled) {
+  color: #ffffff;
+  border-color: #cc5a56;
+  background: #bd4a46;
+  box-shadow: none;
+  transform: none;
+}
+
+:global(.collector-app.dark) .file-refresh-button,
+:global(.collector-app.dark) .file-select-trigger,
+:global(.collector-app.dark) .file-list :deep(.file-date-picker.ant-picker) {
   border-color: rgba(128, 153, 188, 0.2);
   background: rgba(15, 24, 39, 0.62);
   box-shadow: inset 0 1px 0 rgba(214, 226, 244, 0.045);
 }
 
-:global(.collector-app.dark) .file-list :deep(.file-vxe-control .vxe-input--inner),
-:global(.collector-app.dark) .file-list :deep(.file-vxe-control .vxe-date-picker--inner),
-:global(.collector-app.dark) .file-list :deep(.file-vxe-control .vxe-date-range-picker--inner),
-:global(.collector-app.dark) .file-list :deep(.file-date-picker .vxe-date-picker--prefix),
-:global(.collector-app.dark) .file-list :deep(.file-date-picker .vxe-date-picker--suffix),
-:global(.collector-app.dark) .file-list :deep(.file-date-range-picker .vxe-date-range-picker--prefix),
-:global(.collector-app.dark) .file-list :deep(.file-date-range-picker .vxe-date-range-picker--suffix) {
+:global(.collector-app.dark) .file-refresh-button,
+:global(.collector-app.dark) .file-select-trigger,
+:global(.collector-app.dark) .file-select-chevron,
+:global(.collector-app.dark) .file-list :deep(.file-date-picker .ant-picker-input > input),
+:global(.collector-app.dark) .file-list :deep(.file-date-picker .ant-picker-separator),
+:global(.collector-app.dark) .file-list :deep(.file-date-picker .ant-picker-suffix),
+:global(.collector-app.dark) .file-list :deep(.file-date-picker .ant-picker-clear) {
   color: #cbd8ea;
 }
 
-:global(.collector-app.dark) .file-list :deep(.file-vxe-control .vxe-input--inner::placeholder),
-:global(.collector-app.dark) .file-list :deep(.file-vxe-control .vxe-date-picker--inner::placeholder),
-:global(.collector-app.dark) .file-list :deep(.file-vxe-control .vxe-date-range-picker--inner::placeholder) {
+:global(.collector-app.dark) .file-list :deep(.file-date-picker .ant-picker-input > input::placeholder) {
   color: rgba(142, 162, 189, 0.72);
 }
 
-:global(.collector-app.dark) .file-list :deep(.file-vxe-pager .vxe-pager--prev-btn),
-:global(.collector-app.dark) .file-list :deep(.file-vxe-pager .vxe-pager--next-btn),
-:global(.collector-app.dark) .file-list :deep(.file-vxe-pager .vxe-pager--num-btn),
-:global(.collector-app.dark) .file-list :deep(.file-vxe-pager .vxe-pager--jump-prev),
-:global(.collector-app.dark) .file-list :deep(.file-vxe-pager .vxe-pager--jump-next),
-:global(.collector-app.dark) .record-detail :deep(.file-vxe-pager .vxe-pager--prev-btn),
-:global(.collector-app.dark) .record-detail :deep(.file-vxe-pager .vxe-pager--next-btn),
-:global(.collector-app.dark) .record-detail :deep(.file-vxe-pager .vxe-pager--num-btn),
-:global(.collector-app.dark) .record-detail :deep(.file-vxe-pager .vxe-pager--jump-prev),
-:global(.collector-app.dark) .record-detail :deep(.file-vxe-pager .vxe-pager--jump-next),
+:global(.collector-app.dark) .file-list :deep(.file-ant-pager .ant-pagination-prev),
+:global(.collector-app.dark) .file-list :deep(.file-ant-pager .ant-pagination-next),
+:global(.collector-app.dark) .file-list :deep(.file-ant-pager .ant-pagination-item),
+:global(.collector-app.dark) .file-list :deep(.file-ant-pager .ant-pagination-jump-prev),
+:global(.collector-app.dark) .file-list :deep(.file-ant-pager .ant-pagination-jump-next),
+:global(.collector-app.dark) .record-detail :deep(.file-ant-pager .ant-pagination-prev),
+:global(.collector-app.dark) .record-detail :deep(.file-ant-pager .ant-pagination-next),
+:global(.collector-app.dark) .record-detail :deep(.file-ant-pager .ant-pagination-item),
+:global(.collector-app.dark) .record-detail :deep(.file-ant-pager .ant-pagination-jump-prev),
+:global(.collector-app.dark) .record-detail :deep(.file-ant-pager .ant-pagination-jump-next),
 :global(.collector-app.dark) .fixed-page-size {
   color: #a9bfda;
   border-color: rgba(128, 153, 188, 0.16);
@@ -2770,69 +3449,32 @@ onBeforeUnmount(() => {
   box-shadow: inset 0 1px 0 rgba(214, 226, 244, 0.04);
 }
 
-:global(.collector-app.dark) .file-list :deep(.file-vxe-pager .vxe-pager--prev-btn:hover:not(.is--disabled)),
-:global(.collector-app.dark) .file-list :deep(.file-vxe-pager .vxe-pager--next-btn:hover:not(.is--disabled)),
-:global(.collector-app.dark) .file-list :deep(.file-vxe-pager .vxe-pager--num-btn:hover:not(.is--active)),
-:global(.collector-app.dark) .file-list :deep(.file-vxe-pager .vxe-pager--jump-prev:hover:not(.is--disabled)),
-:global(.collector-app.dark) .file-list :deep(.file-vxe-pager .vxe-pager--jump-next:hover:not(.is--disabled)),
-:global(.collector-app.dark) .record-detail :deep(.file-vxe-pager .vxe-pager--prev-btn:hover:not(.is--disabled)),
-:global(.collector-app.dark) .record-detail :deep(.file-vxe-pager .vxe-pager--next-btn:hover:not(.is--disabled)),
-:global(.collector-app.dark) .record-detail :deep(.file-vxe-pager .vxe-pager--num-btn:hover:not(.is--active)),
-:global(.collector-app.dark) .record-detail :deep(.file-vxe-pager .vxe-pager--jump-prev:hover:not(.is--disabled)),
-:global(.collector-app.dark) .record-detail :deep(.file-vxe-pager .vxe-pager--jump-next:hover:not(.is--disabled)) {
+:global(.collector-app.dark) .file-list :deep(.file-ant-pager .ant-pagination-prev:hover:not(.ant-pagination-disabled)),
+:global(.collector-app.dark) .file-list :deep(.file-ant-pager .ant-pagination-next:hover:not(.ant-pagination-disabled)),
+:global(.collector-app.dark) .file-list :deep(.file-ant-pager .ant-pagination-item:hover:not(.ant-pagination-item-active)),
+:global(.collector-app.dark) .file-list :deep(.file-ant-pager .ant-pagination-jump-prev:hover),
+:global(.collector-app.dark) .file-list :deep(.file-ant-pager .ant-pagination-jump-next:hover),
+:global(.collector-app.dark) .record-detail :deep(.file-ant-pager .ant-pagination-prev:hover:not(.ant-pagination-disabled)),
+:global(.collector-app.dark) .record-detail :deep(.file-ant-pager .ant-pagination-next:hover:not(.ant-pagination-disabled)),
+:global(.collector-app.dark) .record-detail :deep(.file-ant-pager .ant-pagination-item:hover:not(.ant-pagination-item-active)),
+:global(.collector-app.dark) .record-detail :deep(.file-ant-pager .ant-pagination-jump-prev:hover),
+:global(.collector-app.dark) .record-detail :deep(.file-ant-pager .ant-pagination-jump-next:hover) {
   color: #dceaff;
   border-color: rgba(111, 154, 211, 0.34);
   background: rgba(24, 38, 60, 0.86);
 }
 
-:global(.collector-app.dark) .file-list :deep(.file-vxe-pager .vxe-pager--num-btn.is--active),
-:global(.collector-app.dark) .record-detail :deep(.file-vxe-pager .vxe-pager--num-btn.is--active) {
+:global(.collector-app.dark) .file-list :deep(.file-ant-pager .ant-pagination-item-active),
+:global(.collector-app.dark) .record-detail :deep(.file-ant-pager .ant-pagination-item-active) {
   color: #f0f6ff;
   border-color: rgba(111, 154, 211, 0.36);
   background: linear-gradient(180deg, #376fb0, #285c9c);
 }
 
-:global(.collector-app.dark) .file-list :deep(.file-vxe-pager .is--disabled),
-:global(.collector-app.dark) .record-detail :deep(.file-vxe-pager .is--disabled) {
+:global(.collector-app.dark) .file-list :deep(.file-ant-pager .ant-pagination-disabled),
+:global(.collector-app.dark) .record-detail :deep(.file-ant-pager .ant-pagination-disabled) {
   color: rgba(142, 162, 189, 0.42);
   background: rgba(17, 27, 44, 0.42);
 }
 
-:global(.collector-app.dark) .batch-export-dialog-layer {
-  background: rgba(7, 12, 22, 0.58);
-}
-
-:global(.collector-app.dark) .batch-export-dialog {
-  border-color: rgba(98, 141, 196, 0.3);
-  background: #141f31;
-  box-shadow: 0 18px 34px rgba(0, 0, 0, 0.34);
-}
-
-:global(.collector-app.dark) .batch-export-head,
-:global(.collector-app.dark) .batch-export-actions {
-  border-color: rgba(128, 153, 188, 0.14);
-  background: rgba(18, 28, 45, 0.94);
-}
-
-:global(.collector-app.dark) .batch-export-table-wrap {
-  border-color: rgba(128, 153, 188, 0.14);
-  background: rgba(13, 21, 34, 0.46);
-}
-
-:global(.collector-app.dark) .batch-export-icon {
-  color: #83c7a8;
-  border-color: rgba(64, 142, 111, 0.24);
-  background: rgba(64, 142, 111, 0.14);
-}
-
-:global(.collector-app.dark) .batch-export-head h3,
-:global(.collector-app.dark) .export-account-cell {
-  color: #dce7f5;
-}
-
-:global(.collector-app.dark) .batch-export-head p,
-:global(.collector-app.dark) .batch-export-meta,
-:global(.collector-app.dark) .batch-export-table .table-state-cell {
-  color: #8ea2bd;
-}
 </style>

@@ -179,7 +179,7 @@ class ArticleDetailCommentsDiagnosticService:
                         _cell("评论数", comment_result.get("comment_count")),
                         _cell("回复数", comment_result.get("reply_count")),
                         _cell("页数", comment_result.get("page_count")),
-                        _cell("停止原因", comment_result.get("stop_reason")),
+                        _cell("停止原因", _format_stop_reason(comment_result.get("stop_reason"))),
                     ],
                 }
             )
@@ -290,6 +290,8 @@ def _event_item(event: Mapping[str, Any]) -> dict[str, Any]:
     cells = [_cell("结果", event.get("result"))]
     if isinstance(details, Mapping):
         for key, value in details.items():
+            if str(key) == "stop_reason":
+                value = _format_stop_reason(value)
             cells.append(_cell(_detail_label(str(key)), value))
     return {
         "label": str(event.get("name") or "评论子进程步骤"),
@@ -331,6 +333,24 @@ def _detail_label(key: str) -> str:
         "comment_path": "评论文件",
         "history_id": "历史ID",
     }.get(key, key)
+
+
+def _format_stop_reason(value: Any) -> str:
+    reason = str(value or "").strip()
+    if not reason:
+        return "无"
+    mapping = {
+        "continue_flag_false": "接口返回无下一页，分页正常结束",
+        "no_new_comments": "本页没有新增评论，停止分页",
+        "max_pages_reached": "达到最大页数限制，可能未完全采完",
+        "html_comment_count_zero": "HTML 评论数为 0，未发起评论请求",
+        "html_comment_count_missing": "未解析到 HTML 评论数，未发起评论请求",
+        "reply_total_reached": "回复数已达到接口声明总数",
+        "reply_parameters_missing": "回复分页参数不足，停止拉取该楼层回复",
+        "no_new_replies": "本页没有新增回复，停止拉取该楼层回复",
+        "completed": "已完成",
+    }
+    return mapping.get(reason, f"未识别停止原因：{reason}")
 
 
 def _safe_mapping_value(value: Any, key: str) -> str:

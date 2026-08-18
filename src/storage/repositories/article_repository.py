@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 from dataclasses import dataclass
+import unicodedata
 
 from src.domain.models import ResourceManifest
 
@@ -165,6 +167,39 @@ class ArticleRepository:
         ).fetchone()
         return row is not None
 
+    def find_by_account_date_and_title_fragment(
+        self,
+        account_id: int,
+        *,
+        published_date: str,
+        title_fragment: str,
+    ) -> ArticleRecord | None:
+        """按公众号、发布日期和归一化标题片段查找已采集文章。"""
+        normalized_title = _normalize_title_for_lookup(title_fragment)
+        if not normalized_title:
+            return None
+        normalized_date = published_date.strip()
+        conditions = ["account_id = ?"]
+        params: list[object] = [int(account_id)]
+        if normalized_date:
+            conditions.append("published_article_time LIKE ? ESCAPE '!'")
+            params.append(f"{_escape_like(normalized_date)}%")
+        rows = self.connection.execute(
+            f"""
+            SELECT *
+            FROM awa_public_articles
+            WHERE {' AND '.join(conditions)}
+            ORDER BY published_article_time DESC, id DESC
+            """,
+            tuple(params),
+        ).fetchall()
+        for row in rows:
+            # UIA 标题和 HTML 标题可能只差全角/半角标点，比较前统一做临时归一化。
+            article_title = _normalize_title_for_lookup(str(row["article_title"]))
+            if normalized_title in article_title:
+                return _to_record(row)
+        return None
+
     def list_offline_cache_records_by_ids(
         self,
         article_ids,
@@ -243,3 +278,15 @@ def _to_offline_cache_record(row: sqlite3.Row) -> OfflineCacheArticleRecord:
         archive_dir=str(row["archive_dir"]),
         resource_types_json=str(row["resource_types_json"]),
     )
+
+
+def _escape_like(value: str) -> str:
+    """转义 LIKE 通配符，避免标题中的 %、_ 被当成模式字符。"""
+    return value.replace("!", "!!").replace("%", "!%").replace("_", "!_")
+
+
+def _normalize_title_for_lookup(value: str) -> str:
+    """生成仅用于已采集记录比对的标题，不回写数据库。"""
+    text = unicodedata.normalize("NFKC", str(value or ""))
+    text = text.replace("……", "...").replace("…", "...")
+    return re.sub(r"\s+", " ", text).strip()

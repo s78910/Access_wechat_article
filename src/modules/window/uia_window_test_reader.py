@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections import deque
 from dataclasses import dataclass
+import re
 from typing import Any
 
 from src.modules.window.article_date_filter import normalize_home_date_text
@@ -36,6 +37,8 @@ _NON_TITLE_TEXT = frozenset(
     }
 )
 
+_MORE_ARTICLES_PATTERN = re.compile(r"^余下\s*(\d+)\s*篇$")
+
 # 这些限制只控制单次 UIA 结构扫描范围，不属于用户可调的业务参数。
 _DATE_LIST_TAIL_PROBE_LIMIT = 8
 _DATE_GROUP_SCAN_LIMIT = 256
@@ -63,6 +66,23 @@ class UiaWindowTestArticleCard:
     @property
     def marker(self) -> Marker:
         return (normalize_uia_text(self.date_text), normalize_uia_text(self.raw_title))
+
+    @property
+    def is_more_trigger(self) -> bool:
+        """当前卡片是否为“余下 xx 篇”的文章展开入口。"""
+
+        return _MORE_ARTICLES_PATTERN.fullmatch(
+            normalize_uia_text(self.raw_title)
+        ) is not None
+
+    @property
+    def remaining_count(self) -> int:
+        """返回展开入口标注的剩余文章数量，普通文章返回 0。"""
+
+        matched = _MORE_ARTICLES_PATTERN.fullmatch(
+            normalize_uia_text(self.raw_title)
+        )
+        return int(matched.group(1)) if matched is not None else 0
 
 
 @dataclass(frozen=True, slots=True)

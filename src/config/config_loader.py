@@ -90,6 +90,10 @@ def build_app_config(mapping: Mapping[str, Any], *, project_root: str | Path) ->
     runtime = _section(data, "runtime")
 
     data_schema_version = _as_string(software, "data_schema_version")
+    (
+        article_title_poll_initial_interval_seconds,
+        article_title_poll_max_interval_seconds,
+    ) = _window_article_title_poll_intervals(window)
     config = AppConfig(
         software=SoftwareConfig(
             version=_as_string(software, "version"),
@@ -128,6 +132,12 @@ def build_app_config(mapping: Mapping[str, Any], *, project_root: str | Path) ->
             restore_focus_after_close=_as_bool(window, "restore_focus_after_close"),
             article_open_timeout_seconds=_as_float(
                 window, "article_open_timeout_seconds"
+            ),
+            article_title_poll_initial_interval_seconds=(
+                article_title_poll_initial_interval_seconds
+            ),
+            article_title_poll_max_interval_seconds=(
+                article_title_poll_max_interval_seconds
             ),
             article_title_poll_interval_seconds=_as_float(
                 window, "article_title_poll_interval_seconds"
@@ -214,6 +224,10 @@ def _latest_menu_mapping(mapping: Mapping[str, Any]) -> dict[str, Any]:
     runtime_maintenance = _mapping_value(basic_settings, "runtime_maintenance")
     project_storage = _mapping_value(basic_settings, "project_storage")
     database_settings = _mapping_value(basic_settings, "database_settings")
+    basic_proxy_settings = _mapping_value(basic_settings, "proxy_settings")
+    main_flow = _mapping_value(mapping, "main_flow")
+    dispatch_control = _mapping_value(main_flow, "dispatch_control")
+    single_article_task = _mapping_value(mapping, "single_article_task")
     _copy_keys(
         runtime_maintenance,
         result.setdefault("runtime", {}),
@@ -229,6 +243,10 @@ def _latest_menu_mapping(mapping: Mapping[str, Any]) -> dict[str, Any]:
         result.setdefault("request", {}),
         ("request_interval_seconds",),
     )
+    if "single_task_interval_seconds" in dispatch_control:
+        result.setdefault("request", {})["request_interval_seconds"] = dispatch_control[
+            "single_task_interval_seconds"
+        ]
     _copy_keys(
         project_storage,
         result.setdefault("storage", {}),
@@ -241,11 +259,9 @@ def _latest_menu_mapping(mapping: Mapping[str, Any]) -> dict[str, Any]:
         ("data_schema_version",),
     )
 
-    proxy_settings = _mapping_value(mapping, "proxy_settings")
-    proxy_basic = _mapping_value(proxy_settings, "basic_info")
-    proxy_process = _mapping_value(proxy_settings, "process_control")
+    single_task_mitm_capture = _mapping_value(single_article_task, "mitm_capture")
     _copy_keys(
-        proxy_basic,
+        basic_proxy_settings,
         result.setdefault("proxy", {}),
         (
             "host",
@@ -259,7 +275,7 @@ def _latest_menu_mapping(mapping: Mapping[str, Any]) -> dict[str, Any]:
         ),
     )
     _copy_keys(
-        proxy_process,
+        single_task_mitm_capture,
         result.setdefault("mitm_capture", {}),
         (
             "ready_timeout_seconds",
@@ -270,13 +286,12 @@ def _latest_menu_mapping(mapping: Mapping[str, Any]) -> dict[str, Any]:
         ),
     )
 
-    windows_command = _mapping_value(mapping, "windows_command")
-    single_tab = _mapping_value(windows_command, "single_article_tab")
-    home_window = _mapping_value(windows_command, "home_window")
-    home_scroll = _mapping_value(windows_command, "home_scroll")
+    main_home_window = _mapping_value(main_flow, "home_window")
+    main_home_scroll = _mapping_value(main_flow, "home_scroll")
+    single_task_article_tab = _mapping_value(single_article_task, "article_tab")
     window_runtime = result.setdefault("window", {})
     _copy_keys(
-        single_tab,
+        single_task_article_tab,
         window_runtime,
         (
             "restore_focus_after_close",
@@ -286,16 +301,17 @@ def _latest_menu_mapping(mapping: Mapping[str, Any]) -> dict[str, Any]:
             "article_close_confirm_timeout_seconds",
         ),
     )
-    if "article_title_poll_interval_seconds_range" in single_tab:
-        _, max_interval = _number_pair(
-            single_tab,
+    if "article_title_poll_interval_seconds_range" in single_task_article_tab:
+        initial_interval, max_interval = _number_pair(
+            single_task_article_tab,
             "article_title_poll_interval_seconds_range",
         )
-        # 运行时代码当前只消费最大轮询间隔；起始值用于 YAML 和设置页展示。
+        window_runtime["article_title_poll_initial_interval_seconds"] = initial_interval
+        window_runtime["article_title_poll_max_interval_seconds"] = max_interval
         window_runtime["article_title_poll_interval_seconds"] = max_interval
 
     _copy_keys(
-        home_window,
+        main_home_window,
         window_runtime,
         (
             "activation_wait_seconds",
@@ -303,7 +319,7 @@ def _latest_menu_mapping(mapping: Mapping[str, Any]) -> dict[str, Any]:
         ),
     )
     _copy_keys(
-        home_scroll,
+        main_home_scroll,
         window_runtime,
         (
             "scroll_wheel_steps",
@@ -320,32 +336,34 @@ def _latest_menu_mapping(mapping: Mapping[str, Any]) -> dict[str, Any]:
             "bounce_attempts",
         ),
     )
-    if "date_seek_scroll_steps_range" in home_scroll:
+    if "date_seek_scroll_steps_range" in main_home_scroll:
         normal_steps, max_steps = _number_pair(
-            home_scroll,
+            main_home_scroll,
             "date_seek_scroll_steps_range",
         )
         window_runtime["scroll_wheel_steps"] = int(normal_steps)
         window_runtime["date_seek_max_steps"] = int(max_steps)
-    if "scroll_probe_interval_seconds_range" in home_scroll:
+    if "scroll_probe_interval_seconds_range" in main_home_scroll:
         initial_interval, max_interval = _number_pair(
-            home_scroll,
+            main_home_scroll,
             "scroll_probe_interval_seconds_range",
         )
         window_runtime["scroll_probe_interval_seconds"] = initial_interval
         window_runtime["scroll_probe_max_interval_seconds"] = max_interval
 
-    data_acquisition = _mapping_value(mapping, "data_acquisition")
-    reference_request = _mapping_value(data_acquisition, "reference_request")
-    comment_collection = _mapping_value(data_acquisition, "comment_collection")
-    offline_cache = _mapping_value(data_acquisition, "offline_cache")
+    html_storage = _mapping_value(single_article_task, "html_storage")
+    single_task_comment_collection = _mapping_value(
+        single_article_task,
+        "comment_collection",
+    )
+    single_task_offline_cache = _mapping_value(single_article_task, "offline_cache")
     _copy_keys(
-        reference_request,
+        html_storage,
         result.setdefault("request", {}),
         ("request_timeout_seconds",),
     )
     _copy_keys(
-        comment_collection,
+        single_task_comment_collection,
         result.setdefault("comment", {}),
         (
             "enabled_by_default",
@@ -354,12 +372,12 @@ def _latest_menu_mapping(mapping: Mapping[str, Any]) -> dict[str, Any]:
             "max_concurrent_processes",
         ),
     )
-    if "top_level_max_pages" in comment_collection:
-        result.setdefault("comment", {})["max_pages"] = comment_collection[
+    if "top_level_max_pages" in single_task_comment_collection:
+        result.setdefault("comment", {})["max_pages"] = single_task_comment_collection[
             "top_level_max_pages"
         ]
     _copy_keys(
-        offline_cache,
+        single_task_offline_cache,
         result.setdefault("offline_cache", {}),
         (
             "enabled_by_default",
@@ -406,6 +424,22 @@ def _number_pair(source: Mapping[str, Any], key: str) -> tuple[float, float]:
         raise ConfigValidationError(f"{key} 的结束值不能小于起始值")
 
     return first, second
+
+
+def _window_article_title_poll_intervals(
+    window: Mapping[str, Any],
+) -> tuple[float, float]:
+    """标题检测轮询使用起始值和最大值；旧标量字段兼容为“最大值”。"""
+    if (
+        "article_title_poll_initial_interval_seconds" in window
+        and "article_title_poll_max_interval_seconds" in window
+    ):
+        return (
+            _as_float(window, "article_title_poll_initial_interval_seconds"),
+            _as_float(window, "article_title_poll_max_interval_seconds"),
+        )
+    max_interval = _as_float(window, "article_title_poll_interval_seconds")
+    return min(0.05, max_interval), max_interval
 
 
 def _section(data: Mapping[str, Any], key: str) -> Mapping[str, Any]:

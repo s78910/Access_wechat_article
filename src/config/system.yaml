@@ -1,102 +1,91 @@
 software:
-  version: 2.1.1
+  version: 2.1.1  # 应用版本号，用于启动自检和前端展示。
+
 basic_settings:
-  # 运行维护：日志、临时文件清理和请求控制。
+  # 运行维护：控制日志级别、临时文件清理和保留周期。
   runtime_maintenance:
     log_level: INFO  # 日志级别：DEBUG / INFO / WARN / ERROR。
-    auto_clean_temp_files: true  # 启动时是否自动清理临时文件。
-    temp_retention_days: 7  # 临时文件保留天数。
-    log_retention_days: 30  # 日志文件保留天数。
-    request_interval_seconds: 0.0  # 请求/文章处理间隔；原 request.request_interval_seconds。
+    auto_clean_temp_files: true  # 启动时是否自动清理过期临时文件。
+    temp_retention_days: 7  # 临时文件保留天数，仅影响自动清理。
+    log_retention_days: 30  # 日志文件保留天数，仅影响自动清理。
 
-  # 项目存储：业务文件、临时文件和日志目录。
+  # 项目存储：文章归档、临时文件和日志目录。
   project_storage:
-    article_storage_root: storages  # 文章归档根目录；原 storage.article_storage_root。
-    temp_dir: data/tmp  # 临时文件目录；原 storage.temp_dir。
-    log_dir: data/logs  # 日志目录；原 storage.log_dir。
+    article_storage_root: storages  # 文章详情、评论、离线缓存等归档根目录。
+    temp_dir: data/tmp  # 诊断运行记录、临时任务文件和中间结果目录。
+    log_dir: data/logs  # 用户可查看日志和详细运行日志目录。
 
-  # 数据库设置：数据表结构版本和 SQLite 数据库目录。
+  # 数据库设置：SQLite 数据库目录和当前表结构版本。
   database_settings:
-    data_schema_version: v2.1  # 当前数据表结构版本；原 software.data_schema_version。
-    db_dir: data/sql  # SQLite 数据库目录；原 storage.db_dir。
-proxy_settings:
-  # 基础信息：MITM 监听地址、端口、证书和验证页面。
-  basic_info:
-    host: 127.0.0.1  # MITM 监听地址；原 proxy.host。
-    port: 18000  # MITM 监听端口；原 proxy.port。
-    verification_url: https://mitm.it/  # 代理证书验证/安装页面；原 proxy.verification_url。
-    confdir: .mitmproxy  # mitmproxy 配置目录；原 proxy.confdir。
-    ca_cert_path: .mitmproxy/mitmproxy-ca-cert.cer  # CA 证书路径；原 proxy.ca_cert_path。
-    startup_delay_seconds: 0.0  # 代理启动后的额外等待时间；原 proxy.startup_delay_seconds。
-    enable_system_proxy: true  # 是否接管系统代理；原 proxy.enable_system_proxy。
-    ssl_insecure: true  # 是否允许 MITM 连接上游 HTTPS 时忽略证书校验；原 proxy.ssl_insecure。
+    data_schema_version: v2.1  # 数据库结构版本；程序会使用 data/sql/create_script/create_awa_v2_1.sql 初始化。
+    db_dir: data/sql  # SQLite 数据库所在目录；文件名由结构版本自动生成。
 
-  # 代理进程控制：父进程、子进程、listener 和清理阶段的超时/轮询设置。
-  process_control:
-    ready_timeout_seconds: 10.0  # 父进程等待 MITM READY 的最大时长；原 mitm_capture.ready_timeout_seconds。
-    capture_timeout_seconds: 20.0  # 子进程 READY 后等待 STOP_CAPTURE 的最大时长；原 mitm_capture.capture_timeout_seconds。
-    result_timeout_seconds: 11.0  # 父进程发送 STOP_CAPTURE 后等待 RESULT/FAILED 的最大时长。
-    listener_shutdown_timeout_seconds: 3.0  # MITM listener 关闭超时。
-    cancel_grace_seconds: 1.0  # 取消时等待子进程正常退出的时间；当前源码默认值为 1.0。
-    terminate_grace_seconds: 1.0  # terminate/kill 后等待退出的时间；当前源码默认值为 1.0。
-    start_capture_message_timeout_seconds: 30.0  # 子进程启动后等待 START_CAPTURE 的兜底超时；当前源码固定为 30.0。
-    fallback_capture_timeout_seconds: 60.0  # 子进程兜底捕获超时；正常会被 START_CAPTURE 里的 capture_timeout_seconds 覆盖。
-    listener_ready_poll_interval_seconds: 0.02  # 子进程检测 MITM 端口是否可连接的轮询间隔；当前源码固定为 0.02。
-    stop_capture_poll_interval_seconds: 0.05  # 子进程等待 STOP_CAPTURE 命令时的轮询间隔；当前源码默认值为 0.05。
-    close_as_capture_deadline: true  # 关闭文章标签作为本次捕获截止点；原 mitm_capture.close_as_capture_deadline 默认值。
-windows_command:
-  # 单篇标签操作：从点击文章后检测标题，到关闭文章标签并回到主页。
-  single_article_tab:
-    article_title_stable_delay_seconds: 0.1  # 检测到目标文章标签标题后，再等待 0.1 秒确认标题稳定；等待结束后立即关闭文章标签。
-    article_open_timeout_seconds: 12.0  # 点击文章后等待详情页打开的最大时长；超过仍未识别到目标标题则认为打开失败。
-    article_title_poll_interval_seconds_range: [0.05, 0.15]  # [起始值, 最大值]；等待文章标题时从 0.05 秒开始轮询，并按增长规则放大到最多 0.15 秒。
-    article_title_poll_growth_factor: 1.5  # 标题轮询间隔按 1.5 倍逐步放大，不是每次固定增加 0.05 秒。
-    article_close_confirm_timeout_seconds: 3.0  # 关闭文章标签后，最多等待 3 秒确认窗口标题变化或标签消失。
-    article_close_title_poll_interval_seconds: 0.05  # 关闭文章标签后检测标题变化的轮询间隔；当前由源码固定为 0.05 秒。
-    restore_focus_after_close: true  # 关闭文章标签后恢复/聚焦到公众号主页窗口；原 window.restore_focus_after_close。
+  # 代理基础设置：MITM 监听地址、证书目录和系统代理开关。
+  proxy_settings:
+    host: 127.0.0.1  # MITM 监听地址。
+    port: 18000  # MITM 监听端口；系统代理也会指向该端口。
+    verification_url: https://mitm.it/  # CA 证书安装/验证页面。
+    confdir: .mitmproxy  # mitmproxy 配置目录。
+    ca_cert_path: .mitmproxy/mitmproxy-ca-cert.cer  # mitmproxy 生成的 CA 证书路径。
+    startup_delay_seconds: 0.0  # MITM 启动后额外等待时间；用于慢机器预留缓冲。
+    enable_system_proxy: true  # 单篇采集时是否自动开启/恢复系统代理。
+    ssl_insecure: true  # MITM 连接上游 HTTPS 时是否忽略证书校验。
 
-  # 主页窗口操作：主页激活、点击动作内部等待，以及点击前后 MITM 相关等待。
+main_flow:
+  # 主页窗口：主流程定位和激活公众号主页窗口。
   home_window:
-    activation_wait_seconds: 0.05  # 激活公众号主页窗口后的等待时间，避免窗口尚未稳定就执行点击；原 window.activation_wait_seconds。
-    home_find_timeout_seconds: 3.0  # 诊断工具定位微信主页窗口的最大时长；超过后直接提示用户打开公众号主页。
-    mitm_ready_timeout_seconds: 10.0  # 点击文章前等待 MITM 进入 READY 状态的最大时长；对应 mitm_capture.ready_timeout_seconds。
-    mitm_capture_timeout_seconds: 20.0  # MITM 捕获文章请求的最大时长；对应 mitm_capture.capture_timeout_seconds。
-    mitm_result_timeout_seconds: 11.0  # 停止 MITM 后等待结果的参考值；实际运行以 proxy_settings.process_control.result_timeout_seconds 为准。
-    mitm_shutdown_timeout_seconds: 3.0  # MITM 子进程关闭超时的参考值；实际运行以 proxy_settings.process_control.listener_shutdown_timeout_seconds 为准。
-    click_mouse_move_wait_seconds: 0.02  # 发送鼠标移动消息后的短暂停顿；当前由源码固定。
-    click_mouse_down_wait_seconds: 0.04  # 发送鼠标按下消息后的短暂停顿；当前由源码固定。
-    click_mouse_up_wait_seconds: 0.25  # 发送鼠标释放消息后等待 Chromium 开始处理导航；当前由源码固定。
-    uia_control_click_wait_seconds: 0.0  # 走 UIA 控件 Click 时不额外等待；当前 waitTime=0。
+    activation_wait_seconds: 0.05  # 激活主页窗口后的等待时间，避免窗口焦点尚未稳定。
+    home_find_timeout_seconds: 3.0  # 查找已打开公众号主页窗口的最长时间。
 
-  # 主页滚动操作：找下一篇文章、检测页面变化、懒加载等待和回弹滚动。
+  # 主页滚动：主流程读取文章卡片、日期定位、懒加载和回弹滚动策略。
   home_scroll:
-    date_seek_scroll_steps_range: [3, 18]  # [普通收录步长, 日期定位最大步长]；普通收录使用 3 步，日期定位按距离放大但最多 18 步。
-    scroll_initial_delay_seconds: 0.05  # 每次滚动后先等待 0.05 秒，再开始读取页面；原 window.scroll_initial_delay_seconds。
-    scroll_probe_interval_seconds_range: [0.1, 0.4]  # [起始值, 最大值]；滚动后从 0.1 秒开始检测页面变化，未变化时逐步放大到最多 0.4 秒。
-    unchanged_before_bounce_seconds: 0.6  # 滚动后 0.6 秒内页面无变化，则认为本次滚动无效并准备触发回弹；原 window.unchanged_before_bounce_seconds。
-    lazy_load_timeout_seconds: 3.0  # 如果检测到页面处于“正在加载/加载中”状态，最多等待 3 秒；原 window.lazy_load_timeout_seconds。
-    bounce_enabled: true  # 是否启用回弹滚动；原 window.bounce_enabled。
-    bounce_up_steps: 2  # 回弹时先向上滚动 2 步；原 window.bounce_up_steps。
-    bounce_pause_seconds: 0.2  # 回弹上滚后等待 0.2 秒，再向下滚动；原 window.bounce_pause_seconds。
-    bounce_down_steps: 6  # 回弹时再向下滚动 6 步；原 window.bounce_down_steps。
-    bounce_attempts: 2  # 每轮寻找候选文章时，最多尝试 2 次回弹；原 window.bounce_attempts。
-data_acquisition:
-  # 原 HTML 请求：使用 reference 参数重新请求文章 HTML 时的超时设置。
-  reference_request:
+    date_seek_scroll_steps_range: [3, 18]  # [普通收录步长, 日期定位最大步长]；日期定位会按目标日期距离动态放大。
+    scroll_initial_delay_seconds: 0.05  # 每次滚动后，开始读取 UIA 树前的等待时间。
+    scroll_probe_interval_seconds_range: [0.1, 0.4]  # 页面变化检测轮询区间；当前从 0.1 秒逐步放大到 0.4 秒。
+    unchanged_before_bounce_seconds: 0.6  # 滚动后持续无变化达到该时长，则准备触发回弹滚动。
+    lazy_load_timeout_seconds: 3.0  # 检测到页面正在加载时，等待新内容出现的最长时间。
+    bounce_enabled: true  # 是否启用回弹滚动处理懒加载未触发的情况。
+    bounce_attempts: 2  # 每次寻找新内容时最多尝试回弹的次数。
+    bounce_up_steps: 2  # 回弹时先向上滚动的步数。
+    bounce_pause_seconds: 0.2  # 回弹上滚后等待多久再向下滚动。
+    bounce_down_steps: 6  # 回弹等待后再向下滚动的步数。
+
+  # 任务分发：主流程向单篇任务队列派发任务时的节奏控制。
+  dispatch_control:
+    single_task_interval_seconds: 0.0  # 两次单篇任务派发之间的额外等待；0 表示不额外等待。
+
+single_article_task:
+  # 文章标签：单篇任务点击文章后等待详情页、确认标题稳定、关闭文章标签。
+  article_tab:
+    restore_focus_after_close: true  # 关闭文章标签后是否恢复到公众号主页窗口。
+    article_open_timeout_seconds: 12.0  # 点击文章后等待详情页标签出现的最长时间。
+    article_title_poll_interval_seconds_range: [0.05, 0.15]  # 标题检测轮询间隔区间；运行时从起始值逐步放大到最大值。
+    article_title_stable_delay_seconds: 0.1  # 检测到文章标签后额外等待，确保页面标题稳定。
+    article_close_confirm_timeout_seconds: 3.0  # 发送 Ctrl+W 后等待标签关闭确认的最长时间。
+
+  # MITM 捕获：单篇任务详情获取期间的代理捕获生命周期超时。
+  mitm_capture:
+    ready_timeout_seconds: 10.0  # 启动 MITM 后，等待子进程进入 READY 状态的最长时间。
+    capture_timeout_seconds: 20.0  # MITM READY 后等待文章请求被捕获的最长时间。
+    result_timeout_seconds: 11.0  # 发送停止捕获命令后，等待捕获结果返回的最长时间。
+    listener_shutdown_timeout_seconds: 3.0  # 停止 MITM listener 的最长等待时间。
+    close_as_capture_deadline: true  # 关闭文章标签后立即作为本次捕获截止点；当前必须保持 true。
+
+  # 文章详情存储：MITM 只捕获到 reference 时，用微信原始参数重新请求文章 HTML。
+  html_storage:
     request_timeout_seconds: 10.0  # 单次 reference 请求文章 HTML 的最长等待时间。
 
-  # 评论采集：控制首页默认是否采集评论，以及评论接口请求、分页节奏和页数上限。
+  # 评论采集：评论信息存储测试和后续单篇任务评论子流程的默认参数。
   comment_collection:
-    enabled_by_default: false  # 默认评论采集开关；开启后首页应默认勾选评论采集。
-    request_timeout_seconds: 10.0  # 每一次评论 HTTP 请求最多等待 10 秒，不是整篇文章评论采集总耗时。
-    page_interval_seconds: 0.5  # 评论分页之间的等待时间，避免连续请求过快。
-    top_level_max_pages: 50  # 一级评论最多请求 50 页。
-    reply_max_pages: 50  # 回复评论最多请求 50 页；当前代码尚需后续适配才能和一级评论页数分开生效。
-    max_concurrent_processes: 3  # 评论采集独立子进程的最大并发数；超过 3 篇时排队等待空闲槽位。
+    enabled_by_default: false  # 是否默认勾选评论采集；具体任务仍以前端当前勾选为准。
+    request_timeout_seconds: 10.0  # 每次评论 HTTP 请求的最长等待时间。
+    page_interval_seconds: 0.5  # 评论分页请求之间的等待间隔。
+    top_level_max_pages: 50  # 一级评论最多请求页数。
+    max_concurrent_processes: 3  # 评论采集子进程最大并发数。
 
-  # 离线缓存：控制离线页面缓存时的滚动加载范围和单个资源下载超时。
+  # 离线缓存：Playwright 打开文章并生成 index.html + assets 的默认参数。
   offline_cache:
-    enabled_by_default: false  # 默认离线归档开关；开启后主服务页默认勾选离线归档，具体任务仍以前端当前开关为准。
-    max_scroll_seconds: 30.0  # 离线缓存时最长滚动加载时间。
-    resource_timeout_seconds: 10.0  # 单个资源下载超时。
-    max_concurrent_processes: 3  # 同时运行的 Playwright 离线缓存子进程上限。
+    enabled_by_default: false  # 是否默认勾选离线归档；具体任务仍以前端当前勾选为准。
+    max_scroll_seconds: 30.0  # 离线缓存时滚动触发懒加载的最长时间。
+    resource_timeout_seconds: 10.0  # 单个资源下载或等待的最长时间。
+    max_concurrent_processes: 3  # 离线缓存子进程最大并发数。

@@ -32,8 +32,12 @@ test('获取指定内容把文章详情移到插画下方并在右侧加入离�
   assert.match(appVue, /downloadSelections\.value\.offlineArchive\s*=\s*parseConfigSwitchValue/)
   assert.match(appVue, /downloadSelections\.value\.commentInfo\s*=\s*parseConfigSwitchValue/)
   assert.match(appVue, /const mandatoryDownloadOption = \{ key: 'articleDetail', label: '文章详情', locked: true \}/)
-  assert.match(appVue, /const downloadOptions = \[\s*\{ key: 'offlineArchive', label: '离线归档', locked: false \}/)
-  assert.match(appVue, /selections:\s*\{[\s\S]*offlineArchive: downloadSelections\.value\.offlineArchive/)
+  assert.match(appVue, /type OfflineArchiveMode = 'standard' \| 'beta'/)
+  assert.match(appVue, /const offlineArchiveMode = ref<OfflineArchiveMode>\('standard'\)/)
+  assert.match(appVue, /const offlineArchiveModeOpen = ref\(false\)/)
+  assert.match(appVue, /const offlineArchiveModeOptions = \[[\s\S]*\{ value: 'standard', label: '离线归档' \}[\s\S]*\{ value: 'beta', label: '离线归档 \(beta\)' \}/)
+  assert.match(appVue, /const downloadOptions = \[\s*\{ key: 'commentInfo', label: '评论信息', locked: false \}/)
+  assert.match(appVue, /const downloadSelections = ref\(\{[\s\S]*offlineArchive: false/)
 
   const contentCardMatch = appVue.match(/<article class="task-card task-card-content panel">[\s\S]*?<\/article>/)
   assert.ok(contentCardMatch, '获取指定内容卡片应使用独立布局类')
@@ -43,12 +47,45 @@ test('获取指定内容把文章详情移到插画下方并在右侧加入离�
   assert.match(contentCard, /<ACheckbox[\s\S]*?v-model:checked="downloadSelections\[mandatoryDownloadOption\.key\]"/)
   assert.match(contentCard, /class="\[\s*'download-option',\s*'article-detail-option'/)
   assert.match(contentCard, /mandatoryDownloadOption\.label/)
+  assert.match(contentCard, /<div[\s\S]*class="\[[\s\S]*'download-option-combo'[\s\S]*offlineArchiveSelected/)
+  assert.match(contentCard, /<ACheckbox[\s\S]*?v-model:checked="downloadSelections\.offlineArchive"[\s\S]*?\{\{ selectedOfflineArchiveModeLabel \}\}[\s\S]*?<\/ACheckbox>/)
+  assert.match(contentCard, /<ADropdown[\s\S]*?v-model:open="offlineArchiveModeOpen"[\s\S]*?:trigger="\['click'\]"[\s\S]*?overlay-class-name="offline-archive-mode-dropdown"/)
+  assert.match(contentCard, /<AButton[\s\S]*?class="offline-archive-mode-trigger"/)
+  assert.match(contentCard, /<DownOutlined\s+:class="\['download-select-chevron', \{ 'is-open': offlineArchiveModeOpen \}\]"\s+\/>/)
+  assert.match(contentCard, /<AMenu :selected-keys="\[offlineArchiveMode\]">[\s\S]*?<AMenuItem[\s\S]*?v-for="option in offlineArchiveModeOptions"/)
+  assert.doesNotMatch(contentCard, /<ASelect[\s\S]*?class="offline-archive-mode-select"/)
   assert.match(contentCard, /<ACheckbox[\s\S]*?v-for="option in downloadOptions"/)
   assert.match(contentCard, /v-model:checked="downloadSelections\[option\.key\]"/)
   assert.match(contentCard, /v-for="option in downloadOptions"[\s\S]*\{\{ option\.label \}\}[\s\S]*<\/ACheckbox>/)
+  assert.doesNotMatch(contentCard, /v-for="option in downloadOptions"[\s\S]*离线归档[\s\S]*<\/ACheckbox>/)
   assert.doesNotMatch(contentCard, /v-for="option in downloadOptions"[\s\S]*文章详情/)
   assert.doesNotMatch(contentCard, /role="checkbox"|class="option-box"/)
   assert.doesNotMatch(contentCard, /<button[\s\S]*?download-option/)
+})
+
+test('离线归档保留勾选框并通过右侧下拉选择模式', () => {
+  assert.match(appVue, /function handleOfflineArchiveModeChange\(value: OfflineArchiveMode\)/)
+  assert.match(appVue, /offlineArchiveMode\.value = value/)
+  assert.match(appVue, /offlineArchiveModeOpen\.value = false/)
+  assert.match(appVue, /const selectedOfflineArchiveModeLabel = computed\(\(\) =>/)
+  assert.match(appVue, /\.download-option-combo\s*\{[\s\S]*grid-template-columns:\s*minmax\(0, 1fr\) 28px;/)
+  assert.match(appVue, /\.offline-archive-mode-trigger\s*\{[\s\S]*width:\s*28px;/)
+  assert.match(appVue, /\.offline-archive-mode-trigger\s*\{[\s\S]*place-items:\s*center;/)
+  assert.match(appVue, /\.download-select-chevron\.is-open\s*\{[\s\S]*transform:\s*rotate\(180deg\);/)
+  const dropdownRule = appVue.match(
+    /:global\(\.offline-archive-mode-dropdown\.ant-dropdown \.ant-dropdown-menu\)\s*\{(?<body>[\s\S]*?)\}/,
+  )
+  const dropdownItemRule = appVue.match(
+    /:global\(\.offline-archive-mode-dropdown\.ant-dropdown \.ant-dropdown-menu \.ant-dropdown-menu-item\)\s*\{(?<body>[\s\S]*?)\}/,
+  )
+
+  assert.ok(dropdownRule?.groups?.body)
+  assert.match(dropdownRule.groups.body, /min-width:\s*calc\(168px \* var\(--app-scale\)\);/)
+  assert.match(dropdownRule.groups.body, /padding:\s*calc\(4px \* var\(--app-scale\)\);/)
+  assert.doesNotMatch(dropdownRule.groups.body, /zoom:/)
+  assert.ok(dropdownItemRule?.groups?.body)
+  assert.match(dropdownItemRule.groups.body, /min-height:\s*calc\(32px \* var\(--app-scale\)\);/)
+  assert.match(dropdownItemRule.groups.body, /font-size:\s*calc\(14px \* var\(--app-scale\)\);/)
 })
 
 test('获取指定内容插画下方按钮使用左侧独立布局区域', () => {

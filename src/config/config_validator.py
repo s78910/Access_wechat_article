@@ -56,6 +56,14 @@ def validate_app_config(config: AppConfig) -> None:
         ("window.article_open_timeout_seconds", config.window.article_open_timeout_seconds),
         ("window.home_find_timeout_seconds", config.window.home_find_timeout_seconds),
         (
+            "window.article_title_poll_initial_interval_seconds",
+            config.window.article_title_poll_initial_interval_seconds,
+        ),
+        (
+            "window.article_title_poll_max_interval_seconds",
+            config.window.article_title_poll_max_interval_seconds,
+        ),
+        (
             "window.article_title_poll_interval_seconds",
             config.window.article_title_poll_interval_seconds,
         ),
@@ -133,6 +141,13 @@ def validate_app_config(config: AppConfig) -> None:
     ):
         raise ConfigValidationError(
             "window.scroll_probe_max_interval_seconds 不能小于 scroll_probe_interval_seconds"
+        )
+    if (
+        config.window.article_title_poll_max_interval_seconds
+        < config.window.article_title_poll_initial_interval_seconds
+    ):
+        raise ConfigValidationError(
+            "window.article_title_poll_max_interval_seconds 不能小于 article_title_poll_initial_interval_seconds"
         )
     article_window_budget = (
         config.window.article_open_timeout_seconds

@@ -670,6 +670,7 @@ onBeforeUnmount(() => {
             placeholder="搜索公众号或文章标题"
             :options="historyNameOptions"
             :filter-option="false"
+            :dropdown-match-select-width="false"
             popup-class-name="history-keyword-panel"
             aria-label="搜索公众号或文章标题"
             @search="handleHistoryKeywordSearch"
@@ -1266,7 +1267,9 @@ onBeforeUnmount(() => {
 }
 
 :global(.history-keyword-panel.ant-select-dropdown) {
-  min-width: calc(180px * var(--app-scale));
+  width: max-content;
+  min-width: calc(240px * var(--app-scale));
+  max-width: calc(360px * var(--app-scale));
   padding: calc(4px * var(--app-scale));
   border: 1px solid var(--line);
   border-radius: calc(7px * var(--app-scale));
@@ -1299,6 +1302,12 @@ onBeforeUnmount(() => {
   font-size: calc(14px * var(--app-scale));
   font-weight: 400;
   line-height: 1.25;
+}
+
+:global(.history-keyword-panel .ant-select-item-option-content) {
+  overflow: visible;
+  text-overflow: clip;
+  white-space: nowrap;
 }
 
 :global(.history-keyword-panel .ant-select-item-option-selected),

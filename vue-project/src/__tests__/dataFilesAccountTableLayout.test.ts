@@ -60,6 +60,8 @@ test('公众号列表表格列宽、操作按钮和分页布局保持完整显�
   assert.match(actionButtonsRule, /flex-wrap:\s*nowrap;/)
   assert.match(actionLinkRule, /min-width:\s*50px;/)
   assert.match(actionLinkRule, /padding:\s*0 6px;/)
+  assert.match(dataFilesPageVue, /<span v-else-if="column\.key === 'account'" class="account-name-cell" :title="record\.account">\s*\{\{ record\.account \}\}/)
+  assert.doesNotMatch(dataFilesPageVue, /truncateAccountName/)
   assert.match(dataFilesPageVue, /const filePageSize = ref\(10\)/)
   assert.match(dataFilesPageVue, /:page-size-options="\[10\]"/)
   assert.match(dataFilesPageVue, /account-pagination-total/)

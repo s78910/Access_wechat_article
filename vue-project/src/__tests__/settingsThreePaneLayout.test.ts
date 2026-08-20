@@ -202,7 +202,8 @@ test('快速操作按钮使用 2x2 居中文本布局并清除默认错位间距
   assert.match(settingsPageSource, /\.config-action-grid \{[\s\S]*?grid-auto-rows:\s*minmax\(56px, 1fr\);/)
   assert.match(settingsPageSource, /\.config-action-grid :deep\(\.config-action-button\) \{[\s\S]*?min-height:\s*56px;/)
   const configActionBlock = settingsPageSource.match(/<section class="config-actions page-panel"[\s\S]*?<\/section>/)?.[0] ?? ''
-  assert.equal((configActionBlock.match(/<AButton[\s\S]*?class="settings-ant-button config-action-button/g) ?? []).length, 5)
+  assert.equal((configActionBlock.match(/<AButton[\s\S]*?class="settings-ant-button config-action-button/g) ?? []).length, 4)
+  assert.doesNotMatch(configActionBlock, /测试代理连接|handleTestProxyConnection/)
   assert.match(
     settingsPageSource,
     /\.config-action-grid :deep\(\.config-action-button \.ant-btn-icon\+span\),[\s\S]*?\.config-action-grid :deep\(\.config-action-button span\+\.ant-btn-icon\) \{[\s\S]*?margin-inline-start:\s*9px;/,
@@ -225,7 +226,10 @@ test('快速操作按钮使用 2x2 居中文本布局并清除默认错位间距
   assert.doesNotMatch(settingsPageSource, />\s*检测代理连通性\s*</)
   assert.match(settingsPageSource, /保存配置/)
   assert.match(settingsPageSource, /恢复默认/)
-  assert.match(settingsPageSource, /测试代理/)
+  assert.doesNotMatch(
+    settingsPageSource.match(/<section class="config-actions page-panel"[\s\S]*?<\/section>/)?.[0] ?? '',
+    /测试代理/,
+  )
   assert.match(settingsPageSource, /清理缓存/)
   assert.match(settingsPageSource, /重新自检/)
 })
@@ -347,12 +351,52 @@ test('诊断工具按钮使用统一宽度、低高度圆角和主题配色', ()
   )
   assert.match(
     settingsPageSource,
+    /\.diagnostic-action-grid :deep\(\.diagnostic-action-button\.teal\) \{[\s\S]*?--diagnostic-action-color:\s*#0F766E;[\s\S]*?background:\s*#ECFDFB;/,
+  )
+  assert.match(
+    settingsPageSource,
     /\.diagnostic-action-grid :deep\(\.diagnostic-action-button\.purple\) \{[\s\S]*?--diagnostic-action-bg:\s*#F5F0FF;[\s\S]*?background:\s*#F5F0FF;/,
   )
   assert.match(
     settingsPageSource,
     /\.diagnostic-action-grid :deep\(\.diagnostic-action-button\.danger\) \{[\s\S]*?color:\s*#B4232E;[\s\S]*?background:\s*#FFF1F1;/,
   )
+})
+
+test('diagnostic action rows use semantic tones for window and mitm actions', () => {
+  const mitmDiagnosticsBlock = extractSettingsCaseBlock('mitm-diagnostics')
+  const windowDiagnosticsBlock = extractSettingsCaseBlock('window-diagnostics')
+
+  assert.match(mitmDiagnosticsBlock, /icon: 'fa-solid fa-certificate', tone: 'primary'/)
+  assert.match(settingsPageSource, /const mitmProxyDiagnosticTone = computed<'teal' \| 'orange' \| 'danger'>/)
+  assert.match(settingsPageSource, /isMitmProxyPortUnavailable\.value \? 'danger' : isMitmProxyDiagnosticActive\.value \? 'orange' : 'teal'/)
+  assert.match(windowDiagnosticsBlock, /icon: 'fa-solid fa-xmark', tone: 'danger'/)
+})
+
+test('diagnostic action rows use separated card accents', () => {
+  assert.match(settingsPageSource, /'diagnostic-action-row'/)
+  assert.match(settingsPageSource, /action\.tone \?\? 'ghost'/)
+  assert.match(
+    settingsPageSource,
+    /\.diagnostic-action-grid\.settings-config-list \{[\s\S]*?gap:\s*12px;/,
+  )
+  assert.match(
+    settingsPageSource,
+    /\.diagnostic-action-grid \.settings-config-row \{[\s\S]*?position:\s*relative;[\s\S]*?padding:\s*14px 14px 14px 20px;[\s\S]*?border-color:\s*rgba\(104, 141, 181, 0\.24\);[\s\S]*?box-shadow:\s*0 4px 10px rgba\(21, 56, 111, 0\.06\),[\s\S]*?inset 0 1px 0 rgba\(255, 255, 255, 0\.74\);/,
+  )
+  assert.match(
+    settingsPageSource,
+    /\.diagnostic-action-grid \.settings-config-row::before \{[\s\S]*?width:\s*4px;[\s\S]*?background:\s*var\(--diagnostic-row-accent\);/,
+  )
+  assert.match(
+    settingsPageSource,
+    /\.diagnostic-action-grid \.settings-config-row:hover \{[\s\S]*?border-color:\s*rgba\(53, 127, 217, 0\.32\);[\s\S]*?box-shadow:\s*0 6px 14px rgba\(21, 56, 111, 0\.09\),/,
+  )
+  assert.match(settingsPageSource, /\.diagnostic-action-grid \.settings-config-row\.success \{[\s\S]*?--diagnostic-row-accent:\s*#35B889;/)
+  assert.match(settingsPageSource, /\.diagnostic-action-grid \.settings-config-row\.orange \{[\s\S]*?--diagnostic-row-accent:\s*#F28B3C;/)
+  assert.match(settingsPageSource, /\.diagnostic-action-grid \.settings-config-row\.teal \{[\s\S]*?--diagnostic-row-accent:\s*#159A91;/)
+  assert.match(settingsPageSource, /\.diagnostic-action-grid \.settings-config-row\.purple \{[\s\S]*?--diagnostic-row-accent:\s*#8968CD;/)
+  assert.match(settingsPageSource, /\.diagnostic-action-grid \.settings-config-row\.danger \{[\s\S]*?--diagnostic-row-accent:\s*#D74D4D;/)
 })
 
 test('MITM 管理将证书动作标明 CA，并分别提供系统代理和 MITM 代理切换动作', () => {
@@ -617,6 +661,9 @@ test('流程测试按钮使用流程名称作为标题，并用说明表达执�
   assert.match(pythonApiSource, /archiveOfflineContent\?: boolean/)
   assert.match(pythonApiSource, /statefulOfflineCache\?: boolean/)
   assert.match(pythonApiSource, /article-detail-offline-cache/)
+  const flowDiagnosticTones = [...flowDiagnosticsBlock.matchAll(/tone: '([^']+)'/g)]
+    .map((match) => match[1])
+  assert.deepEqual(flowDiagnosticTones, ['blue', 'purple', 'success', 'orange', 'primary'])
   assert.doesNotMatch(flowDiagnosticsBlock, /label: '单篇文章全内容'/)
   assert.doesNotMatch(flowDiagnosticsBlock, /label: '单次主流程全量获取'/)
   assert.doesNotMatch(flowDiagnosticsBlock, /buttonLabel: '主流程获取'/)
@@ -706,7 +753,7 @@ test('配置详情说明下方展示 custom.yaml 变量路径', () => {
   assert.match(keylineStyle, /overflow-wrap:\s*break-word;/)
   assert.doesNotMatch(keylineStyle, /text-overflow:\s*ellipsis;/)
   assert.match(settingsPageSource, /configKey: 'basic_settings\.runtime_maintenance\.log_level'/)
-  assert.match(settingsPageSource, /configKey: 'proxy_settings\.basic_info\.host'/)
+  assert.match(settingsPageSource, /configKey: 'basic_settings\.proxy_settings\.host'/)
   assert.match(settingsPageSource, /configKey: 'basic_settings\.database_settings\.data_schema_version'/)
 })
 
@@ -717,7 +764,7 @@ test('数字配置项把单位合并到左侧标题，右侧控件不再单独�
   assert.match(settingsPageSource, /<strong>\{\{ getSettingsFieldLabel\(field\) \}\}<\/strong>/)
   assert.doesNotMatch(settingsPageSource, /<span v-if="field\.unit" class="settings-field-unit">/)
 
-  for (const blockName of ['mitm-settings', 'single-article-tab', 'home-window-actions', 'home-scroll-actions', 'comment-collection', 'offline-cache']) {
+  for (const blockName of ['single-mitm-capture', 'single-article-tab', 'main-home-window', 'main-home-scroll', 'main-dispatch-control', 'single-html-storage', 'single-comment-collection', 'single-offline-cache']) {
     const block = extractSettingsCaseBlock(blockName)
     assert.match(block, /inputType: 'number-stepper'[^}]*unit: '[^']+'/)
   }
@@ -734,7 +781,7 @@ test('设置页展示的配置变量名都来自 custom.yaml', () => {
   assert.deepEqual(extraKeys, [])
 })
 
-test('基础设置和代理设置完整展示 custom.yaml 的新配置路径', () => {
+test('基础设置、主流程和单篇任务完整展示 custom.yaml 的新配置路径', () => {
   const expectedKeys = [
     'basic_settings.project_storage.article_storage_root',
     'basic_settings.project_storage.temp_dir',
@@ -745,26 +792,47 @@ test('基础设置和代理设置完整展示 custom.yaml 的新配置路径', (
     'basic_settings.runtime_maintenance.auto_clean_temp_files',
     'basic_settings.runtime_maintenance.temp_retention_days',
     'basic_settings.runtime_maintenance.log_retention_days',
-    'basic_settings.runtime_maintenance.request_interval_seconds',
-    'proxy_settings.basic_info.host',
-    'proxy_settings.basic_info.port',
-    'proxy_settings.basic_info.verification_url',
-    'proxy_settings.basic_info.confdir',
-    'proxy_settings.basic_info.ca_cert_path',
-    'proxy_settings.basic_info.startup_delay_seconds',
-    'proxy_settings.basic_info.enable_system_proxy',
-    'proxy_settings.basic_info.ssl_insecure',
-    'proxy_settings.process_control.ready_timeout_seconds',
-    'proxy_settings.process_control.capture_timeout_seconds',
-    'proxy_settings.process_control.result_timeout_seconds',
-    'proxy_settings.process_control.listener_shutdown_timeout_seconds',
-    'proxy_settings.process_control.cancel_grace_seconds',
-    'proxy_settings.process_control.terminate_grace_seconds',
-    'proxy_settings.process_control.start_capture_message_timeout_seconds',
-    'proxy_settings.process_control.fallback_capture_timeout_seconds',
-    'proxy_settings.process_control.listener_ready_poll_interval_seconds',
-    'proxy_settings.process_control.stop_capture_poll_interval_seconds',
-    'proxy_settings.process_control.close_as_capture_deadline',
+    'basic_settings.proxy_settings.host',
+    'basic_settings.proxy_settings.port',
+    'basic_settings.proxy_settings.verification_url',
+    'basic_settings.proxy_settings.confdir',
+    'basic_settings.proxy_settings.ca_cert_path',
+    'basic_settings.proxy_settings.startup_delay_seconds',
+    'basic_settings.proxy_settings.enable_system_proxy',
+    'basic_settings.proxy_settings.ssl_insecure',
+    'main_flow.home_window.activation_wait_seconds',
+    'main_flow.home_window.home_find_timeout_seconds',
+    'main_flow.home_scroll.date_seek_scroll_steps_range',
+    'main_flow.home_scroll.scroll_initial_delay_seconds',
+    'main_flow.home_scroll.scroll_probe_interval_seconds_range',
+    'main_flow.home_scroll.unchanged_before_bounce_seconds',
+    'main_flow.home_scroll.lazy_load_timeout_seconds',
+    'main_flow.home_scroll.bounce_enabled',
+    'main_flow.home_scroll.bounce_attempts',
+    'main_flow.home_scroll.bounce_up_steps',
+    'main_flow.home_scroll.bounce_pause_seconds',
+    'main_flow.home_scroll.bounce_down_steps',
+    'main_flow.dispatch_control.single_task_interval_seconds',
+    'single_article_task.article_tab.restore_focus_after_close',
+    'single_article_task.article_tab.article_open_timeout_seconds',
+    'single_article_task.article_tab.article_title_poll_interval_seconds_range',
+    'single_article_task.article_tab.article_title_stable_delay_seconds',
+    'single_article_task.article_tab.article_close_confirm_timeout_seconds',
+    'single_article_task.mitm_capture.ready_timeout_seconds',
+    'single_article_task.mitm_capture.capture_timeout_seconds',
+    'single_article_task.mitm_capture.result_timeout_seconds',
+    'single_article_task.mitm_capture.listener_shutdown_timeout_seconds',
+    'single_article_task.mitm_capture.close_as_capture_deadline',
+    'single_article_task.html_storage.request_timeout_seconds',
+    'single_article_task.comment_collection.enabled_by_default',
+    'single_article_task.comment_collection.request_timeout_seconds',
+    'single_article_task.comment_collection.page_interval_seconds',
+    'single_article_task.comment_collection.top_level_max_pages',
+    'single_article_task.comment_collection.max_concurrent_processes',
+    'single_article_task.offline_cache.enabled_by_default',
+    'single_article_task.offline_cache.max_scroll_seconds',
+    'single_article_task.offline_cache.resource_timeout_seconds',
+    'single_article_task.offline_cache.max_concurrent_processes',
   ]
 
   for (const configKey of expectedKeys) {
@@ -813,7 +881,7 @@ test('数据库存储详情只保留数据表结构版本和数据库目录', ()
 test('代理基础信息中的 mitmproxy 目录和 CA 证书路径为只读配置', () => {
   const proxyBasicBlock = extractSettingsCaseBlock('proxy-basic')
 
-  for (const configKey of ['proxy_settings.basic_info.confdir', 'proxy_settings.basic_info.ca_cert_path']) {
+  for (const configKey of ['basic_settings.proxy_settings.confdir', 'basic_settings.proxy_settings.ca_cert_path']) {
     const fieldBlock = proxyBasicBlock.match(new RegExp("configKey: '" + configKey.replace('.', "\\.") + "'[^}]*}"))
 
     assert.ok(fieldBlock, `${configKey} 字段应存在`)
@@ -823,105 +891,100 @@ test('代理基础信息中的 mitmproxy 目录和 CA 证书路径为只读配�
 })
 
 test('MITM 设置使用秒单位、开关和加减数字框表达可调项', () => {
-  const mitmBlock = extractSettingsCaseBlock('mitm-settings')
+  const mitmBlock = extractSettingsCaseBlock('single-mitm-capture')
 
   assert.match(mitmBlock, /label: '代理启动额外等待（秒）'/)
-  assert.match(mitmBlock, /configKey: 'proxy_settings\.basic_info\.startup_delay_seconds'/)
-  assert.match(mitmBlock, /configKey: 'proxy_settings\.basic_info\.ssl_insecure'[^}]*inputType: 'switch'/)
-  assert.match(mitmBlock, /configKey: 'proxy_settings\.process_control\.ready_timeout_seconds'[^}]*inputType: 'number-stepper'[^}]*unit: '秒'/)
-  assert.match(mitmBlock, /configKey: 'proxy_settings\.process_control\.capture_timeout_seconds'[^}]*inputType: 'number-stepper'[^}]*unit: '秒'/)
-  assert.match(mitmBlock, /configKey: 'proxy_settings\.process_control\.close_as_capture_deadline'[^}]*inputType: 'switch'/)
+  assert.match(mitmBlock, /configKey: 'basic_settings\.proxy_settings\.startup_delay_seconds'/)
+  assert.match(mitmBlock, /configKey: 'basic_settings\.proxy_settings\.ssl_insecure'[^}]*inputType: 'switch'/)
+  assert.match(mitmBlock, /configKey: 'single_article_task\.mitm_capture\.ready_timeout_seconds'[^}]*inputType: 'number-stepper'[^}]*unit: '秒'/)
+  assert.match(mitmBlock, /configKey: 'single_article_task\.mitm_capture\.capture_timeout_seconds'[^}]*inputType: 'number-stepper'[^}]*unit: '秒'/)
+  assert.match(mitmBlock, /configKey: 'single_article_task\.mitm_capture\.close_as_capture_deadline'[^}]*inputType: 'switch'/)
 })
 
-test('运行维护只展示请求间隔，不再展示单篇文章重试次数', () => {
+test('运行维护不再展示任务间隔和单篇文章重试次数', () => {
   const runtimeBlock = extractSettingsCaseBlock('runtime-maintenance')
 
-  assert.match(runtimeBlock, /configKey: 'basic_settings\.runtime_maintenance\.request_interval_seconds'[^}]*inputType: 'number-stepper'[^}]*unit: '秒'/)
+  assert.doesNotMatch(runtimeBlock, /basic_settings\.runtime_maintenance\.request_interval_seconds/)
+  assert.match(settingsPageSource, /configKey: 'main_flow\.dispatch_control\.single_task_interval_seconds'[^}]*inputType: 'number-stepper'[^}]*unit: '秒'/)
   assert.doesNotMatch(settingsPageSource, /basic_settings\.runtime_maintenance\.article_retry_count/)
   assert.doesNotMatch(settingsPageSource, /retryCount/)
 })
 
-test('单篇标签操作使用 windows_command 键、开关和带单位的加减数字框', () => {
+test('单篇标签操作使用 single_article_task 键、开关和带单位的加减数字框', () => {
   const singleTabBlock = extractSettingsCaseBlock('single-article-tab')
 
-  assert.match(singleTabBlock, /configKey: 'windows_command\.single_article_tab\.restore_focus_after_close'[^}]*inputType: 'switch'/)
+  assert.match(singleTabBlock, /configKey: 'single_article_task\.article_tab\.restore_focus_after_close'[^}]*inputType: 'switch'/)
 
   for (const [configKey, unit] of [
-    ['windows_command.single_article_tab.article_title_stable_delay_seconds', '秒'],
-    ['windows_command.single_article_tab.article_open_timeout_seconds', '秒'],
-    ['windows_command.single_article_tab.article_title_poll_growth_factor', '倍'],
-    ['windows_command.single_article_tab.article_close_confirm_timeout_seconds', '秒'],
-    ['windows_command.single_article_tab.article_close_title_poll_interval_seconds', '秒'],
+    ['single_article_task.article_tab.article_title_stable_delay_seconds', '秒'],
+    ['single_article_task.article_tab.article_open_timeout_seconds', '秒'],
+    ['single_article_task.article_tab.article_close_confirm_timeout_seconds', '秒'],
   ]) {
     const escapedKey = configKey.replaceAll('.', '\\.')
     assert.match(singleTabBlock, new RegExp("configKey: '" + escapedKey + "'[^}]*inputType: 'number-stepper'[^}]*unit: '" + unit + "'"))
   }
-  assert.match(singleTabBlock, /configKey: 'windows_command\.single_article_tab\.article_title_poll_interval_seconds_range'[\s\S]*?inputType: 'readonly-range'[\s\S]*?unit: '秒'/)
+  assert.match(singleTabBlock, /configKey: 'single_article_task\.article_tab\.article_title_poll_interval_seconds_range'[\s\S]*?inputType: 'readonly-range'[\s\S]*?unit: '秒'/)
+  assert.doesNotMatch(singleTabBlock, /article_title_poll_growth_factor/)
+  assert.doesNotMatch(singleTabBlock, /article_close_title_poll_interval_seconds/)
 })
 
-test('主页窗口操作使用 windows_command 键和秒单位加减数字框', () => {
-  const homeWindowBlock = extractSettingsCaseBlock('home-window-actions')
+test('主页窗口操作使用 main_flow 键和秒单位加减数字框', () => {
+  const homeWindowBlock = extractSettingsCaseBlock('main-home-window')
 
   for (const configKey of [
-    'windows_command.home_window.activation_wait_seconds',
-    'windows_command.home_window.home_find_timeout_seconds',
-    'windows_command.home_window.mitm_ready_timeout_seconds',
-    'windows_command.home_window.mitm_capture_timeout_seconds',
-    'windows_command.home_window.mitm_result_timeout_seconds',
-    'windows_command.home_window.mitm_shutdown_timeout_seconds',
-    'windows_command.home_window.click_mouse_move_wait_seconds',
-    'windows_command.home_window.click_mouse_down_wait_seconds',
-    'windows_command.home_window.click_mouse_up_wait_seconds',
-    'windows_command.home_window.uia_control_click_wait_seconds',
+    'main_flow.home_window.activation_wait_seconds',
+    'main_flow.home_window.home_find_timeout_seconds',
   ]) {
     const escapedKey = configKey.replaceAll('.', '\\.')
     assert.match(homeWindowBlock, new RegExp("configKey: '" + escapedKey + "'[^}]*inputType: 'number-stepper'[^}]*unit: '秒'"))
   }
-  assert.doesNotMatch(homeWindowBlock, /windows_command\.home_window\.home_find_use_article_probe/)
-  assert.doesNotMatch(homeWindowBlock, /windows_command\.home_window\.screen_click_wait_seconds/)
+  assert.doesNotMatch(homeWindowBlock, /home_find_use_article_probe/)
+  assert.doesNotMatch(homeWindowBlock, /screen_click_wait_seconds/)
+  assert.doesNotMatch(homeWindowBlock, /click_mouse_move_wait_seconds/)
+  assert.doesNotMatch(homeWindowBlock, /uia_control_click_wait_seconds/)
 })
 
-test('主页滚动操作使用 windows_command 键、开关和步数/次数/秒单位', () => {
-  const homeScrollBlock = extractSettingsCaseBlock('home-scroll-actions')
+test('主页滚动操作使用 main_flow 键、开关和步数/次数/秒单位', () => {
+  const homeScrollBlock = extractSettingsCaseBlock('main-home-scroll')
 
-  assert.match(homeScrollBlock, /configKey: 'windows_command\.home_scroll\.bounce_enabled'[^}]*inputType: 'switch'/)
+  assert.match(homeScrollBlock, /configKey: 'main_flow\.home_scroll\.bounce_enabled'[^}]*inputType: 'switch'/)
 
   for (const [configKey, unit] of [
-    ['windows_command.home_scroll.scroll_initial_delay_seconds', '秒'],
-    ['windows_command.home_scroll.unchanged_before_bounce_seconds', '秒'],
-    ['windows_command.home_scroll.lazy_load_timeout_seconds', '秒'],
-    ['windows_command.home_scroll.bounce_up_steps', '步'],
-    ['windows_command.home_scroll.bounce_pause_seconds', '秒'],
-    ['windows_command.home_scroll.bounce_down_steps', '步'],
-    ['windows_command.home_scroll.bounce_attempts', '次'],
+    ['main_flow.home_scroll.scroll_initial_delay_seconds', '秒'],
+    ['main_flow.home_scroll.unchanged_before_bounce_seconds', '秒'],
+    ['main_flow.home_scroll.lazy_load_timeout_seconds', '秒'],
+    ['main_flow.home_scroll.bounce_up_steps', '步'],
+    ['main_flow.home_scroll.bounce_pause_seconds', '秒'],
+    ['main_flow.home_scroll.bounce_down_steps', '步'],
+    ['main_flow.home_scroll.bounce_attempts', '次'],
   ]) {
     const escapedKey = configKey.replaceAll('.', '\\.')
     assert.match(homeScrollBlock, new RegExp("configKey: '" + escapedKey + "'[^}]*inputType: 'number-stepper'[^}]*unit: '" + unit + "'"))
   }
-  assert.match(homeScrollBlock, /configKey: 'windows_command\.home_scroll\.date_seek_scroll_steps_range'[\s\S]*?inputType: 'readonly-range'[\s\S]*?unit: '步'/)
-  assert.match(homeScrollBlock, /configKey: 'windows_command\.home_scroll\.scroll_probe_interval_seconds_range'[\s\S]*?inputType: 'readonly-range'[\s\S]*?unit: '秒'/)
-  assert.doesNotMatch(homeScrollBlock, /windows_command\.home_scroll\.max_scroll_attempts/)
-  assert.doesNotMatch(homeScrollBlock, /windows_command\.home_scroll\.scroll_probe_growth_factor/)
-  assert.doesNotMatch(homeScrollBlock, /windows_command\.home_scroll\.scroll_settle_timeout_seconds/)
+  assert.match(homeScrollBlock, /configKey: 'main_flow\.home_scroll\.date_seek_scroll_steps_range'[\s\S]*?inputType: 'readonly-range'[\s\S]*?unit: '步'/)
+  assert.match(homeScrollBlock, /configKey: 'main_flow\.home_scroll\.scroll_probe_interval_seconds_range'[\s\S]*?inputType: 'readonly-range'[\s\S]*?unit: '秒'/)
+  assert.doesNotMatch(homeScrollBlock, /max_scroll_attempts/)
+  assert.doesNotMatch(homeScrollBlock, /scroll_probe_growth_factor/)
+  assert.doesNotMatch(homeScrollBlock, /scroll_settle_timeout_seconds/)
 })
 
-test('数据获取设置中的开关和数值项使用统一控件样式', () => {
-  const referenceBlock = extractSettingsCaseBlock('reference-request')
-  const commentBlock = extractSettingsCaseBlock('comment-collection')
-  const offlineBlock = extractSettingsCaseBlock('offline-cache')
+test('单篇任务设置中的开关和数值项使用统一控件样式', () => {
+  const referenceBlock = extractSettingsCaseBlock('single-html-storage')
+  const commentBlock = extractSettingsCaseBlock('single-comment-collection')
+  const offlineBlock = extractSettingsCaseBlock('single-offline-cache')
 
   assert.doesNotMatch(settingsPageSource, /data_acquisition\.initial_html/)
-  assert.match(referenceBlock, /configKey: 'data_acquisition\.reference_request\.request_timeout_seconds'[^}]*inputType: 'number-stepper'[^}]*unit: '秒'/)
-  assert.match(commentBlock, /configKey: 'data_acquisition\.comment_collection\.enabled_by_default'[^}]*inputType: 'switch'/)
-  assert.match(commentBlock, /configKey: 'data_acquisition\.comment_collection\.request_timeout_seconds'[^}]*inputType: 'number-stepper'[^}]*unit: '秒'/)
-  assert.match(commentBlock, /configKey: 'data_acquisition\.comment_collection\.page_interval_seconds'[^}]*inputType: 'number-stepper'[^}]*unit: '秒'/)
-  assert.match(commentBlock, /configKey: 'data_acquisition\.comment_collection\.top_level_max_pages'[^}]*inputType: 'number-stepper'[^}]*unit: '页'/)
-  assert.match(commentBlock, /configKey: 'data_acquisition\.comment_collection\.reply_max_pages'[^}]*inputType: 'number-stepper'[^}]*unit: '页'/)
-  assert.match(commentBlock, /configKey: 'data_acquisition\.comment_collection\.max_concurrent_processes'[^}]*inputType: 'number-stepper'[^}]*unit: '个'/)
-  assert.match(offlineBlock, /configKey: 'data_acquisition\.offline_cache\.enabled_by_default'[^}]*inputType: 'switch'/)
-  assert.match(offlineBlock, /configKey: 'data_acquisition\.offline_cache\.max_scroll_seconds'[^}]*inputType: 'number-stepper'[^}]*unit: '秒'/)
-  assert.match(offlineBlock, /configKey: 'data_acquisition\.offline_cache\.resource_timeout_seconds'[^}]*inputType: 'number-stepper'[^}]*unit: '秒'/)
-  assert.match(offlineBlock, /configKey: 'data_acquisition\.offline_cache\.max_concurrent_processes'[^}]*inputType: 'number-stepper'[^}]*unit: '个'/)
+  assert.match(referenceBlock, /configKey: 'single_article_task\.html_storage\.request_timeout_seconds'[^}]*inputType: 'number-stepper'[^}]*unit: '秒'/)
+  assert.match(commentBlock, /configKey: 'single_article_task\.comment_collection\.enabled_by_default'[^}]*inputType: 'switch'/)
+  assert.match(commentBlock, /configKey: 'single_article_task\.comment_collection\.request_timeout_seconds'[^}]*inputType: 'number-stepper'[^}]*unit: '秒'/)
+  assert.match(commentBlock, /configKey: 'single_article_task\.comment_collection\.page_interval_seconds'[^}]*inputType: 'number-stepper'[^}]*unit: '秒'/)
+  assert.match(commentBlock, /configKey: 'single_article_task\.comment_collection\.top_level_max_pages'[^}]*inputType: 'number-stepper'[^}]*unit: '页'/)
+  assert.doesNotMatch(commentBlock, /reply_max_pages/)
+  assert.match(commentBlock, /configKey: 'single_article_task\.comment_collection\.max_concurrent_processes'[^}]*inputType: 'number-stepper'[^}]*unit: '个'/)
+  assert.match(offlineBlock, /configKey: 'single_article_task\.offline_cache\.enabled_by_default'[^}]*inputType: 'switch'/)
+  assert.match(offlineBlock, /configKey: 'single_article_task\.offline_cache\.max_scroll_seconds'[^}]*inputType: 'number-stepper'[^}]*unit: '秒'/)
+  assert.match(offlineBlock, /configKey: 'single_article_task\.offline_cache\.resource_timeout_seconds'[^}]*inputType: 'number-stepper'[^}]*unit: '秒'/)
+  assert.match(offlineBlock, /configKey: 'single_article_task\.offline_cache\.max_concurrent_processes'[^}]*inputType: 'number-stepper'[^}]*unit: '个'/)
 })
 
 test('短控件配置项在说明右侧展示，长路径类配置保持宽行展示', () => {
@@ -980,9 +1043,8 @@ test('短控件配置项在说明右侧展示，长路径类配置保持宽行�
 test('三段式配置中心覆盖 custom.yaml 的主要配置分组', () => {
   for (const label of [
     '基础设置',
-    '代理设置',
-    '窗口控制',
-    '数据获取',
+    '主流程',
+    '单篇任务',
     '诊断工具',
   ]) {
     assert.match(settingsPageSource, new RegExp(label))
@@ -993,13 +1055,14 @@ test('三段式配置中心覆盖 custom.yaml 的主要配置分组', () => {
     'database-storage',
     'runtime-maintenance',
     'proxy-basic',
-    'mitm-settings',
+    'main-home-window',
+    'main-home-scroll',
+    'main-dispatch-control',
     'single-article-tab',
-    'home-window-actions',
-    'home-scroll-actions',
-    'reference-request',
-    'comment-collection',
-    'offline-cache',
+    'single-mitm-capture',
+    'single-html-storage',
+    'single-comment-collection',
+    'single-offline-cache',
     'mitm-diagnostics',
     'window-diagnostics',
     'flow-diagnostics',
@@ -1007,10 +1070,10 @@ test('三段式配置中心覆盖 custom.yaml 的主要配置分组', () => {
     assert.match(settingsPageSource, new RegExp("key: '" + itemKey + "'"))
   }
 
-  assert.match(settingsPageSource, /MITM 设置/)
+  assert.match(settingsPageSource, /MITM 捕获/)
   assert.match(settingsPageSource, /单篇标签操作/)
-  assert.match(settingsPageSource, /主页窗口操作/)
-  assert.match(settingsPageSource, /主页滚动操作/)
+  assert.match(settingsPageSource, /主页窗口/)
+  assert.match(settingsPageSource, /主页滚动/)
   assert.match(settingsPageSource, /诊断工具/)
   assert.match(settingsPageSource, /diagnostic-action-grid/)
   assert.doesNotMatch(settingsPageSource, /key: 'runtime-environment'/)
@@ -1047,10 +1110,10 @@ test('恢复默认按钮先确认，再使用 system.yaml 覆盖 custom.yaml', (
   assert.match(settingsPageSource, /data\/custom\.yaml\.bak/)
 })
 
-test('数据获取设置展示 system.yaml 中的原 HTML 请求超时', () => {
-  assert.match(customYamlSource, /reference_request:\s*[\s\S]*?request_timeout_seconds:\s*10\.0/)
-  assert.match(settingsPageSource, /key:\s*'reference-request'/)
-  assert.match(settingsPageSource, /data_acquisition\.reference_request\.request_timeout_seconds/)
+test('单篇任务设置展示 system.yaml 中的原 HTML 请求超时', () => {
+  assert.match(customYamlSource, /html_storage:\s*[\s\S]*?request_timeout_seconds:\s*10\.0/)
+  assert.match(settingsPageSource, /key:\s*'single-html-storage'/)
+  assert.match(settingsPageSource, /single_article_task\.html_storage\.request_timeout_seconds/)
 })
 
 test('快速操作按钮使用 Ant Design Vue 并补齐交互状态', () => {

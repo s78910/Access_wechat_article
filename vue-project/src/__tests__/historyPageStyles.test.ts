@@ -31,6 +31,7 @@ test('采集历史筛选区使用 Ant Design Vue 控件', () => {
     'refresh button should be placed before the keyword search control',
   )
   assert.match(filterBlock[0], /<ASelect[\s\S]*?class="history-ant-control history-ant-select history-keyword"/)
+  assert.match(filterBlock[0], /<ASelect[\s\S]*?:dropdown-match-select-width="false"/)
   assert.match(filterBlock[0], /<ATreeSelect[\s\S]*?class="history-ant-control history-ant-select history-filter-tree"/)
   assert.match(filterBlock[0], /tree-checkable/)
   assert.match(filterBlock[0], /:tree-data="historyFilterTreeData"/)
@@ -95,10 +96,20 @@ test('采集历史筛选浮层按应用缩放比例显示', () => {
   )
 
   assert.ok(datePanelRule, 'history date picker panel scale rule should exist')
-  assert.match(keywordDropdownRule, /min-width:\s*calc\(180px \* var\(--app-scale\)\);/)
+  assert.match(keywordDropdownRule, /width:\s*max-content;/)
+  assert.match(keywordDropdownRule, /min-width:\s*calc\(240px \* var\(--app-scale\)\);/)
+  assert.match(keywordDropdownRule, /max-width:\s*calc\(360px \* var\(--app-scale\)\);/)
   assert.match(keywordDropdownRule, /font-size:\s*calc\(14px \* var\(--app-scale\)\);/)
   assert.match(filterDropdownRule, /font-size:\s*calc\(14px \* var\(--app-scale\)\);/)
   assert.match(datePanelRule[0], /zoom:\s*var\(--app-scale\);/)
+
+  const keywordOptionContentRule = extractRule(
+    historyPageVue,
+    ':global(.history-keyword-panel .ant-select-item-option-content)',
+  )
+
+  assert.match(keywordOptionContentRule, /overflow:\s*visible;/)
+  assert.match(keywordOptionContentRule, /text-overflow:\s*clip;/)
 })
 
 test('采集历史树筛选浮层参考搜索框做紧凑缩放', () => {

@@ -29,6 +29,8 @@ class SingleCaptureSettings:
     ready_timeout_seconds: float
     result_timeout_seconds: float
     title_timeout_seconds: float
+    title_poll_initial_interval_seconds: float
+    title_poll_max_interval_seconds: float
     title_poll_interval_seconds: float
     title_stable_delay_seconds: float
 
@@ -50,6 +52,12 @@ class SingleCaptureSettings:
             ready_timeout_seconds=config.mitm_capture.ready_timeout_seconds,
             result_timeout_seconds=config.mitm_capture.result_timeout_seconds,
             title_timeout_seconds=config.window.article_open_timeout_seconds,
+            title_poll_initial_interval_seconds=(
+                config.window.article_title_poll_initial_interval_seconds
+            ),
+            title_poll_max_interval_seconds=(
+                config.window.article_title_poll_max_interval_seconds
+            ),
             title_poll_interval_seconds=config.window.article_title_poll_interval_seconds,
             title_stable_delay_seconds=stable_delay,
         )
@@ -144,8 +152,11 @@ class SingleArticleCaptureService:
                 article_tab = self._tabs.wait_for_opened_article_tab(
                     baseline=baseline,
                     timeout_seconds=settings.title_timeout_seconds,
-                    poll_interval_seconds=settings.title_poll_interval_seconds,
                     stable_delay_seconds=settings.title_stable_delay_seconds,
+                    poll_initial_interval_seconds=(
+                        settings.title_poll_initial_interval_seconds
+                    ),
+                    poll_max_interval_seconds=settings.title_poll_max_interval_seconds,
                 )
             except ArticleTabNotFoundError as exc:
                 _record_runtime_stage(

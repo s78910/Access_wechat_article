@@ -50,6 +50,8 @@ class WindowConfig:
     home_find_timeout_seconds: float
     restore_focus_after_close: bool
     article_open_timeout_seconds: float
+    article_title_poll_initial_interval_seconds: float
+    article_title_poll_max_interval_seconds: float
     article_title_poll_interval_seconds: float
     article_title_stable_delay_seconds: float
     article_close_confirm_timeout_seconds: float

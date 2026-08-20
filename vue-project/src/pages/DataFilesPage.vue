@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import AppIcon from '../components/AppIcon.vue'
 import ArchiveDistributionChart from '../components/ArchiveDistributionChart.vue'
-import { DownOutlined, ReloadOutlined } from '@ant-design/icons-vue'
+import { ReloadOutlined, SearchOutlined } from '@ant-design/icons-vue'
 import { notification } from 'ant-design-vue'
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { ArchiveAccountItem, ArchiveArticleItem, ArchiveCacheJob, ArchiveCacheResultItem } from '../bridge/pythonApi'
@@ -107,7 +107,10 @@ type CheckboxChangeEvent = {
 
 type CollectDateRangeValue = [string, string] | null
 
-const ALL_ACCOUNT_FILTER_KEY = '__all_accounts__'
+type ArchiveAccountSelectOption = {
+  label: string
+  value: string
+}
 
 const props = defineProps<{
   summaryStats: ArchiveSummaryStat[]
@@ -125,7 +128,6 @@ const selectedRecordIndexes = ref<number[]>([])
 const fileListRows = ref<FileRow[]>([])
 const recordRows = ref<RecordRow[]>([])
 const recordTotal = ref(0)
-const selectedAccountDropdownOpen = ref(false)
 const archiveAccountsLoading = ref(true)
 const archiveAccountsError = ref('')
 const archiveArticlesLoading = ref(false)
@@ -172,21 +174,12 @@ const accountOptions = computed(() => {
   return Array.from(new Set(fileListRows.value.map((file) => file.account)))
 })
 
-const accountSelectOptions = computed(() => {
+const accountSelectOptions = computed<ArchiveAccountSelectOption[]>(() => {
   return accountOptions.value.map((account) => ({
     label: account,
     value: account,
   }))
 })
-
-const accountFilterOptions = computed(() => [
-  { label: '全部公众号', value: ALL_ACCOUNT_FILTER_KEY },
-  ...accountSelectOptions.value,
-])
-
-const selectedAccountLabel = computed(() => selectedAccount.value || '选择公众号')
-
-const selectedAccountMenuKeys = computed(() => [selectedAccount.value || ALL_ACCOUNT_FILTER_KEY])
 
 const selectedCollectDateRange = computed<CollectDateRangeValue>({
   get: (): CollectDateRangeValue => {
@@ -201,9 +194,12 @@ const selectedCollectDateRange = computed<CollectDateRangeValue>({
   },
 })
 
-function selectArchiveAccountFilter(value: string) {
-  selectedAccount.value = value === ALL_ACCOUNT_FILTER_KEY ? '' : value
-  selectedAccountDropdownOpen.value = false
+function filterArchiveAccountOption(input: string, option?: ArchiveAccountSelectOption) {
+  const keyword = input.trim().toLowerCase()
+  if (!keyword) {
+    return true
+  }
+  return (option?.label ?? '').toLowerCase().includes(keyword)
 }
 
 const archiveMetricLabels = new Set(['文章数量', '存储占用'])
@@ -531,11 +527,6 @@ function formatArchiveArticleRow(item: ArchiveArticleItem, index: number): Recor
     publishedAt: item.publishedArticleTime || '-',
     size: item.sizeLabel || '0 B',
   }
-}
-
-function truncateAccountName(account: string) {
-  const chars = Array.from(account || '')
-  return chars.length > 10 ? `${chars.slice(0, 9).join('')}...` : account
 }
 
 async function loadArchiveAccounts() {
@@ -1225,30 +1216,22 @@ onBeforeUnmount(() => {
             <ReloadOutlined />
             刷新
           </AButton>
-          <ADropdown
-            v-model:open="selectedAccountDropdownOpen"
-            :trigger="['click']"
-            placement="bottomLeft"
-            overlay-class-name="file-account-filter-dropdown"
+          <ASelect
+            v-model:value="selectedAccount"
+            class="file-ant-control file-ant-select account-select-trigger"
+            show-search
+            allow-clear
+            placeholder="选择公众号"
+            :options="accountSelectOptions"
+            :filter-option="filterArchiveAccountOption"
+            :dropdown-match-select-width="false"
+            popup-class-name="file-account-filter-dropdown"
+            aria-label="选择公众号"
           >
-            <AButton class="file-select-trigger account-select-trigger" aria-label="选择公众号">
-              <span>{{ selectedAccountLabel }}</span>
-              <DownOutlined
-                :class="['file-select-chevron', { 'is-open': selectedAccountDropdownOpen }]"
-              />
-            </AButton>
-            <template #overlay>
-              <AMenu :selected-keys="selectedAccountMenuKeys">
-                <AMenuItem
-                  v-for="option in accountFilterOptions"
-                  :key="option.value"
-                  @click="selectArchiveAccountFilter(option.value)"
-                >
-                  {{ option.label }}
-                </AMenuItem>
-              </AMenu>
+            <template #suffixIcon>
+              <SearchOutlined class="file-search-icon" />
             </template>
-          </ADropdown>
+          </ASelect>
           <ARangePicker
             v-model:value="selectedCollectDateRange"
             class="file-date-picker file-date-range-picker"
@@ -1287,7 +1270,7 @@ onBeforeUnmount(() => {
                 {{ record.displayIndex }}
               </template>
               <span v-else-if="column.key === 'account'" class="account-name-cell" :title="record.account">
-                {{ truncateAccountName(record.account) }}
+                {{ record.account }}
               </span>
               <template v-else-if="column.key === 'createdAt'">
                 {{ record.createdAt }}
@@ -3142,7 +3125,7 @@ onBeforeUnmount(() => {
   transform: none;
 }
 
-.file-select-trigger,
+.file-ant-control,
 .file-date-picker {
   width: 100%;
   min-width: 0;
@@ -3156,39 +3139,53 @@ onBeforeUnmount(() => {
   font-weight: 400;
 }
 
-.file-select-trigger {
-  position: relative;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  height: 32px;
-  padding: 0 22px 0 4px;
-  text-align: left;
-  overflow: hidden;
-}
-
-.file-select-trigger > span:first-child {
-  display: block;
+.file-list :deep(.file-ant-select.ant-select) {
   width: 100%;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
-.file-select-chevron {
-  position: absolute;
-  top: 50%;
-  right: 8px;
-  flex: 0 0 auto;
-  color: rgba(77, 108, 159, 0.84);
-  font-size: 8px;
-  transform: translateY(-50%) rotate(0deg);
-  transition: transform 160ms ease;
+.file-list :deep(.file-ant-select.ant-select .ant-select-selector) {
+  height: 32px;
+  padding: 0 11px;
+  border-color: var(--paper-edge);
+  border-radius: 6px;
+  color: var(--ink-strong);
+  background: var(--frost-bg-strong);
+  box-shadow: var(--paper-shadow-sm);
+  font-size: 14px;
+  font-weight: 400;
 }
 
-.file-select-chevron.is-open {
-  transform: translateY(-50%) rotate(180deg);
+.file-list :deep(.file-ant-select.ant-select .ant-select-selection-item),
+.file-list :deep(.file-ant-select.ant-select .ant-select-selection-placeholder),
+.file-list :deep(.file-ant-select.ant-select .ant-select-selection-search-input) {
+  color: var(--ink-strong);
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 30px;
+}
+
+.file-list :deep(.file-ant-select.ant-select .ant-select-selection-placeholder) {
+  color: rgba(77, 108, 159, 0.72);
+}
+
+.file-search-icon {
+  color: rgba(77, 108, 159, 0.78);
+  font-size: 14px;
+  pointer-events: none;
+}
+
+.file-list :deep(.file-ant-select.ant-select .ant-select-arrow),
+.file-list :deep(.file-ant-select.ant-select .ant-select-clear) {
+  color: rgba(77, 108, 159, 0.72);
+}
+
+.file-list :deep(.file-ant-select.ant-select .ant-select-clear) {
+  background: transparent;
+  font-size: 12px;
+}
+
+.file-list :deep(.file-ant-select.ant-select .ant-select-clear:hover) {
+  color: rgba(21, 56, 111, 0.82);
 }
 
 .file-list :deep(.file-date-picker.ant-picker) {
@@ -3217,19 +3214,40 @@ onBeforeUnmount(() => {
   text-align: center;
 }
 
-:global(.file-account-filter-dropdown.ant-dropdown .ant-dropdown-menu) {
-  min-width: calc(180px * var(--app-scale));
+:global(.file-account-filter-dropdown.ant-select-dropdown) {
+  width: max-content;
+  min-width: calc(240px * var(--app-scale));
+  max-width: calc(360px * var(--app-scale));
   padding: calc(4px * var(--app-scale));
-  border-radius: calc(6px * var(--app-scale));
+  border: 1px solid var(--line);
+  border-radius: calc(7px * var(--app-scale));
+  color: var(--ink);
+  background: #fbfdff;
+  box-shadow: 0 12px 22px rgba(35, 69, 111, 0.14);
+  font-size: calc(14px * var(--app-scale));
+  font-weight: 400;
 }
 
-:global(.file-account-filter-dropdown.ant-dropdown .ant-dropdown-menu .ant-dropdown-menu-item) {
+:global(.file-account-filter-dropdown.ant-select-dropdown .ant-select-item) {
   min-height: calc(32px * var(--app-scale));
   padding: calc(5px * var(--app-scale)) calc(12px * var(--app-scale));
   border-radius: calc(4px * var(--app-scale));
+  color: var(--ink);
   font-size: calc(14px * var(--app-scale));
   font-weight: 400;
   line-height: 1.25;
+}
+
+:global(.file-account-filter-dropdown.ant-select-dropdown .ant-select-item-option-content) {
+  overflow: visible;
+  text-overflow: clip;
+  white-space: nowrap;
+}
+
+:global(.file-account-filter-dropdown.ant-select-dropdown .ant-select-item-option-selected) {
+  color: var(--ink-strong);
+  background: rgba(45, 117, 214, 0.1);
+  font-weight: 500;
 }
 
 :global(.file-date-picker-panel .ant-picker-panel-container) {
@@ -3411,7 +3429,7 @@ onBeforeUnmount(() => {
 }
 
 :global(.collector-app.dark) .file-refresh-button,
-:global(.collector-app.dark) .file-select-trigger,
+:global(.collector-app.dark) .file-list :deep(.file-ant-select.ant-select .ant-select-selector),
 :global(.collector-app.dark) .file-list :deep(.file-date-picker.ant-picker) {
   border-color: rgba(128, 153, 188, 0.2);
   background: rgba(15, 24, 39, 0.62);
@@ -3419,8 +3437,11 @@ onBeforeUnmount(() => {
 }
 
 :global(.collector-app.dark) .file-refresh-button,
-:global(.collector-app.dark) .file-select-trigger,
-:global(.collector-app.dark) .file-select-chevron,
+:global(.collector-app.dark) .file-search-icon,
+:global(.collector-app.dark) .file-list :deep(.file-ant-select.ant-select .ant-select-selection-item),
+:global(.collector-app.dark) .file-list :deep(.file-ant-select.ant-select .ant-select-selection-search-input),
+:global(.collector-app.dark) .file-list :deep(.file-ant-select.ant-select .ant-select-arrow),
+:global(.collector-app.dark) .file-list :deep(.file-ant-select.ant-select .ant-select-clear),
 :global(.collector-app.dark) .file-list :deep(.file-date-picker .ant-picker-input > input),
 :global(.collector-app.dark) .file-list :deep(.file-date-picker .ant-picker-separator),
 :global(.collector-app.dark) .file-list :deep(.file-date-picker .ant-picker-suffix),
@@ -3428,6 +3449,7 @@ onBeforeUnmount(() => {
   color: #cbd8ea;
 }
 
+:global(.collector-app.dark) .file-list :deep(.file-ant-select.ant-select .ant-select-selection-placeholder),
 :global(.collector-app.dark) .file-list :deep(.file-date-picker .ant-picker-input > input::placeholder) {
   color: rgba(142, 162, 189, 0.72);
 }

@@ -177,9 +177,8 @@ const configGuideItems = [
 
 type SettingsCategoryKey =
   | 'basic'
-  | 'proxy'
-  | 'window'
-  | 'data'
+  | 'main-flow'
+  | 'single-article-task'
   | 'diagnostics'
 
 type SettingsItemKey =
@@ -187,33 +186,17 @@ type SettingsItemKey =
   | 'database-storage'
   | 'runtime-maintenance'
   | 'proxy-basic'
-  | 'mitm-settings'
+  | 'main-home-window'
+  | 'main-home-scroll'
+  | 'main-dispatch-control'
+  | 'single-mitm-capture'
+  | 'single-html-storage'
+  | 'single-comment-collection'
+  | 'single-offline-cache'
   | 'single-article-tab'
-  | 'home-window-actions'
-  | 'home-scroll-actions'
-  | 'reference-request'
-  | 'comment-collection'
-  | 'offline-cache'
   | 'mitm-diagnostics'
   | 'window-diagnostics'
   | 'flow-diagnostics'
-  // 兼容页面中仍保留的旧详情模板分支，避免类型检查误判这些分支永远不可达。
-  | 'archive-storage'
-  | 'database-files'
-  | 'temp-log-directories'
-  | 'mitm-capture-timing'
-  | 'proxy-listener'
-  | 'system-proxy-cert-validation'
-  | 'certificate-paths'
-  | 'comment-default-switch'
-  | 'comment-request-policy'
-  | 'offline-cache-switch'
-  | 'offline-page-loading'
-  | 'offline-resource-download'
-  | 'software-data-version'
-  | 'log-level'
-  | 'temp-cleanup'
-  | 'log-retention'
 
 type SettingsItem = {
   key: SettingsItemKey
@@ -274,7 +257,7 @@ type SettingsDetailAction = {
   description: string
   detail?: string
   icon: string
-  tone?: 'primary' | 'success' | 'orange' | 'danger' | 'ghost' | 'blue' | 'purple'
+  tone?: 'primary' | 'success' | 'orange' | 'danger' | 'ghost' | 'blue' | 'purple' | 'teal'
   disabled?: () => boolean
   showWindowClickFlowOptions?: boolean
   showScrollStepInput?: boolean
@@ -297,66 +280,49 @@ type SettingsControlLayoutClass = 'compact-control' | 'wide-control'
 const settingsNumberValues = reactive<Record<string, number>>({
   'basic_settings.runtime_maintenance.temp_retention_days': 7,
   'basic_settings.runtime_maintenance.log_retention_days': 30,
-  'basic_settings.runtime_maintenance.request_interval_seconds': 0,
-  'proxy_settings.process_control.ready_timeout_seconds': 10,
-  'proxy_settings.process_control.capture_timeout_seconds': 20,
-  'proxy_settings.process_control.result_timeout_seconds': 11,
-  'proxy_settings.process_control.listener_shutdown_timeout_seconds': 3,
-  'proxy_settings.process_control.cancel_grace_seconds': 1,
-  'proxy_settings.process_control.terminate_grace_seconds': 1,
-  'proxy_settings.process_control.start_capture_message_timeout_seconds': 30,
-  'proxy_settings.process_control.fallback_capture_timeout_seconds': 60,
-  'proxy_settings.process_control.listener_ready_poll_interval_seconds': 0.02,
-  'proxy_settings.process_control.stop_capture_poll_interval_seconds': 0.05,
-  'windows_command.single_article_tab.article_title_stable_delay_seconds': 0.1,
-  'windows_command.single_article_tab.article_open_timeout_seconds': 12,
-  'windows_command.single_article_tab.article_title_poll_growth_factor': 1.5,
-  'windows_command.single_article_tab.article_close_confirm_timeout_seconds': 3,
-  'windows_command.single_article_tab.article_close_title_poll_interval_seconds': 0.05,
-  'windows_command.home_window.activation_wait_seconds': 0.25,
-  'windows_command.home_window.home_find_timeout_seconds': 3,
-  'windows_command.home_window.mitm_ready_timeout_seconds': 10,
-  'windows_command.home_window.mitm_capture_timeout_seconds': 20,
-  'windows_command.home_window.mitm_result_timeout_seconds': 11,
-  'windows_command.home_window.mitm_shutdown_timeout_seconds': 3,
-  'windows_command.home_window.click_mouse_move_wait_seconds': 0.02,
-  'windows_command.home_window.click_mouse_down_wait_seconds': 0.04,
-  'windows_command.home_window.click_mouse_up_wait_seconds': 0.25,
-  'windows_command.home_window.uia_control_click_wait_seconds': 0,
-  'windows_command.home_scroll.scroll_initial_delay_seconds': 0.05,
-  'windows_command.home_scroll.unchanged_before_bounce_seconds': 0.6,
-  'windows_command.home_scroll.lazy_load_timeout_seconds': 3,
-  'windows_command.home_scroll.bounce_up_steps': 2,
-  'windows_command.home_scroll.bounce_pause_seconds': 0.2,
-  'windows_command.home_scroll.bounce_down_steps': 6,
-  'windows_command.home_scroll.bounce_attempts': 2,
-  'data_acquisition.reference_request.request_timeout_seconds': 10,
-  'data_acquisition.comment_collection.request_timeout_seconds': 10,
-  'data_acquisition.comment_collection.page_interval_seconds': 0.5,
-  'data_acquisition.comment_collection.top_level_max_pages': 50,
-  'data_acquisition.comment_collection.reply_max_pages': 50,
-  'data_acquisition.comment_collection.max_concurrent_processes': 3,
-  'data_acquisition.offline_cache.max_scroll_seconds': 30,
-  'data_acquisition.offline_cache.resource_timeout_seconds': 10,
-  'data_acquisition.offline_cache.max_concurrent_processes': 3,
+  'main_flow.home_window.activation_wait_seconds': 0.05,
+  'main_flow.home_window.home_find_timeout_seconds': 3,
+  'main_flow.home_scroll.scroll_initial_delay_seconds': 0.05,
+  'main_flow.home_scroll.unchanged_before_bounce_seconds': 0.6,
+  'main_flow.home_scroll.lazy_load_timeout_seconds': 3,
+  'main_flow.home_scroll.bounce_up_steps': 2,
+  'main_flow.home_scroll.bounce_pause_seconds': 0.2,
+  'main_flow.home_scroll.bounce_down_steps': 6,
+  'main_flow.home_scroll.bounce_attempts': 2,
+  'main_flow.dispatch_control.single_task_interval_seconds': 0,
+  'single_article_task.article_tab.article_title_stable_delay_seconds': 0.1,
+  'single_article_task.article_tab.article_open_timeout_seconds': 12,
+  'single_article_task.article_tab.article_close_confirm_timeout_seconds': 3,
+  'single_article_task.mitm_capture.ready_timeout_seconds': 10,
+  'single_article_task.mitm_capture.capture_timeout_seconds': 20,
+  'single_article_task.mitm_capture.result_timeout_seconds': 11,
+  'single_article_task.mitm_capture.listener_shutdown_timeout_seconds': 3,
+  'single_article_task.html_storage.request_timeout_seconds': 10,
+  'single_article_task.comment_collection.request_timeout_seconds': 10,
+  'single_article_task.comment_collection.page_interval_seconds': 0.5,
+  'single_article_task.comment_collection.top_level_max_pages': 50,
+  'single_article_task.comment_collection.max_concurrent_processes': 3,
+  'single_article_task.offline_cache.max_scroll_seconds': 30,
+  'single_article_task.offline_cache.resource_timeout_seconds': 10,
+  'single_article_task.offline_cache.max_concurrent_processes': 3,
 })
 
 const settingsToggleValues = reactive<Record<string, boolean>>({
-  'proxy_settings.basic_info.ssl_insecure': true,
-  'proxy_settings.process_control.close_as_capture_deadline': true,
-  'windows_command.single_article_tab.restore_focus_after_close': true,
-  'windows_command.home_scroll.bounce_enabled': true,
-  'data_acquisition.comment_collection.enabled_by_default': false,
-  'data_acquisition.offline_cache.enabled_by_default': false,
+  'basic_settings.proxy_settings.ssl_insecure': true,
+  'single_article_task.mitm_capture.close_as_capture_deadline': true,
+  'single_article_task.article_tab.restore_focus_after_close': true,
+  'main_flow.home_scroll.bounce_enabled': true,
+  'single_article_task.comment_collection.enabled_by_default': false,
+  'single_article_task.offline_cache.enabled_by_default': false,
 })
 
 const runtimeConfigValues = reactive<Record<string, string>>({})
 let runtimeConfigSyncTimer = 0
 
 const readonlyRangeConfigKeys = new Set([
-  'windows_command.single_article_tab.article_title_poll_interval_seconds_range',
-  'windows_command.home_scroll.date_seek_scroll_steps_range',
-  'windows_command.home_scroll.scroll_probe_interval_seconds_range',
+  'single_article_task.article_tab.article_title_poll_interval_seconds_range',
+  'main_flow.home_scroll.date_seek_scroll_steps_range',
+  'main_flow.home_scroll.scroll_probe_interval_seconds_range',
 ])
 
 const wideControlKinds = new Set<SettingsDetailControl['kind']>([
@@ -403,47 +369,39 @@ const settingsCategories: SettingsCategory[] = [
     key: 'basic',
     label: '基础设置',
     icon: 'fa-solid fa-gear',
-    summary: '项目存储、数据库只读信息和运行维护参数',
-    description: '基础设置对应 basic_settings 配置，集中展示项目目录、数据库配置与运行维护参数。数据库存储当前只做只读展示，避免误改数据结构版本和数据库目录。',
+    summary: '项目存储、数据库、运行维护和代理基础参数',
+    description: '基础设置对应 basic_settings 配置，集中展示项目目录、数据库配置、运行维护参数和代理基础信息。数据库存储当前只做只读展示，避免误改数据结构版本和数据库目录。',
     items: [
       { key: 'project-storage', label: '项目存储', summary: '文章归档目录、临时文件目录和日志目录', icon: 'fa-regular fa-folder-open' },
       { key: 'database-storage', label: '数据库存储', summary: '数据表结构版本和数据库目录', icon: 'fa-solid fa-database' },
-      { key: 'runtime-maintenance', label: '运行维护', summary: '日志、启动清理、文件保留、请求间隔和失败重试参数', icon: 'fa-solid fa-broom' },
+      { key: 'runtime-maintenance', label: '运行维护', summary: '日志、启动清理和文件保留周期', icon: 'fa-solid fa-broom' },
+      { key: 'proxy-basic', label: '代理基础设置', summary: '监听地址、监听端口、证书目录、CA 证书路径和代理验证地址', icon: 'fa-solid fa-plug-circle-check' },
     ],
   },
   {
-    key: 'proxy',
-    label: '代理设置',
-    icon: 'fa-solid fa-network-wired',
-    summary: '本地代理基础信息、证书路径和 MITM 捕获控制参数',
-    description: '代理设置对应 proxy_settings 配置，影响 MITM 监听、系统代理接管、证书校验和单次捕获生命周期。',
+    key: 'main-flow',
+    label: '主流程',
+    icon: 'fa-solid fa-code-branch',
+    summary: '主页窗口定位、主页滚动和单篇任务分发节奏',
+    description: '主流程对应 main_flow 配置，只负责围绕公众号主页窗口读取文章卡片、滚动定位和向单篇任务队列派发任务。',
     items: [
-      { key: 'proxy-basic', label: '基础信息', summary: '监听地址、监听端口、证书目录、CA 证书路径和代理验证地址', icon: 'fa-solid fa-plug-circle-check' },
-      { key: 'mitm-settings', label: 'MITM 设置', summary: '代理启动、系统代理接管、证书校验和进程生命周期控制', icon: 'fa-solid fa-shield-halved' },
+      { key: 'main-home-window', label: '主页窗口', summary: '主页窗口激活等待和主页定位超时', icon: 'fa-regular fa-hand-pointer' },
+      { key: 'main-home-scroll', label: '主页滚动', summary: '日期定位步长、页面变化检测、懒加载和回弹滚动', icon: 'fa-solid fa-download' },
+      { key: 'main-dispatch-control', label: '任务分发', summary: '主流程派发单篇任务之间的节奏控制', icon: 'fa-solid fa-network-wired' },
     ],
   },
   {
-    key: 'window',
-    label: '窗口控制',
-    icon: 'fa-solid fa-desktop',
-    summary: '单篇标签、主页窗口点击和主页滚动参数',
-    description: '窗口控制对应 windows_command 配置，主要处理文章标签识别关闭、主页窗口点击时序、滚动找下一篇文章和回弹加载补偿。',
+    key: 'single-article-task',
+    label: '单篇任务',
+    icon: 'fa-regular fa-file-lines',
+    summary: '文章标签、MITM 捕获、HTML 存储、评论采集和离线缓存',
+    description: '单篇任务对应 single_article_task 配置，控制每篇文章从详情获取到内容存储、评论采集和离线缓存的可调参数。',
     items: [
       { key: 'single-article-tab', label: '单篇标签操作', summary: '文章详情页标题检测、标题稳定等待、关闭确认和焦点恢复', icon: 'fa-solid fa-window-restore' },
-      { key: 'home-window-actions', label: '主页窗口操作', summary: '主页激活、点击前 MITM ready、鼠标点击内部等待和子进程收尾', icon: 'fa-regular fa-hand-pointer' },
-      { key: 'home-scroll-actions', label: '主页滚动操作', summary: '滚动步长、候选文章查找、页面变化探测、懒加载和回弹滚动', icon: 'fa-solid fa-download' },
-    ],
-  },
-  {
-    key: 'data',
-    label: '数据获取',
-    icon: 'fa-regular fa-file-lines',
-    summary: '原 HTML 请求、评论采集和离线缓存参数',
-    description: '数据获取对应 data_acquisition 配置，控制 reference 请求、评论分页和 Playwright 离线资源缓存。',
-    items: [
-      { key: 'reference-request', label: '原 HTML 请求', summary: '使用 reference 参数重新请求文章 HTML 的超时时间', icon: 'fa-regular fa-file-code' },
-      { key: 'comment-collection', label: '评论采集', summary: '默认开关、请求节奏、页数上限和子进程并发数', icon: 'fa-regular fa-clipboard' },
-      { key: 'offline-cache', label: '离线缓存', summary: 'Playwright 打开文章后的滚动加载和离线资源下载超时', icon: 'fa-solid fa-file-shield' },
+      { key: 'single-mitm-capture', label: 'MITM 捕获', summary: '代理启动、系统代理接管、证书校验和捕获生命周期', icon: 'fa-solid fa-shield-halved' },
+      { key: 'single-html-storage', label: '文章详情存储', summary: '使用 reference 参数重新请求文章 HTML 的超时时间', icon: 'fa-regular fa-file-code' },
+      { key: 'single-comment-collection', label: '评论采集', summary: '默认开关、请求节奏、页数上限和子进程并发数', icon: 'fa-regular fa-clipboard' },
+      { key: 'single-offline-cache', label: '离线缓存', summary: 'Playwright 打开文章后的滚动加载和离线资源下载超时', icon: 'fa-solid fa-file-shield' },
     ],
   },
 ]
@@ -613,8 +571,8 @@ const mitmProxyDiagnosticIcon = computed(() => (
     ? 'fa-solid fa-triangle-exclamation'
     : isMitmProxyDiagnosticActive.value ? 'fa-solid fa-stop' : 'fa-solid fa-circle-play'
 ))
-const mitmProxyDiagnosticTone = computed<'success' | 'orange' | 'danger'>(() => (
-  isMitmProxyPortUnavailable.value ? 'danger' : isMitmProxyDiagnosticActive.value ? 'orange' : 'success'
+const mitmProxyDiagnosticTone = computed<'teal' | 'orange' | 'danger'>(() => (
+  isMitmProxyPortUnavailable.value ? 'danger' : isMitmProxyDiagnosticActive.value ? 'orange' : 'teal'
 ))
 
 const selectedSettingsDetail = computed<SettingsDetailContent | null>(() => {
@@ -638,7 +596,7 @@ const selectedSettingsDetail = computed<SettingsDetailContent | null>(() => {
       }
     case 'runtime-maintenance':
       return {
-        note: '运行维护对应 basic_settings.runtime_maintenance，用于控制日志、启动清理、文件保留和文章处理间隔。',
+        note: '运行维护对应 basic_settings.runtime_maintenance，用于控制日志、启动清理和文件保留周期。',
         controls: [
           { kind: 'log-level', label: '日志级别', description: '控制程序输出日志的最低级别，默认 INFO。', configKey: 'basic_settings.runtime_maintenance.log_level' },
           { kind: 'auto-clean', label: '启动自动清理', description: '程序启动时是否自动清理上次遗留的临时文件。', configKey: 'basic_settings.runtime_maintenance.auto_clean_temp_files' },
@@ -646,117 +604,106 @@ const selectedSettingsDetail = computed<SettingsDetailContent | null>(() => {
         fields: [
           { label: '临时文件保留天数', configKey: 'basic_settings.runtime_maintenance.temp_retention_days', value: '7', description: '超过该天数的临时文件允许被清理。', inputType: 'number-stepper', unit: '天', min: 0, max: 365, step: 1 },
           { label: '日志文件保留天数', configKey: 'basic_settings.runtime_maintenance.log_retention_days', value: '30', description: '超过该天数的旧日志允许被清理。', inputType: 'number-stepper', unit: '天', min: 0, max: 365, step: 1 },
-          { label: '请求与文章处理间隔', configKey: 'basic_settings.runtime_maintenance.request_interval_seconds', value: '0.0', description: '相邻请求或文章处理之间的等待时间；0 表示不额外等待。', inputType: 'number-stepper', unit: '秒', min: 0, max: 3600, step: 0.1 },
         ],
       }
     case 'proxy-basic':
       return {
-        note: '基础信息对应 proxy_settings.basic_info。监听地址和端口会影响系统代理指向，证书路径用于检测、安装和清理 MITM CA。',
+        note: '代理基础设置对应 basic_settings.proxy_settings。监听地址和端口会影响系统代理指向，证书路径用于检测、安装和清理 MITM CA。',
         controls: [
-          { kind: 'proxy-host', label: '监听地址', description: 'MITM 服务绑定的本机地址，当前默认 127.0.0.1。', configKey: 'proxy_settings.basic_info.host' },
-          { kind: 'proxy-port', label: '监听端口', description: 'MITM 服务监听端口，当前默认 18000。', configKey: 'proxy_settings.basic_info.port' },
-          { kind: 'verification-url', label: '代理验证地址', description: '用于代理证书验证、安装和手动诊断。', configKey: 'proxy_settings.basic_info.verification_url' },
+          { kind: 'proxy-host', label: '监听地址', description: 'MITM 服务绑定的本机地址，当前默认 127.0.0.1。', configKey: 'basic_settings.proxy_settings.host' },
+          { kind: 'proxy-port', label: '监听端口', description: 'MITM 服务监听端口，当前默认 18000。', configKey: 'basic_settings.proxy_settings.port' },
+          { kind: 'verification-url', label: '代理验证地址', description: '用于代理证书验证、安装和手动诊断。', configKey: 'basic_settings.proxy_settings.verification_url' },
         ],
         fields: [
-          { label: 'mitmproxy 配置目录', configKey: 'proxy_settings.basic_info.confdir', value: '.mitmproxy', description: 'mitmproxy 配置和证书目录。', tone: 'readonly' },
-          { label: 'CA 证书路径', configKey: 'proxy_settings.basic_info.ca_cert_path', value: '.mitmproxy/mitmproxy-ca-cert.cer', description: '用于检测、安装或删除本项目生成的 CA 证书。', tone: 'readonly' },
+          { label: 'mitmproxy 配置目录', configKey: 'basic_settings.proxy_settings.confdir', value: '.mitmproxy', description: 'mitmproxy 配置和证书目录。', tone: 'readonly' },
+          { label: 'CA 证书路径', configKey: 'basic_settings.proxy_settings.ca_cert_path', value: '.mitmproxy/mitmproxy-ca-cert.cer', description: '用于检测、安装或删除本项目生成的 CA 证书。', tone: 'readonly' },
         ],
       }
-    case 'mitm-settings':
+    case 'single-mitm-capture':
       return {
-        note: 'MITM 设置集中展示 proxy_settings.basic_info 中的启动策略，以及 proxy_settings.process_control 中父子进程、监听器和清理阶段的控制参数。',
+        note: 'MITM 捕获对应 single_article_task.mitm_capture，并引用 basic_settings.proxy_settings 中的代理启动和系统代理策略。',
         controls: [
-          { kind: 'startup-delay', label: '代理启动额外等待（秒）', description: 'MITM 代理启动后的额外等待时间；通常为 0，由 READY 检测判断可用性。', configKey: 'proxy_settings.basic_info.startup_delay_seconds' },
-          { kind: 'system-proxy', label: '接管系统代理', description: '采集时是否允许程序接管 Windows 系统代理。', configKey: 'proxy_settings.basic_info.enable_system_proxy' },
+          { kind: 'startup-delay', label: '代理启动额外等待（秒）', description: 'MITM 代理启动后的额外等待时间；通常为 0，由 READY 检测判断可用性。', configKey: 'basic_settings.proxy_settings.startup_delay_seconds' },
+          { kind: 'system-proxy', label: '接管系统代理', description: '采集时是否允许程序接管 Windows 系统代理。', configKey: 'basic_settings.proxy_settings.enable_system_proxy' },
           { kind: 'mitm-proxy', label: 'MITM 运行状态', description: '由单篇文章采集 attempt 自动启动和停止。' },
         ],
         fields: [
-          { label: '宽松证书校验', configKey: 'proxy_settings.basic_info.ssl_insecure', value: '开启', description: 'MITM 连接上游 HTTPS 时是否允许忽略证书校验。', inputType: 'switch' },
-          { label: 'READY 通知等待', configKey: 'proxy_settings.process_control.ready_timeout_seconds', value: '10.0', description: '父进程等待 MITM 子进程发出 READY 通知的最大时长。', inputType: 'number-stepper', unit: '秒', min: 0, max: 300, step: 0.5 },
-          { label: '单次捕获总超时', configKey: 'proxy_settings.process_control.capture_timeout_seconds', value: '20.0', description: '子进程发出 READY 后，等待 STOP_CAPTURE 命令的最大时长。', inputType: 'number-stepper', unit: '秒', min: 1, max: 3600, step: 1 },
-          { label: '捕获结果等待', configKey: 'proxy_settings.process_control.result_timeout_seconds', value: '11.0', description: '父进程发送 STOP_CAPTURE 后等待 RESULT 或 FAILED 的最大时长。', inputType: 'number-stepper', unit: '秒', min: 0, max: 600, step: 0.5 },
-          { label: '监听器关闭超时', configKey: 'proxy_settings.process_control.listener_shutdown_timeout_seconds', value: '3.0', description: '等待 MITM listener 正常关闭的最大时长。', inputType: 'number-stepper', unit: '秒', min: 0, max: 60, step: 0.5 },
-          { label: '取消退出宽限时间', configKey: 'proxy_settings.process_control.cancel_grace_seconds', value: '1.0', description: '取消任务时等待 MITM 子进程正常退出的时长。', inputType: 'number-stepper', unit: '秒', min: 0, max: 60, step: 0.1 },
-          { label: '强制终止宽限时间', configKey: 'proxy_settings.process_control.terminate_grace_seconds', value: '1.0', description: '执行 terminate 或 kill 后等待子进程退出的时长。', inputType: 'number-stepper', unit: '秒', min: 0, max: 60, step: 0.1 },
-          { label: '启动捕获消息等待', configKey: 'proxy_settings.process_control.start_capture_message_timeout_seconds', value: '30.0', description: 'MITM 子进程启动后等待 START_CAPTURE 消息的兜底时长。', inputType: 'number-stepper', unit: '秒', min: 1, max: 600, step: 1 },
-          { label: '兜底捕获超时', configKey: 'proxy_settings.process_control.fallback_capture_timeout_seconds', value: '60.0', description: '未被 START_CAPTURE 参数覆盖时使用的子进程捕获超时。', inputType: 'number-stepper', unit: '秒', min: 1, max: 3600, step: 1 },
-          { label: '监听器就绪轮询间隔', configKey: 'proxy_settings.process_control.listener_ready_poll_interval_seconds', value: '0.02', description: '子进程检测 MITM 监听端口是否可连接的轮询间隔。', inputType: 'number-stepper', unit: '秒', min: 0.01, max: 5, step: 0.01 },
-          { label: '停止捕获轮询间隔', configKey: 'proxy_settings.process_control.stop_capture_poll_interval_seconds', value: '0.05', description: '子进程等待 STOP_CAPTURE 命令时的轮询间隔。', inputType: 'number-stepper', unit: '秒', min: 0.01, max: 5, step: 0.01 },
-          { label: '关闭标签作为捕获截止点', configKey: 'proxy_settings.process_control.close_as_capture_deadline', value: '开启', description: '关闭文章标签时立即结束本次捕获，不再接收新的捕获结果。', inputType: 'switch' },
+          { label: '宽松证书校验', configKey: 'basic_settings.proxy_settings.ssl_insecure', value: '开启', description: 'MITM 连接上游 HTTPS 时是否允许忽略证书校验。', inputType: 'switch' },
+          { label: 'READY 通知等待', configKey: 'single_article_task.mitm_capture.ready_timeout_seconds', value: '10.0', description: '父进程等待 MITM 子进程发出 READY 通知的最大时长。', inputType: 'number-stepper', unit: '秒', min: 0, max: 300, step: 0.5 },
+          { label: '单次捕获总超时', configKey: 'single_article_task.mitm_capture.capture_timeout_seconds', value: '20.0', description: 'MITM READY 后等待文章请求被捕获的最长时间。', inputType: 'number-stepper', unit: '秒', min: 1, max: 3600, step: 1 },
+          { label: '捕获结果等待', configKey: 'single_article_task.mitm_capture.result_timeout_seconds', value: '11.0', description: '发送停止捕获命令后，等待捕获结果返回的最长时间。', inputType: 'number-stepper', unit: '秒', min: 0, max: 600, step: 0.5 },
+          { label: '监听器关闭超时', configKey: 'single_article_task.mitm_capture.listener_shutdown_timeout_seconds', value: '3.0', description: '停止 MITM listener 的最长等待时间。', inputType: 'number-stepper', unit: '秒', min: 0, max: 60, step: 0.5 },
+          { label: '关闭标签作为捕获截止点', configKey: 'single_article_task.mitm_capture.close_as_capture_deadline', value: '开启', description: '关闭文章标签时立即结束本次捕获，不再接收新的捕获结果。', inputType: 'switch' },
         ],
       }
     case 'single-article-tab':
       return {
         note: '单篇标签操作用于确认文章详情页标题、稳定后关闭文章标签，并把焦点恢复到公众号主页。',
         fields: [
-          { label: '标题稳定等待', configKey: 'windows_command.single_article_tab.article_title_stable_delay_seconds', value: '0.1', description: '检测到目标文章标签标题后短暂等待；等待结束后立即关闭文章标签。', inputType: 'number-stepper', unit: '秒', min: 0, max: 5, step: 0.05 },
-          { label: '详情页打开超时', configKey: 'windows_command.single_article_tab.article_open_timeout_seconds', value: '12.0', description: '点击文章后等待详情页打开的最大时长；超过仍未识别目标标题则认为打开失败。', inputType: 'number-stepper', unit: '秒', min: 1, max: 120, step: 0.5 },
-          { label: '标题轮询间隔', configKey: 'windows_command.single_article_tab.article_title_poll_interval_seconds_range', value: { start: '0.05', end: '0.15', startLabel: '起始值', endLabel: '最大值' }, description: '点击文章后等待文章标签打开时使用；从起始间隔开始检测标题，未检测到时逐步放大。使用区间：0.05 秒 ~ 0.15 秒。', inputType: 'readonly-range', unit: '秒', tone: 'readonly' },
-          { label: '标题轮询增长倍数', configKey: 'windows_command.single_article_tab.article_title_poll_growth_factor', value: '1.5', description: '标题轮询间隔逐步放大的倍率；当前 YAML 使用 1.5 倍增长。', inputType: 'number-stepper', unit: '倍', min: 1, max: 5, step: 0.1 },
-          { label: '关闭确认超时', configKey: 'windows_command.single_article_tab.article_close_confirm_timeout_seconds', value: '3.0', description: '关闭文章标签后，最多等待窗口标题变化或标签消失的时长。', inputType: 'number-stepper', unit: '秒', min: 0, max: 60, step: 0.5 },
-          { label: '关闭后标题轮询间隔', configKey: 'windows_command.single_article_tab.article_close_title_poll_interval_seconds', value: '0.05', description: '关闭文章标签后检测标题变化的轮询间隔。', inputType: 'number-stepper', unit: '秒', min: 0.01, max: 5, step: 0.01 },
-          { label: '关闭后恢复主页焦点', configKey: 'windows_command.single_article_tab.restore_focus_after_close', value: '开启', description: '关闭文章标签后立即聚焦回公众号主页窗口。', inputType: 'switch' },
+          { label: '标题稳定等待', configKey: 'single_article_task.article_tab.article_title_stable_delay_seconds', value: '0.1', description: '检测到目标文章标签标题后短暂等待；等待结束后立即关闭文章标签。', inputType: 'number-stepper', unit: '秒', min: 0, max: 5, step: 0.05 },
+          { label: '详情页打开超时', configKey: 'single_article_task.article_tab.article_open_timeout_seconds', value: '12.0', description: '点击文章后等待详情页打开的最大时长；超过仍未识别目标标题则认为打开失败。', inputType: 'number-stepper', unit: '秒', min: 1, max: 120, step: 0.5 },
+          { label: '标题轮询间隔', configKey: 'single_article_task.article_tab.article_title_poll_interval_seconds_range', value: { start: '0.05', end: '0.15', startLabel: '起始值', endLabel: '最大值' }, description: '点击文章后等待文章标签打开时使用；从起始间隔开始检测标题，未检测到时逐步放大。使用区间：0.05 秒 ~ 0.15 秒。', inputType: 'readonly-range', unit: '秒', tone: 'readonly' },
+          { label: '关闭确认超时', configKey: 'single_article_task.article_tab.article_close_confirm_timeout_seconds', value: '3.0', description: '关闭文章标签后，最多等待窗口标题变化或标签消失的时长。', inputType: 'number-stepper', unit: '秒', min: 0, max: 60, step: 0.5 },
+          { label: '关闭后恢复主页焦点', configKey: 'single_article_task.article_tab.restore_focus_after_close', value: '开启', description: '关闭文章标签后立即聚焦回公众号主页窗口。', inputType: 'switch' },
         ],
       }
-    case 'home-window-actions':
+    case 'main-home-window':
       return {
-        note: '主页窗口操作用于控制主页激活、点击动作内部等待，以及点击文章前后的 MITM 生命周期等待。',
+        note: '主页窗口设置用于控制主流程定位和短暂激活公众号主页窗口的等待时间。',
         fields: [
-          { label: '激活主页窗口等待', configKey: 'windows_command.home_window.activation_wait_seconds', value: '0.25', description: '激活公众号主页窗口后等待窗口稳定，再继续准备点击文章。', inputType: 'number-stepper', unit: '秒', min: 0, max: 10, step: 0.05 },
-          { label: '主页定位超时', configKey: 'windows_command.home_window.home_find_timeout_seconds', value: '3.0', description: '诊断工具查找微信主页窗口的最大等待时间；超过后直接提示先打开公众号主页。', inputType: 'number-stepper', unit: '秒', min: 0.5, max: 30, step: 0.5 },
-          { label: '点击前 MITM READY 等待', configKey: 'windows_command.home_window.mitm_ready_timeout_seconds', value: '10.0', description: '点击文章前等待 MITM 子进程进入 READY 状态的最大时长。', inputType: 'number-stepper', unit: '秒', min: 0, max: 300, step: 0.5 },
-          { label: 'MITM 捕获超时', configKey: 'windows_command.home_window.mitm_capture_timeout_seconds', value: '20.0', description: 'MITM 捕获文章请求的最大时长，对应单次捕获生命周期。', inputType: 'number-stepper', unit: '秒', min: 1, max: 3600, step: 1 },
-          { label: 'MITM 结果等待', configKey: 'windows_command.home_window.mitm_result_timeout_seconds', value: '11.0', description: '停止 MITM 后等待捕获结果返回的最大时长。', inputType: 'number-stepper', unit: '秒', min: 1, max: 600, step: 0.5 },
-          { label: 'MITM 关闭超时', configKey: 'windows_command.home_window.mitm_shutdown_timeout_seconds', value: '3.0', description: '等待 MITM 子进程按清理顺序退出的最大时长。', inputType: 'number-stepper', unit: '秒', min: 0, max: 60, step: 0.5 },
-          { label: '鼠标移动后等待', configKey: 'windows_command.home_window.click_mouse_move_wait_seconds', value: '0.02', description: '发送鼠标移动消息后短暂停顿，避免点击事件过快进入下一步。', inputType: 'number-stepper', unit: '秒', min: 0, max: 2, step: 0.01 },
-          { label: '鼠标按下后等待', configKey: 'windows_command.home_window.click_mouse_down_wait_seconds', value: '0.04', description: '发送鼠标按下消息后短暂停顿。', inputType: 'number-stepper', unit: '秒', min: 0, max: 2, step: 0.01 },
-          { label: '鼠标释放后等待', configKey: 'windows_command.home_window.click_mouse_up_wait_seconds', value: '0.25', description: '等待 Chromium 异步处理点击，避免标题检测太早开始。', inputType: 'number-stepper', unit: '秒', min: 0, max: 5, step: 0.05 },
-          { label: 'UIA 点击等待', configKey: 'windows_command.home_window.uia_control_click_wait_seconds', value: '0.0', description: '走 UIA 控件 Click 时的额外等待时间，当前默认不额外等待。', inputType: 'number-stepper', unit: '秒', min: 0, max: 5, step: 0.05 },
+          { label: '激活主页窗口等待', configKey: 'main_flow.home_window.activation_wait_seconds', value: '0.05', description: '激活公众号主页窗口后等待窗口稳定，再继续读取 UIA 树或滚动。', inputType: 'number-stepper', unit: '秒', min: 0, max: 10, step: 0.05 },
+          { label: '主页定位超时', configKey: 'main_flow.home_window.home_find_timeout_seconds', value: '3.0', description: '诊断工具查找微信主页窗口的最大等待时间；超过后直接提示先打开公众号主页。', inputType: 'number-stepper', unit: '秒', min: 0.5, max: 30, step: 0.5 },
         ],
       }
-    case 'home-scroll-actions':
+    case 'main-home-scroll':
       return {
         note: '主页滚动操作用于查找下一篇候选文章、判断页面变化、等待懒加载，并在必要时执行回弹滚动。',
         fields: [
-          { label: '日期定位滚动步长', configKey: 'windows_command.home_scroll.date_seek_scroll_steps_range', value: { start: '3', end: '18', startLabel: '普通收录步长', endLabel: '日期定位最大步长' }, description: '日期定位阶段根据目标日期距离动态放大滚动步长；普通收录仍使用基础步长。使用区间：3 步 ~ 18 步。', inputType: 'readonly-range', unit: '步', tone: 'readonly' },
-          { label: '滚动后读取等待', configKey: 'windows_command.home_scroll.scroll_initial_delay_seconds', value: '0.05', description: '每次滚动后先等待，再开始读取主页可见文章。', inputType: 'number-stepper', unit: '秒', min: 0, max: 5, step: 0.05 },
-          { label: '变化检测轮询间隔', configKey: 'windows_command.home_scroll.scroll_probe_interval_seconds_range', value: { start: '0.1', end: '0.4', startLabel: '起始值', endLabel: '最大值' }, description: '滚动后用于判断 UIA 页面内容是否发生变化；从起始间隔开始检测，页面未变化时逐步放大。使用区间：0.1 秒 ~ 0.4 秒。', inputType: 'readonly-range', unit: '秒', tone: 'readonly' },
-          { label: '无变化判定等待', configKey: 'windows_command.home_scroll.unchanged_before_bounce_seconds', value: '0.6', description: '滚动后页面持续无变化达到该时长，就认为本次滚动无效并准备回弹。', inputType: 'number-stepper', unit: '秒', min: 0, max: 10, step: 0.1 },
-          { label: '懒加载最长等待', configKey: 'windows_command.home_scroll.lazy_load_timeout_seconds', value: '3.0', description: '检测到页面处于加载状态时，等待新内容出现的最长时间。', inputType: 'number-stepper', unit: '秒', min: 0, max: 60, step: 0.5 },
-          { label: '启用回弹滚动', configKey: 'windows_command.home_scroll.bounce_enabled', value: '开启', description: '滚动到底且没有触发懒加载时，是否允许先上滚再下滚寻找新文章。', inputType: 'switch' },
-          { label: '回弹向上步长', configKey: 'windows_command.home_scroll.bounce_up_steps', value: '2', description: '回弹滚动时先向上滚动的步数。', inputType: 'number-stepper', unit: '步', min: 0, max: 50, step: 1 },
-          { label: '回弹等待时间', configKey: 'windows_command.home_scroll.bounce_pause_seconds', value: '0.2', description: '向上滚动后等待该时长，再执行向下滚动。', inputType: 'number-stepper', unit: '秒', min: 0, max: 10, step: 0.1 },
-          { label: '回弹向下步长', configKey: 'windows_command.home_scroll.bounce_down_steps', value: '6', description: '回弹等待后再次向下滚动的步数。', inputType: 'number-stepper', unit: '步', min: 0, max: 80, step: 1 },
-          { label: '回弹滚动次数', configKey: 'windows_command.home_scroll.bounce_attempts', value: '2', description: '每轮寻找候选文章时，最多尝试回弹滚动的次数。', inputType: 'number-stepper', unit: '次', min: 0, max: 20, step: 1 },
+          { label: '日期定位滚动步长', configKey: 'main_flow.home_scroll.date_seek_scroll_steps_range', value: { start: '3', end: '18', startLabel: '普通收录步长', endLabel: '日期定位最大步长' }, description: '日期定位阶段根据目标日期距离动态放大滚动步长；普通收录仍使用基础步长。使用区间：3 步 ~ 18 步。', inputType: 'readonly-range', unit: '步', tone: 'readonly' },
+          { label: '滚动后读取等待', configKey: 'main_flow.home_scroll.scroll_initial_delay_seconds', value: '0.05', description: '每次滚动后先等待，再开始读取主页可见文章。', inputType: 'number-stepper', unit: '秒', min: 0, max: 5, step: 0.05 },
+          { label: '变化检测轮询间隔', configKey: 'main_flow.home_scroll.scroll_probe_interval_seconds_range', value: { start: '0.1', end: '0.4', startLabel: '起始值', endLabel: '最大值' }, description: '滚动后用于判断 UIA 页面内容是否发生变化；从起始间隔开始检测，页面未变化时逐步放大。使用区间：0.1 秒 ~ 0.4 秒。', inputType: 'readonly-range', unit: '秒', tone: 'readonly' },
+          { label: '无变化判定等待', configKey: 'main_flow.home_scroll.unchanged_before_bounce_seconds', value: '0.6', description: '滚动后页面持续无变化达到该时长，就认为本次滚动无效并准备回弹。', inputType: 'number-stepper', unit: '秒', min: 0, max: 10, step: 0.1 },
+          { label: '懒加载最长等待', configKey: 'main_flow.home_scroll.lazy_load_timeout_seconds', value: '3.0', description: '检测到页面处于加载状态时，等待新内容出现的最长时间。', inputType: 'number-stepper', unit: '秒', min: 0, max: 60, step: 0.5 },
+          { label: '启用回弹滚动', configKey: 'main_flow.home_scroll.bounce_enabled', value: '开启', description: '滚动到底且没有触发懒加载时，是否允许先上滚再下滚寻找新文章。', inputType: 'switch' },
+          { label: '回弹向上步长', configKey: 'main_flow.home_scroll.bounce_up_steps', value: '2', description: '回弹滚动时先向上滚动的步数。', inputType: 'number-stepper', unit: '步', min: 0, max: 50, step: 1 },
+          { label: '回弹等待时间', configKey: 'main_flow.home_scroll.bounce_pause_seconds', value: '0.2', description: '向上滚动后等待该时长，再执行向下滚动。', inputType: 'number-stepper', unit: '秒', min: 0, max: 10, step: 0.1 },
+          { label: '回弹向下步长', configKey: 'main_flow.home_scroll.bounce_down_steps', value: '6', description: '回弹等待后再次向下滚动的步数。', inputType: 'number-stepper', unit: '步', min: 0, max: 80, step: 1 },
+          { label: '回弹滚动次数', configKey: 'main_flow.home_scroll.bounce_attempts', value: '2', description: '每轮寻找候选文章时，最多尝试回弹滚动的次数。', inputType: 'number-stepper', unit: '次', min: 0, max: 20, step: 1 },
         ],
       }
-    case 'reference-request':
+    case 'main-dispatch-control':
       return {
-        note: '原 HTML 请求用于 MITM 捕获到 reference 参数后重新获取文章 HTML。',
+        note: '任务分发用于控制主流程连续派发单篇任务时的额外等待，0 表示不主动等待。',
         fields: [
-          { label: '请求超时时间', configKey: 'data_acquisition.reference_request.request_timeout_seconds', value: '10', description: '使用 reference 参数重新请求文章 HTML 时，单次请求允许等待的最长时间。', inputType: 'number-stepper', unit: '秒', min: 1, max: 300, step: 1 },
+          { label: '单篇任务派发间隔', configKey: 'main_flow.dispatch_control.single_task_interval_seconds', value: '0', description: '主流程两次派发单篇任务之间的额外等待时间。', inputType: 'number-stepper', unit: '秒', min: 0, max: 3600, step: 1 },
         ],
       }
-    case 'comment-collection':
+    case 'single-html-storage':
+      return {
+        note: '文章详情存储用于 MITM 捕获到 reference 参数后重新获取文章 HTML。',
+        fields: [
+          { label: '请求超时时间', configKey: 'single_article_task.html_storage.request_timeout_seconds', value: '10', description: '使用 reference 参数重新请求文章 HTML 时，单次请求允许等待的最长时间。', inputType: 'number-stepper', unit: '秒', min: 1, max: 300, step: 1 },
+        ],
+      }
+    case 'single-comment-collection':
       return {
         note: '评论采集属于文章主采集后的可选资源获取任务，具体任务页仍可用前端开关覆盖默认值。',
         fields: [
-          { label: '默认采集评论', configKey: 'data_acquisition.comment_collection.enabled_by_default', value: '关闭', description: '是否默认采集评论；具体任务也可以由前端开关覆盖。', inputType: 'switch' },
-          { label: '评论请求超时', configKey: 'data_acquisition.comment_collection.request_timeout_seconds', value: '10', description: '每一次评论 HTTP 请求最多等待的时间。', inputType: 'number-stepper', unit: '秒', min: 1, max: 300, step: 1 },
-          { label: '分页请求间隔', configKey: 'data_acquisition.comment_collection.page_interval_seconds', value: '0.5', description: '评论分页请求之间的等待时间，避免连续请求过快。', inputType: 'number-stepper', unit: '秒', min: 0, max: 30, step: 0.1 },
-          { label: '一级评论最大页数', configKey: 'data_acquisition.comment_collection.top_level_max_pages', value: '50', description: '一级评论最多请求的页数。', inputType: 'number-stepper', unit: '页', min: 1, max: 1000, step: 1 },
-          { label: '回复评论最大页数', configKey: 'data_acquisition.comment_collection.reply_max_pages', value: '50', description: '回复评论最多请求的页数；后端后续可与一级评论页数分开适配。', inputType: 'number-stepper', unit: '页', min: 1, max: 1000, step: 1 },
-          { label: '评论子进程最大并发数', configKey: 'data_acquisition.comment_collection.max_concurrent_processes', value: '3', description: '同时运行的评论采集独立子进程数量；超过上限的文章会排队。', inputType: 'number-stepper', unit: '个', min: 1, max: 10, step: 1 },
+          { label: '默认采集评论', configKey: 'single_article_task.comment_collection.enabled_by_default', value: '关闭', description: '是否默认采集评论；具体任务也可以由前端开关覆盖。', inputType: 'switch' },
+          { label: '评论请求超时', configKey: 'single_article_task.comment_collection.request_timeout_seconds', value: '10', description: '每一次评论 HTTP 请求最多等待的时间。', inputType: 'number-stepper', unit: '秒', min: 1, max: 300, step: 1 },
+          { label: '分页请求间隔', configKey: 'single_article_task.comment_collection.page_interval_seconds', value: '0.5', description: '评论分页请求之间的等待时间，避免连续请求过快。', inputType: 'number-stepper', unit: '秒', min: 0, max: 30, step: 0.1 },
+          { label: '一级评论最大页数', configKey: 'single_article_task.comment_collection.top_level_max_pages', value: '50', description: '一级评论最多请求的页数。', inputType: 'number-stepper', unit: '页', min: 1, max: 1000, step: 1 },
+          { label: '评论子进程最大并发数', configKey: 'single_article_task.comment_collection.max_concurrent_processes', value: '3', description: '同时运行的评论采集独立子进程数量；超过上限的文章会排队。', inputType: 'number-stepper', unit: '个', min: 1, max: 10, step: 1 },
         ],
       }
-    case 'offline-cache':
+    case 'single-offline-cache':
       return {
         note: '离线缓存使用 Playwright 打开文章短链并下载资源。这里先按当前 custom.yaml 展示默认值。',
         fields: [
-          { label: '默认离线归档', configKey: 'data_acquisition.offline_cache.enabled_by_default', value: '关闭', description: '是否默认在主服务页勾选离线归档；具体任务仍可由前端开关覆盖。', inputType: 'switch' },
-          { label: '最长滚动加载', configKey: 'data_acquisition.offline_cache.max_scroll_seconds', value: '30', description: '离线缓存时最长滚动加载时间。', inputType: 'number-stepper', unit: '秒', min: 1, max: 600, step: 1 },
-          { label: '资源下载超时', configKey: 'data_acquisition.offline_cache.resource_timeout_seconds', value: '10', description: '单个离线资源下载超时。', inputType: 'number-stepper', unit: '秒', min: 1, max: 300, step: 1 },
-          { label: '缓存子进程最大并发数', configKey: 'data_acquisition.offline_cache.max_concurrent_processes', value: '3', description: '同时运行的 Playwright 离线缓存独立子进程数量；超过上限的文章会排队。', inputType: 'number-stepper', unit: '个', min: 1, max: 10, step: 1 },
+          { label: '默认离线归档', configKey: 'single_article_task.offline_cache.enabled_by_default', value: '关闭', description: '是否默认在主服务页勾选离线归档；具体任务仍可由前端开关覆盖。', inputType: 'switch' },
+          { label: '最长滚动加载', configKey: 'single_article_task.offline_cache.max_scroll_seconds', value: '30', description: '离线缓存时最长滚动加载时间。', inputType: 'number-stepper', unit: '秒', min: 1, max: 600, step: 1 },
+          { label: '资源下载超时', configKey: 'single_article_task.offline_cache.resource_timeout_seconds', value: '10', description: '单个离线资源下载超时。', inputType: 'number-stepper', unit: '秒', min: 1, max: 300, step: 1 },
+          { label: '缓存子进程最大并发数', configKey: 'single_article_task.offline_cache.max_concurrent_processes', value: '3', description: '同时运行的 Playwright 离线缓存独立子进程数量；超过上限的文章会排队。', inputType: 'number-stepper', unit: '个', min: 1, max: 10, step: 1 },
         ],
       }
     case 'mitm-diagnostics':
@@ -780,17 +727,17 @@ const selectedSettingsDetail = computed<SettingsDetailContent | null>(() => {
           { label: '首篇点击', description: '立刻聚焦主页窗口，找到首篇候选文章并点击打开；不等待标题确认，也不关闭文章标签。', icon: 'fa-solid fa-play', tone: 'success', disabled: () => isWindowDiagnosticRunning.value || isWindowClickFlowDiagnosticRunning.value, run: () => handleWindowDiagnosticAction('first-article-click') },
           { label: '滚动页面', description: '立刻聚焦主页窗口，并按左侧临时步长执行一次向下滚动；该值不会写入 YAML。', icon: 'fa-solid fa-download', tone: 'purple', showScrollStepInput: true, disabled: () => isWindowDiagnosticRunning.value || isWindowClickFlowDiagnosticRunning.value, run: () => handleWindowDiagnosticAction('scroll-page') },
           { label: '回弹滚动', description: '立刻聚焦主页窗口，并执行一次先上滚后下滚的回弹操作。', icon: 'fa-solid fa-rotate-right', tone: 'orange', disabled: () => isWindowDiagnosticRunning.value || isWindowClickFlowDiagnosticRunning.value, run: () => handleWindowDiagnosticAction('bounce-scroll') },
-          { label: '关闭标签', description: '立刻打开记录弹窗，查找第一个文章标签并通过 Ctrl+W 关闭。', icon: 'fa-solid fa-xmark', tone: 'orange', disabled: () => isWindowDiagnosticRunning.value || isWindowClickFlowDiagnosticRunning.value, run: () => handleWindowDiagnosticAction('close-tab') },
+          { label: '关闭标签', description: '立刻打开记录弹窗，查找第一个文章标签并通过 Ctrl+W 关闭。', icon: 'fa-solid fa-xmark', tone: 'danger', disabled: () => isWindowDiagnosticRunning.value || isWindowClickFlowDiagnosticRunning.value, run: () => handleWindowDiagnosticAction('close-tab') },
         ],
       }
     case 'flow-diagnostics':
       return {
         note: '流程测试均基于当前微信主页窗口。已接入窗口测试、详情获取、初始内容存储、详情评论和离线缓存。',
         actions: [
-          { label: '窗口点击流程', buttonLabel: '窗口测试', description: '首次立即激活公众号主页，按 UIA 日期组和文章卡片读取当前可视内容；滚动后重新读取并用日期加标题衔接，不点击文章、不启动 MITM。', icon: 'fa-solid fa-window-restore', tone: 'blue', showWindowClickFlowOptions: true, disabled: () => isWindowClickFlowDiagnosticRunning.value || isWindowDiagnosticRunning.value, run: handleWindowClickFlowDiagnosticAction },
+          { label: '窗口内容读取', buttonLabel: '窗口测试', description: '首次立即激活公众号主页，按 UIA 日期组和文章卡片读取当前可视内容；滚动后重新读取并用日期加标题衔接，不点击文章、不启动 MITM。', icon: 'fa-solid fa-window-restore', tone: 'blue', showWindowClickFlowOptions: true, disabled: () => isWindowClickFlowDiagnosticRunning.value || isWindowDiagnosticRunning.value, run: handleWindowClickFlowDiagnosticAction },
           { label: '单篇文章详情流程', buttonLabel: '详情获取', description: '激活主页窗口并读取当前可视区第一篇文章卡片', icon: 'fa-regular fa-file-lines', tone: 'purple', showArticleDetailSkipCollectedOption: true, disabled: () => isArticleDetailDiagnosticRunning.value || isInitialContentStorageDiagnosticRunning.value || isArticleDetailCommentsDiagnosticRunning.value || isArticleDetailOfflineCacheDiagnosticRunning.value || isWindowClickFlowDiagnosticRunning.value, run: handleArticleDetailDiagnosticAction },
-          { label: '初始内容存储测试', buttonLabel: '初始内容存储', description: '复用单篇文章详情流程，解析 HTML 并存储初始文章内容', icon: 'fa-solid fa-box-archive', tone: 'primary', showInitialContentStorageOptions: true, disabled: () => isInitialContentStorageDiagnosticRunning.value || isArticleDetailDiagnosticRunning.value || isArticleDetailCommentsDiagnosticRunning.value || isArticleDetailOfflineCacheDiagnosticRunning.value || isWindowClickFlowDiagnosticRunning.value, run: handleInitialContentStorageDiagnosticAction },
-          { label: '单篇评论存储测试', buttonLabel: '评论信息存储', description: '复用初始内容存储，随后启动独立评论子进程采集评论', icon: 'fa-regular fa-clipboard', tone: 'primary', showArticleDetailCommentsOptions: true, disabled: () => isArticleDetailCommentsDiagnosticRunning.value || isArticleDetailDiagnosticRunning.value || isInitialContentStorageDiagnosticRunning.value || isWindowClickFlowDiagnosticRunning.value || isArticleDetailOfflineCacheDiagnosticRunning.value, run: handleArticleDetailCommentsDiagnosticAction },
+          { label: '初始内容存储测试', buttonLabel: '初始内容存储', description: '复用单篇文章详情流程，解析 HTML 并存储初始文章内容', icon: 'fa-solid fa-box-archive', tone: 'success', showInitialContentStorageOptions: true, disabled: () => isInitialContentStorageDiagnosticRunning.value || isArticleDetailDiagnosticRunning.value || isArticleDetailCommentsDiagnosticRunning.value || isArticleDetailOfflineCacheDiagnosticRunning.value || isWindowClickFlowDiagnosticRunning.value, run: handleInitialContentStorageDiagnosticAction },
+          { label: '单篇评论存储测试', buttonLabel: '评论信息存储', description: '复用初始内容存储，随后启动独立评论子进程采集评论', icon: 'fa-regular fa-clipboard', tone: 'orange', showArticleDetailCommentsOptions: true, disabled: () => isArticleDetailCommentsDiagnosticRunning.value || isArticleDetailDiagnosticRunning.value || isInitialContentStorageDiagnosticRunning.value || isWindowClickFlowDiagnosticRunning.value || isArticleDetailOfflineCacheDiagnosticRunning.value, run: handleArticleDetailCommentsDiagnosticAction },
           { label: '单篇离线缓存测试', buttonLabel: '离线缓存', description: '复用初始内容存储，随后启动 Playwright 子进程生成 index.html 和 assets', icon: 'fa-solid fa-download', tone: 'primary', showArticleDetailOfflineCacheOptions: true, disabled: () => isArticleDetailOfflineCacheDiagnosticRunning.value || isArticleDetailCommentsDiagnosticRunning.value || isArticleDetailDiagnosticRunning.value || isInitialContentStorageDiagnosticRunning.value || isWindowClickFlowDiagnosticRunning.value, run: handleArticleDetailOfflineCacheDiagnosticAction },
         ],
       }
@@ -1063,7 +1010,7 @@ const caCertificateDialogProjectPath = computed(() => (
   caCertificateDialogProjectCertificate.value?.path
     || caCertificateStatus.value.currentCaRelativePath
     || caCertificateStatus.value.currentCaPath
-    || getRuntimeConfigDisplayValue('proxy_settings.basic_info.ca_cert_path')
+    || getRuntimeConfigDisplayValue('basic_settings.proxy_settings.ca_cert_path')
     || '.mitmproxy/mitmproxy-ca-cert.cer'
 ))
 
@@ -1818,13 +1765,13 @@ function applyRuntimeConfigValues(values?: Record<string, string>) {
   }
 
   configForm.logLevel = (runtimeConfigValues['basic_settings.runtime_maintenance.log_level'] as RuntimeLogLevel | undefined) ?? configForm.logLevel
-  configForm.requestIntervalSeconds = parseRuntimeNumberValue('basic_settings.runtime_maintenance.request_interval_seconds', configForm.requestIntervalSeconds)
-  configForm.proxyHost = runtimeConfigValues['proxy_settings.basic_info.host'] ?? configForm.proxyHost
-  configForm.proxyPort = parseRuntimeNumberValue('proxy_settings.basic_info.port', configForm.proxyPort)
-  configForm.startupDelaySeconds = parseRuntimeNumberValue('proxy_settings.basic_info.startup_delay_seconds', configForm.startupDelaySeconds)
-  configForm.trafficCheckUrl = runtimeConfigValues['proxy_settings.basic_info.verification_url'] ?? configForm.trafficCheckUrl
+  configForm.requestIntervalSeconds = parseRuntimeNumberValue('main_flow.dispatch_control.single_task_interval_seconds', configForm.requestIntervalSeconds)
+  configForm.proxyHost = runtimeConfigValues['basic_settings.proxy_settings.host'] ?? configForm.proxyHost
+  configForm.proxyPort = parseRuntimeNumberValue('basic_settings.proxy_settings.port', configForm.proxyPort)
+  configForm.startupDelaySeconds = parseRuntimeNumberValue('basic_settings.proxy_settings.startup_delay_seconds', configForm.startupDelaySeconds)
+  configForm.trafficCheckUrl = runtimeConfigValues['basic_settings.proxy_settings.verification_url'] ?? configForm.trafficCheckUrl
   settings.autoCleanTempFiles = parseRuntimeSwitchValue('basic_settings.runtime_maintenance.auto_clean_temp_files', settings.autoCleanTempFiles)
-  settings.enableSystemProxy = parseRuntimeSwitchValue('proxy_settings.basic_info.enable_system_proxy', settings.enableSystemProxy)
+  settings.enableSystemProxy = parseRuntimeSwitchValue('basic_settings.proxy_settings.enable_system_proxy', settings.enableSystemProxy)
 }
 
 function replaceRuntimeConfigValues(values?: Record<string, string>) {
@@ -1853,11 +1800,11 @@ function buildRuntimeConfigValuesPayload() {
     ),
     'basic_settings.runtime_maintenance.log_level': configForm.logLevel,
     'basic_settings.runtime_maintenance.auto_clean_temp_files': formatSwitchValue(settings.autoCleanTempFiles),
-    'proxy_settings.basic_info.host': configForm.proxyHost,
-    'proxy_settings.basic_info.port': String(configForm.proxyPort),
-    'proxy_settings.basic_info.startup_delay_seconds': String(configForm.startupDelaySeconds),
-    'proxy_settings.basic_info.verification_url': configForm.trafficCheckUrl,
-    'proxy_settings.basic_info.enable_system_proxy': formatSwitchValue(settings.enableSystemProxy),
+    'basic_settings.proxy_settings.host': configForm.proxyHost,
+    'basic_settings.proxy_settings.port': String(configForm.proxyPort),
+    'basic_settings.proxy_settings.startup_delay_seconds': String(configForm.startupDelaySeconds),
+    'basic_settings.proxy_settings.verification_url': configForm.trafficCheckUrl,
+    'basic_settings.proxy_settings.enable_system_proxy': formatSwitchValue(settings.enableSystemProxy),
   }
 }
 
@@ -1919,7 +1866,7 @@ function buildRuntimeConfigPayload(): RuntimeConfigPayload {
     autoStartProxy: settings.autoStartProxy,
     enableSystemProxy: settings.enableSystemProxy,
     logLevel: configForm.logLevel,
-    requestIntervalSeconds: settingsNumberValues['basic_settings.runtime_maintenance.request_interval_seconds'] ?? configForm.requestIntervalSeconds,
+    requestIntervalSeconds: settingsNumberValues['main_flow.dispatch_control.single_task_interval_seconds'] ?? configForm.requestIntervalSeconds,
     proxy: {
       host: configForm.proxyHost,
       port: configForm.proxyPort,
@@ -2812,6 +2759,8 @@ onMounted(() => {
                   :class="[
                     'settings-config-row',
                     'compact-control',
+                    'diagnostic-action-row',
+                    action.tone ?? 'ghost',
                     { 'window-click-flow-row': action.showWindowClickFlowOptions },
                   ]"
                 >
@@ -3070,348 +3019,6 @@ onMounted(() => {
             </div>
           </section>
 
-          <section v-else-if="selectedSettingsItem.key === 'archive-storage'" class="settings-detail-section">
-            <div class="detail-form">
-              <div class="form-row detail-row">
-                <label class="settings-label" for="storage-dir">
-                  <strong>文章归档目录</strong>
-                  <small>对应 basic_settings.project_storage.article_storage_root。</small>
-                </label>
-                <div class="browse-line">
-                  <AInput id="storage-dir" v-model:value="configForm.storageDir" class="settings-ant-control browse-input" readonly />
-                  <AButton class="settings-ant-button ghost browse-action" html-type="button" @click="handleOpenRuntimePath('storageDir')">浏览</AButton>
-                </div>
-              </div>
-              <p class="detail-note">归档根目录用于保存文章 HTML、评论 JSON、离线网页和下载资源。当前页面读取后端实际解析路径，避免相对路径和运行目录不一致。</p>
-            </div>
-          </section>
-
-          <section v-else-if="selectedSettingsItem.key === 'database-files'" class="settings-detail-section">
-            <div class="config-field-grid">
-              <article class="config-field-card">
-                <span class="config-field-key">basic_settings.database_settings.data_schema_version</span>
-                <strong>v2.1</strong>
-                <small>用于定位 data/sql/create_script/ 下对应版本建表脚本。</small>
-              </article>
-              <article class="config-field-card">
-                <span class="config-field-key">basic_settings.database_settings.db_dir</span>
-                <strong>data/sql</strong>
-                <small>SQLite 数据库所在目录。</small>
-              </article>
-            </div>
-            <p class="detail-note">数据表结构版本和数据库目录需要与建表脚本保持一致，暂按只读高级配置展示。</p>
-          </section>
-
-          <section v-else-if="selectedSettingsItem.key === 'temp-log-directories'" class="settings-detail-section">
-            <div class="detail-form">
-              <div class="form-row detail-row">
-                <label class="settings-label" for="project-dir">
-                  <strong>项目工作目录</strong>
-                  <small>程序运行根目录，只读展示。</small>
-                </label>
-                <div class="browse-line">
-                  <AInput id="project-dir" v-model:value="configForm.projectDir" class="settings-ant-control browse-input" readonly />
-                  <AButton class="settings-ant-button ghost browse-action" html-type="button" @click="handleOpenRuntimePath('projectDir')">浏览</AButton>
-                </div>
-              </div>
-              <div class="form-row detail-row">
-                <label class="settings-label" for="log-dir">
-                  <strong>日志目录</strong>
-                  <small>对应 basic_settings.project_storage.log_dir。</small>
-                </label>
-                <div class="browse-line">
-                  <AInput id="log-dir" v-model:value="configForm.logDir" class="settings-ant-control browse-input" readonly />
-                  <AButton class="settings-ant-button ghost browse-action" html-type="button" @click="handleOpenRuntimePath('logDir')">浏览</AButton>
-                </div>
-              </div>
-              <div class="config-field-grid">
-                <article class="config-field-card">
-                  <span class="config-field-key">basic_settings.project_storage.temp_dir</span>
-                  <strong>data/tmp</strong>
-                  <small>运行中间文件、导出临时文件和探针结果目录。</small>
-                </article>
-              </div>
-            </div>
-          </section>
-
-          <section v-else-if="selectedSettingsItem.key === 'mitm-capture-timing'" class="settings-detail-section">
-            <div class="config-field-grid">
-              <article class="config-field-card">
-                <span class="config-field-key">proxy_settings.process_control.ready_timeout_seconds</span>
-                <strong>10 秒</strong>
-                <small>等待 MITM 子进程 ready 通知的最长时间。</small>
-              </article>
-              <article class="config-field-card">
-                <span class="config-field-key">proxy_settings.process_control.capture_timeout_seconds</span>
-                <strong>20 秒</strong>
-                <small>单篇文章捕获的总超时保护。</small>
-              </article>
-            </div>
-          </section>
-
-          <section v-else-if="selectedSettingsItem.key === 'proxy-listener'" class="settings-detail-section">
-            <div class="detail-form">
-              <div class="form-row detail-row">
-                <span class="settings-label">
-                  <strong>监听地址</strong>
-                  <small>对应 proxy_settings.basic_info.host 和 proxy_settings.basic_info.port。</small>
-                </span>
-                <div class="proxy-listen-card" :title="`${proxyDisplayHost}:${configForm.proxyPort}`">
-                  <span class="proxy-listen-icon" aria-hidden="true">
-                    <AppIcon icon="fa-solid fa-plug-circle-check" />
-                  </span>
-                  <span class="proxy-listen-copy">
-                    <strong class="proxy-listen-host">{{ proxyDisplayHost }}</strong>
-                    <span class="proxy-listen-meta">{{ proxyListenMeta }}</span>
-                  </span>
-                </div>
-              </div>
-              <div class="form-row detail-row">
-                <label class="settings-label" for="proxy-port">
-                  <strong>端口设置</strong>
-                  <small>保存后，新的代理启动会使用该端口。</small>
-                </label>
-                <AInputNumber
-                  id="proxy-port"
-                  class="settings-ant-number proxy-number-input"
-                  :value="configForm.proxyPort"
-                  :min="numericConfigLimits.proxyPort.min"
-                  :max="numericConfigLimits.proxyPort.max"
-                  :step="numericConfigLimits.proxyPort.step"
-                  :precision="0"
-                  :controls="true"
-                  aria-label="代理端口"
-                  @change="handleNumericConfigNumberChange('proxyPort', $event)"
-                />
-              </div>
-              <div class="form-row detail-row">
-                <label class="settings-label" for="startup-delay">
-                  <strong>启动延迟（秒）</strong>
-                  <small>通常为 0，由 ready 检测判断可用。</small>
-                </label>
-                <AInputNumber
-                  id="startup-delay"
-                  class="settings-ant-number proxy-number-input"
-                  :value="configForm.startupDelaySeconds"
-                  :min="numericConfigLimits.startupDelaySeconds.min"
-                  :max="numericConfigLimits.startupDelaySeconds.max"
-                  :step="numericConfigLimits.startupDelaySeconds.step"
-                  :precision="0"
-                  :controls="true"
-                  aria-label="启动延迟"
-                  @change="handleNumericConfigNumberChange('startupDelaySeconds', $event)"
-                />
-              </div>
-              <div class="form-row detail-row">
-                <label class="settings-label" for="traffic-check-url">
-                  <strong>代理验证地址</strong>
-                  <small>仅用于预检和异常排查。</small>
-                </label>
-                <AInput id="traffic-check-url" v-model:value="configForm.trafficCheckUrl" class="settings-ant-control" />
-              </div>
-              <div class="form-row detail-row">
-                <span class="settings-label">
-                  <strong>MITM 代理进程</strong>
-                  <small>这是运行态开关，不是长期静态配置。</small>
-                </span>
-                <div class="switch-line proxy-switch-line">
-                  <ASwitch :checked="settings.autoStartProxy" class="settings-ant-switch" checked-children="开" un-checked-children="关" disabled />
-                  <span>{{ settings.autoStartProxy ? '采集中运行' : '当前未运行' }}</span>
-                </div>
-              </div>
-            </div>
-          </section>
-
-          <section v-else-if="selectedSettingsItem.key === 'system-proxy-cert-validation'" class="settings-detail-section">
-            <div class="detail-form">
-              <div class="form-row detail-row">
-                <span class="settings-label">
-                  <strong>允许系统代理接管</strong>
-                  <small>对应 proxy_settings.basic_info.enable_system_proxy。</small>
-                </span>
-                <div class="switch-line proxy-switch-line">
-                  <ASwitch v-model:checked="settings.enableSystemProxy" class="settings-ant-switch" checked-children="开" un-checked-children="关" />
-                  <span>{{ settings.enableSystemProxy ? '采集时允许接管' : '禁止接管系统代理' }}</span>
-                </div>
-              </div>
-              <div class="config-field-grid">
-                <article class="config-field-card warning">
-                  <span class="config-field-key">proxy_settings.basic_info.ssl_insecure</span>
-                  <strong>开启</strong>
-                  <small>本地 MITM 场景允许放宽 HTTPS 证书校验，建议保持当前默认值。</small>
-                </article>
-              </div>
-              <div class="settings-explain-card warning">
-                <h3>影响说明</h3>
-                <p>开启后程序会在采集时接管 Windows 系统网络代理。异常退出时需要通过程序恢复，或在系统设置里手动关闭代理。</p>
-              </div>
-            </div>
-          </section>
-
-          <section v-else-if="selectedSettingsItem.key === 'certificate-paths'" class="settings-detail-section">
-            <div class="detail-form">
-              <div class="config-field-grid">
-                <article class="config-field-card">
-                  <span class="config-field-key">proxy_settings.basic_info.confdir</span>
-                  <strong>.mitmproxy</strong>
-                  <small>mitmproxy 配置和证书目录。</small>
-                </article>
-                <article class="config-field-card">
-                  <span class="config-field-key">proxy_settings.basic_info.ca_cert_path</span>
-                  <strong>.mitmproxy/mitmproxy-ca-cert.cer</strong>
-                  <small>用于检测、安装或清理 mitmproxy CA 证书。</small>
-                </article>
-              </div>
-              <div class="form-row detail-row">
-                <span class="settings-label">
-                  <strong>CA 证书状态</strong>
-                  <small>对应 proxy_settings.basic_info.ca_cert_path。</small>
-                </span>
-                <div class="certificate-line">
-                  <span :class="['certificate-status', caCertificateTone]">{{ caCertificateLabel }}</span>
-                  <div class="certificate-actions">
-                    <AButton class="settings-ant-button ghost certificate-action secondary" html-type="button" :disabled="isCheckingCaCertificate" @click="handleCheckCaCertificate">
-                      {{ isCheckingCaCertificate ? '检测中' : '检测状态' }}
-                    </AButton>
-                    <AButton class="settings-ant-button primary certificate-action install" html-type="button" :disabled="isInstallingCaCertificate" @click="openInstallCaCertificateDialog">
-                      {{ isInstallingCaCertificate ? '安装中' : '一键安装' }}
-                    </AButton>
-                  </div>
-                </div>
-              </div>
-              <AButton class="settings-ant-button danger detail-wide-action" html-type="button" :disabled="isListingMitmCertificates || isDeletingMitmCertificates" @click="handleOpenMitmCertificateDialog">
-                <template #icon>
-                  <AppIcon icon="fa-solid fa-certificate" />
-                </template>
-                {{ isListingMitmCertificates ? '检索中' : '清除 MITM 证书' }}
-              </AButton>
-            </div>
-          </section>
-
-          <section v-else-if="selectedSettingsItem.key === 'comment-default-switch'" class="settings-detail-section">
-            <div class="config-field-grid">
-              <article class="config-field-card">
-                <span class="config-field-key">data_acquisition.comment_collection.enabled_by_default</span>
-                <strong>关闭</strong>
-                <small>是否默认采集评论；具体任务仍可由任务页开关覆盖。</small>
-              </article>
-            </div>
-          </section>
-
-          <section v-else-if="selectedSettingsItem.key === 'comment-request-policy'" class="settings-detail-section">
-            <div class="config-field-grid">
-              <article class="config-field-card">
-                <span class="config-field-key">data_acquisition.comment_collection.request_timeout_seconds</span>
-                <strong>10 秒</strong>
-                <small>单次评论接口请求超时。</small>
-              </article>
-              <article class="config-field-card">
-                <span class="config-field-key">data_acquisition.comment_collection.page_interval_seconds</span>
-                <strong>0.5 秒</strong>
-                <small>评论分页请求之间的等待间隔，避免请求过快。</small>
-              </article>
-              <article class="config-field-card">
-                <span class="config-field-key">data_acquisition.comment_collection.top_level_max_pages</span>
-                <strong>50 页</strong>
-                <small>单篇文章最多请求评论页数，防止异常分页导致无限请求。</small>
-              </article>
-            </div>
-          </section>
-
-          <section v-else-if="selectedSettingsItem.key === 'offline-cache-switch'" class="settings-detail-section">
-            <div class="config-field-grid">
-              <article class="config-field-card">
-                <span class="config-field-key">data_acquisition.offline_cache.enabled_by_default</span>
-                <strong>关闭</strong>
-                <small>是否默认生成离线网页，通常由数据档案页手动触发。</small>
-              </article>
-            </div>
-          </section>
-
-          <section v-else-if="selectedSettingsItem.key === 'offline-page-loading'" class="settings-detail-section">
-            <div class="config-field-grid">
-              <article class="config-field-card">
-                <span class="config-field-key">data_acquisition.offline_cache.max_scroll_seconds</span>
-                <strong>30 秒</strong>
-                <small>Playwright 打开文章后最长滚动加载时间。</small>
-              </article>
-            </div>
-          </section>
-
-          <section v-else-if="selectedSettingsItem.key === 'offline-resource-download'" class="settings-detail-section">
-            <div class="config-field-grid">
-              <article class="config-field-card">
-                <span class="config-field-key">data_acquisition.offline_cache.resource_timeout_seconds</span>
-                <strong>10 秒</strong>
-                <small>下载单个离线资源的超时时间。</small>
-              </article>
-            </div>
-          </section>
-
-          <section v-else-if="selectedSettingsItem.key === 'software-data-version'" class="settings-detail-section">
-            <div class="config-field-grid">
-              <article class="config-field-card">
-                <span class="config-field-key">software.version</span>
-                <strong>2.1.0</strong>
-                <small>用于界面展示、日志排查和版本识别。</small>
-              </article>
-              <article class="config-field-card">
-                <span class="config-field-key">basic_settings.database_settings.data_schema_version</span>
-                <strong>v2.1</strong>
-                <small>用于判断当前应该使用哪一版 SQLite 数据表。</small>
-              </article>
-            </div>
-          </section>
-
-          <section v-else-if="selectedSettingsItem.key === 'log-level'" class="settings-detail-section">
-            <div class="detail-form">
-              <div class="form-row detail-row">
-                <label class="settings-label" for="log-level">
-                  <strong>日志等级</strong>
-                  <small>对应 basic_settings.runtime_maintenance.log_level。</small>
-                </label>
-                <ASelect
-                  id="log-level"
-                  v-model:value="configForm.logLevel"
-                  class="settings-ant-control"
-                  :options="logLevelOptions"
-                  popup-class-name="settings-select-panel"
-                />
-              </div>
-            </div>
-          </section>
-
-          <section v-else-if="selectedSettingsItem.key === 'temp-cleanup'" class="settings-detail-section">
-            <div class="detail-form">
-              <div class="form-row detail-row">
-                <span class="settings-label">
-                  <strong>自动清理临时文件</strong>
-                  <small>对应 basic_settings.runtime_maintenance.auto_clean_temp_files。</small>
-                </span>
-                <div class="switch-line">
-                  <ASwitch v-model:checked="settings.autoCleanTempFiles" class="settings-ant-switch" checked-children="开" un-checked-children="关" />
-                  <span>{{ settings.autoCleanTempFiles ? '开启' : '关闭' }}</span>
-                </div>
-              </div>
-              <div class="config-field-grid">
-                <article class="config-field-card">
-                  <span class="config-field-key">basic_settings.runtime_maintenance.temp_retention_days</span>
-                  <strong>7 天</strong>
-                  <small>超过该天数的临时文件允许被清理。</small>
-                </article>
-              </div>
-            </div>
-          </section>
-
-          <section v-else-if="selectedSettingsItem.key === 'log-retention'" class="settings-detail-section">
-            <div class="config-field-grid">
-              <article class="config-field-card">
-                <span class="config-field-key">basic_settings.runtime_maintenance.log_retention_days</span>
-                <strong>30 天</strong>
-                <small>超过该天数的旧日志允许被清理。</small>
-              </article>
-            </div>
-          </section>
         </template>
 
         <section v-else class="settings-category-overview">
@@ -3485,12 +3092,6 @@ onMounted(() => {
               <AppIcon class="config-action-inline-icon" icon="fa-solid fa-broom" />
             </template>
             {{ isClearingCache ? '清理中' : cacheCleaned ? '已清理' : '清理缓存' }}
-          </AButton>
-          <AButton class="settings-ant-button config-action-button ghost" html-type="button" :loading="isTestingProxyConnection" @click="handleTestProxyConnection">
-            <template #icon>
-              <AppIcon class="config-action-inline-icon" icon="fa-solid fa-tower-broadcast" />
-            </template>
-            {{ isTestingProxyConnection ? '测试中' : '测试代理连接' }}
           </AButton>
           <AButton class="settings-ant-button config-action-button ghost" html-type="button" :loading="isRunningStartupSelfCheck" @click="handleRunStartupSelfCheck">
             <template #icon>
@@ -4310,6 +3911,72 @@ onMounted(() => {
   min-width: 0;
 }
 
+.diagnostic-action-grid.settings-config-list {
+  gap: 12px;
+}
+
+.diagnostic-action-grid .settings-config-row {
+  --diagnostic-row-accent: #357FD9;
+  position: relative;
+  overflow: hidden;
+  padding: 14px 14px 14px 20px;
+  border-color: rgba(104, 141, 181, 0.24);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(248, 251, 255, 0.86)),
+    rgba(255, 255, 255, 0.86);
+  box-shadow:
+    0 4px 10px rgba(21, 56, 111, 0.06),
+    inset 0 1px 0 rgba(255, 255, 255, 0.74);
+  transition:
+    border-color 160ms ease,
+    box-shadow 160ms ease,
+    background-color 160ms ease;
+}
+
+.diagnostic-action-grid .settings-config-row::before {
+  content: '';
+  position: absolute;
+  top: 12px;
+  bottom: 12px;
+  left: 10px;
+  width: 4px;
+  border-radius: 999px;
+  background: var(--diagnostic-row-accent);
+  opacity: 0.9;
+}
+
+.diagnostic-action-grid .settings-config-row:hover {
+  border-color: rgba(53, 127, 217, 0.32);
+  box-shadow:
+    0 6px 14px rgba(21, 56, 111, 0.09),
+    inset 0 1px 0 rgba(255, 255, 255, 0.82);
+}
+
+.diagnostic-action-grid .settings-config-row.primary,
+.diagnostic-action-grid .settings-config-row.blue {
+  --diagnostic-row-accent: #357FD9;
+}
+
+.diagnostic-action-grid .settings-config-row.success {
+  --diagnostic-row-accent: #35B889;
+}
+
+.diagnostic-action-grid .settings-config-row.orange {
+  --diagnostic-row-accent: #F28B3C;
+}
+
+.diagnostic-action-grid .settings-config-row.teal {
+  --diagnostic-row-accent: #159A91;
+}
+
+.diagnostic-action-grid .settings-config-row.purple {
+  --diagnostic-row-accent: #8968CD;
+}
+
+.diagnostic-action-grid .settings-config-row.danger {
+  --diagnostic-row-accent: #D74D4D;
+}
+
 .settings-config-control.compact-control.scroll-step-action-control {
   grid-template-columns: max-content max-content;
   gap: 12px;
@@ -4593,6 +4260,20 @@ onMounted(() => {
   color: #235A93;
   border-color: rgba(73, 139, 217, 0.32);
   background: #EEF6FF;
+}
+
+.diagnostic-action-grid :deep(.diagnostic-action-button.teal) {
+  --diagnostic-action-color: #0F766E;
+  --diagnostic-action-border: rgba(21, 154, 145, 0.3);
+  --diagnostic-action-bg: #ECFDFB;
+  --diagnostic-action-hover-color: #0B615B;
+  --diagnostic-action-hover-border: rgba(21, 154, 145, 0.46);
+  --diagnostic-action-hover-bg: #D7F7F3;
+  --diagnostic-action-icon-color: #0F766E;
+  --diagnostic-action-icon-bg: rgba(21, 154, 145, 0.16);
+  color: #0F766E;
+  border-color: rgba(21, 154, 145, 0.3);
+  background: #ECFDFB;
 }
 
 .diagnostic-action-grid :deep(.diagnostic-action-button.purple) {
@@ -6239,6 +5920,21 @@ onMounted(() => {
   background: rgba(15, 24, 39, 0.5);
 }
 
+:global(.collector-app.dark) .diagnostic-action-grid .settings-config-row {
+  border-color: rgba(128, 153, 188, 0.2);
+  background: rgba(15, 24, 39, 0.52);
+  box-shadow:
+    0 4px 10px rgba(0, 0, 0, 0.22),
+    inset 0 1px 0 rgba(214, 226, 244, 0.045);
+}
+
+:global(.collector-app.dark) .diagnostic-action-grid .settings-config-row:hover {
+  border-color: rgba(111, 154, 211, 0.34);
+  box-shadow:
+    0 6px 14px rgba(0, 0, 0, 0.28),
+    inset 0 1px 0 rgba(214, 226, 244, 0.06);
+}
+
 :global(.collector-app.dark) .settings-config-row.readonly,
 :global(.collector-app.dark) .config-field-card.readonly {
   background: rgba(20, 30, 46, 0.58);
@@ -6458,6 +6154,20 @@ onMounted(() => {
   color: #BFDDFB;
   border-color: rgba(103, 163, 235, 0.32);
   background: rgba(29, 62, 99, 0.72);
+}
+
+:global(.collector-app.dark) .diagnostic-action-grid :deep(.diagnostic-action-button.teal) {
+  --diagnostic-action-color: #A7EEE5;
+  --diagnostic-action-border: rgba(67, 190, 177, 0.34);
+  --diagnostic-action-bg: rgba(26, 78, 73, 0.72);
+  --diagnostic-action-hover-color: #C9FFF8;
+  --diagnostic-action-hover-border: rgba(67, 190, 177, 0.5);
+  --diagnostic-action-hover-bg: rgba(33, 94, 88, 0.84);
+  --diagnostic-action-icon-color: #A7EEE5;
+  --diagnostic-action-icon-bg: rgba(67, 190, 177, 0.18);
+  color: #A7EEE5;
+  border-color: rgba(67, 190, 177, 0.34);
+  background: rgba(26, 78, 73, 0.72);
 }
 
 :global(.collector-app.dark) .diagnostic-action-grid :deep(.diagnostic-action-button.purple) {

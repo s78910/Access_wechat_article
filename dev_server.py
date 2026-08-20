@@ -50,6 +50,11 @@ from src.services.capture.capture_runtime_factory import CaptureRuntimeFactory
 from src.services.capture.window_runtime_factory import WindowRuntimeFactory
 from src.services.history.history_query_service import HistoryQueryService
 from src.services.history.history_clear_service import HistoryClearService
+from src.services.main_flow.main_flow_models import MainFlowCommand
+from src.services.main_flow.main_flow_service import (
+    MainFlowConflictError,
+    MainFlowService,
+)
 from src.services.runtime.database_init_service import DatabaseInitService
 from src.services.runtime.article_card_probe_service import ArticleCardProbeService
 from src.services.runtime.runtime_cache_clear_service import RuntimeCacheClearService
@@ -94,6 +99,7 @@ class DevBackendContext:
     runtime: ApplicationRuntime | Any
     db_path: Path
     task_manager: Any
+    main_flow_service: MainFlowService | Any | None = None
     runtime_logger: RuntimeLogService | Any | None = None
     started_at: datetime = field(default_factory=datetime.now)
     active_task_id: str | None = None
@@ -322,6 +328,14 @@ def create_dev_backend(
             db_path=db_path,
             runtime_logger=runtime_logger,
         ),
+        main_flow_service=MainFlowService(
+            project_root=root,
+            config=runtime.config,
+            db_path=db_path,
+            storage_root=runtime.config.storage.article_storage_root,
+            temp_root=runtime.config.storage.temp_dir,
+            runtime_logger=runtime_logger,
+        ),
         runtime_logger=runtime_logger,
         window_click_flow_huey_service=WindowClickFlowHueyService(
             temp_root=runtime.config.storage.temp_dir,
@@ -464,6 +478,38 @@ def create_backend_app(backend: DevBackendContext) -> FastAPI:
 
     @app.post("/api/task/start")
     def start_task(payload: dict[str, Any] | None = None):
+        if backend.main_flow_service is not None:
+            try:
+                command = _main_flow_command_from_payload(
+                    payload or {},
+                    backend.runtime.config,
+                )
+                snapshot = backend.main_flow_service.start(command)
+            except MainFlowConflictError as exc:
+                return JSONResponse(
+                    {
+                        "ok": False,
+                        "status": "conflict",
+                        "message": str(exc),
+                        "ownerTaskId": exc.owner_task_id,
+                    },
+                    status_code=409,
+                )
+            except Exception as exc:
+                backend.append_log(
+                    "ERROR",
+                    f"启动主流程失败：{exc}",
+                    source="main-flow-api",
+                    summary=True,
+                    exception=exc,
+                )
+                return JSONResponse(
+                    {"ok": False, "status": "failed", "message": str(exc)},
+                    status_code=400,
+                )
+            backend.active_task_id = snapshot.task_id
+            return _main_flow_snapshot_payload(snapshot, backend)
+
         try:
             command = _task_command_from_payload(payload or {}, backend.runtime.config)
             snapshot = backend.task_manager.start_capture(command)
@@ -495,6 +541,20 @@ def create_backend_app(backend: DevBackendContext) -> FastAPI:
 
     @app.post("/api/task/stop")
     def stop_task() -> dict[str, Any]:
+        if backend.main_flow_service is not None:
+            task_id = backend.active_task_id or backend.main_flow_service.active_task_id
+            if not task_id:
+                return _idle_task_payload(backend)
+            stopped = backend.main_flow_service.stop(task_id)
+            if not stopped:
+                backend.append_log(
+                    "WARN",
+                    "当前主流程已经结束，无法再次停止",
+                    source="main-flow-api",
+                    summary=True,
+                )
+            return _current_task_payload(backend)
+
         task_id = backend.active_task_id
         if not task_id:
             return _idle_task_payload(backend)
@@ -958,7 +1018,10 @@ def shutdown_backend(backend: DevBackendContext) -> None:
             backend.diagnostic_mitm_listener = None
     if backend.active_task_id:
         try:
-            backend.task_manager.cancel(backend.active_task_id)
+            if backend.main_flow_service is not None:
+                backend.main_flow_service.stop(backend.active_task_id)
+            else:
+                backend.task_manager.cancel(backend.active_task_id)
             backend.append_log("INFO", f"后端退出，已请求停止任务：{backend.active_task_id}")
         except Exception as exc:
             backend.append_log("ERROR", f"后端退出清理失败：{exc}")
@@ -1037,7 +1100,39 @@ def _task_command_from_payload(payload: dict[str, Any], config: Any) -> TaskComm
     return command
 
 
+def _main_flow_command_from_payload(payload: dict[str, Any], config: Any) -> MainFlowCommand:
+    """解析主服务页面命令；默认值来自已加载的内存配置。"""
+    raw = dict(payload)
+    selections = raw.get("selections")
+    if not isinstance(selections, dict):
+        selections = {}
+    if "singleTaskIntervalSeconds" not in raw:
+        raw["singleTaskIntervalSeconds"] = config.request.request_interval_seconds
+    if "commentInfo" not in selections:
+        selections["commentInfo"] = config.comment.enabled_by_default
+    if "offlineArchive" not in selections:
+        selections["offlineArchive"] = config.offline_cache.enabled_by_default
+    raw["selections"] = selections
+    return MainFlowCommand.from_payload(raw)
+
+
 def _current_task_payload(backend: DevBackendContext) -> dict[str, Any]:
+    if backend.main_flow_service is not None and backend.active_task_id:
+        try:
+            return _main_flow_snapshot_payload(
+                backend.main_flow_service.get(backend.active_task_id),
+                backend,
+            )
+        except KeyError:
+            backend.active_task_id = None
+            return _idle_task_payload(backend)
+    if backend.main_flow_service is not None:
+        current = backend.main_flow_service.current()
+        if current is not None:
+            backend.active_task_id = current.task_id
+            return _main_flow_snapshot_payload(current, backend)
+        return _idle_task_payload(backend)
+
     task_id = backend.active_task_id
     if not task_id:
         return _idle_task_payload(backend)
@@ -1056,6 +1151,25 @@ def _idle_task_payload(backend: DevBackendContext) -> dict[str, Any]:
         "message": "当前没有运行中的采集任务。",
         **_runtime_status_fields(backend),
     }
+
+
+def _main_flow_snapshot_payload(snapshot: Any, backend: DevBackendContext) -> dict[str, Any]:
+    """把主流程领域快照转换成现有前端状态协议。"""
+    payload = snapshot.to_payload()
+    runtime_fields = _runtime_status_fields(backend)
+    payload.update(runtime_fields)
+    payload["runtimeState"] = dict(snapshot.runtime_state)
+    payload["traffic"] = dict(snapshot.traffic)
+    state = snapshot.runtime_state
+    payload.update(
+        {
+            "completedCount": int(state.get("progressDone") or 0),
+            "failedCount": int(state.get("errorCount") or 0),
+            "skippedCount": int(state.get("skippedCount") or 0),
+            "totalAttempts": int(state.get("totalWorkerCount") or 0),
+        }
+    )
+    return payload
 
 
 def _task_snapshot_payload(snapshot: Any, backend: DevBackendContext) -> dict[str, Any]:
@@ -2172,7 +2286,10 @@ def _coerce_config_value(flat_key: str, value: Any, current_value: Any) -> Any:
 def _integer_config_keys() -> set[str]:
     return {
         "proxy.port",
+        "basic_settings.proxy_settings.port",
         "comment.max_pages",
+        "comment.max_concurrent_processes",
+        "offline_cache.max_concurrent_processes",
         "runtime.temp_retention_days",
         "runtime.log_retention_days",
         "window.scroll_wheel_steps",
@@ -2180,22 +2297,32 @@ def _integer_config_keys() -> set[str]:
         "window.bounce_attempts",
         "window.bounce_up_steps",
         "window.bounce_down_steps",
+        "single_article_task.comment_collection.top_level_max_pages",
+        "single_article_task.comment_collection.max_concurrent_processes",
+        "single_article_task.offline_cache.max_concurrent_processes",
+        "main_flow.home_scroll.bounce_attempts",
+        "main_flow.home_scroll.bounce_up_steps",
+        "main_flow.home_scroll.bounce_down_steps",
     }
 
 
 def _float_config_keys() -> set[str]:
     return {
         "proxy.startup_delay_seconds",
+        "basic_settings.proxy_settings.startup_delay_seconds",
         "request.request_interval_seconds",
         "request.request_timeout_seconds",
         "reference.request_timeout_seconds",
         "mitm_capture.ready_timeout_seconds",
         "mitm_capture.capture_timeout_seconds",
+        "mitm_capture.result_timeout_seconds",
+        "mitm_capture.listener_shutdown_timeout_seconds",
         "comment.request_timeout_seconds",
         "comment.page_interval_seconds",
         "offline_cache.max_scroll_seconds",
         "offline_cache.resource_timeout_seconds",
         "window.activation_wait_seconds",
+        "window.home_find_timeout_seconds",
         "window.article_open_timeout_seconds",
         "window.article_title_poll_interval_seconds",
         "window.article_title_stable_delay_seconds",
@@ -2206,6 +2333,28 @@ def _float_config_keys() -> set[str]:
         "window.lazy_load_timeout_seconds",
         "window.unchanged_before_bounce_seconds",
         "window.bounce_pause_seconds",
+        "main_flow.home_window.activation_wait_seconds",
+        "main_flow.home_window.home_find_timeout_seconds",
+        "main_flow.home_scroll.scroll_initial_delay_seconds",
+        "main_flow.home_scroll.scroll_probe_interval_seconds",
+        "main_flow.home_scroll.scroll_probe_max_interval_seconds",
+        "main_flow.home_scroll.lazy_load_timeout_seconds",
+        "main_flow.home_scroll.unchanged_before_bounce_seconds",
+        "main_flow.home_scroll.bounce_pause_seconds",
+        "main_flow.dispatch_control.single_task_interval_seconds",
+        "single_article_task.article_tab.article_open_timeout_seconds",
+        "single_article_task.article_tab.article_title_poll_interval_seconds",
+        "single_article_task.article_tab.article_title_stable_delay_seconds",
+        "single_article_task.article_tab.article_close_confirm_timeout_seconds",
+        "single_article_task.mitm_capture.ready_timeout_seconds",
+        "single_article_task.mitm_capture.capture_timeout_seconds",
+        "single_article_task.mitm_capture.result_timeout_seconds",
+        "single_article_task.mitm_capture.listener_shutdown_timeout_seconds",
+        "single_article_task.html_storage.request_timeout_seconds",
+        "single_article_task.comment_collection.request_timeout_seconds",
+        "single_article_task.comment_collection.page_interval_seconds",
+        "single_article_task.offline_cache.max_scroll_seconds",
+        "single_article_task.offline_cache.resource_timeout_seconds",
     }
 
 

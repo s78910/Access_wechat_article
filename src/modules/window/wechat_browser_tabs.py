@@ -81,16 +81,20 @@ class WechatBrowserTabService:
         target_title: str,
         baseline: Mapping[str, str],
         timeout_seconds: float,
-        poll_interval_seconds: float,
         stable_delay_seconds: float,
+        poll_interval_seconds: float | None = None,
+        poll_initial_interval_seconds: float | None = None,
+        poll_max_interval_seconds: float | None = None,
     ) -> BrowserTabInfo:
         expected = _article_title_match_key(target_title)
         if not expected:
             raise ValueError("target_title 不能为空")
         deadline = self._monotonic() + max(0.0, float(timeout_seconds))
-        max_interval = max(0.01, float(poll_interval_seconds))
-        # 先快速探测标签切换，之后逐步放慢，兼顾打开速度和 UIA 扫描开销。
-        interval = min(0.05, max_interval)
+        interval, max_interval = _poll_interval_bounds(
+            poll_interval_seconds=poll_interval_seconds,
+            poll_initial_interval_seconds=poll_initial_interval_seconds,
+            poll_max_interval_seconds=poll_max_interval_seconds,
+        )
 
         while True:
             candidate = self._find_current_target(expected, baseline)
@@ -112,15 +116,20 @@ class WechatBrowserTabService:
         self,
         *,
         timeout_seconds: float,
-        poll_interval_seconds: float,
         stable_delay_seconds: float,
         baseline: Mapping[str, str] | None = None,
+        poll_interval_seconds: float | None = None,
+        poll_initial_interval_seconds: float | None = None,
+        poll_max_interval_seconds: float | None = None,
     ) -> BrowserTabInfo:
         """等待点击后出现的有效文章页，不再要求标签标题与主页候选标题一致。"""
         baseline = baseline or {}
         deadline = self._monotonic() + max(0.0, float(timeout_seconds))
-        max_interval = max(0.01, float(poll_interval_seconds))
-        interval = min(0.05, max_interval)
+        interval, max_interval = _poll_interval_bounds(
+            poll_interval_seconds=poll_interval_seconds,
+            poll_initial_interval_seconds=poll_initial_interval_seconds,
+            poll_max_interval_seconds=poll_max_interval_seconds,
+        )
 
         while True:
             candidate = self._find_current_opened_article(baseline)
@@ -450,6 +459,28 @@ def normalize_article_title(title: str) -> str:
     value = unicodedata.normalize("NFKC", str(title or ""))
     value = value.replace("\u200b", "").replace("\ufeff", "").strip()
     return re.sub(r"\s+", " ", value)
+
+
+def _poll_interval_bounds(
+    *,
+    poll_interval_seconds: float | None,
+    poll_initial_interval_seconds: float | None,
+    poll_max_interval_seconds: float | None,
+) -> tuple[float, float]:
+    # 旧调用只传 poll_interval_seconds，等价于“最大轮询间隔”。
+    max_interval_source = (
+        poll_max_interval_seconds
+        if poll_max_interval_seconds is not None
+        else poll_interval_seconds
+    )
+    max_interval = max(0.01, float(max_interval_source or 0.05))
+    initial_interval_source = (
+        poll_initial_interval_seconds
+        if poll_initial_interval_seconds is not None
+        else min(0.05, max_interval)
+    )
+    initial_interval = max(0.01, float(initial_interval_source))
+    return min(initial_interval, max_interval), max_interval
 
 
 def _article_title_match_key(title: str) -> str:

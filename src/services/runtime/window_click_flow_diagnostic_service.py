@@ -64,6 +64,7 @@ class WindowClickFlowDiagnosticService:
         events: list[dict[str, Any]] = []
         counters = {"recognized": 0, "skipped": 0}
         marker: Marker | None = None
+        expanded_more_keys: set[tuple[str, str]] = set()
 
         def payload(
             *,
@@ -133,6 +134,7 @@ class WindowClickFlowDiagnosticService:
 
             snapshot_reader = self._window_factory.create_window_test_reader()
             scroller = self._window_factory.create_scroller()
+            clicker = self._window_factory.create_clicker()
             if date_filter.mode in {"after", "range"}:
                 target_date = (
                     date_filter.start_date
@@ -190,9 +192,11 @@ class WindowClickFlowDiagnosticService:
                         marker=list(marker),
                     )
 
+                expanded_more = False
                 for card in visible:
-                    marker = card.marker
                     decision = date_filter.decide(_card_published_date(card))
+                    if not card.is_more_trigger:
+                        marker = card.marker
                     if decision is DateFilterDecision.SKIP:
                         counters["skipped"] += 1
                         trace(
@@ -215,6 +219,65 @@ class WindowClickFlowDiagnosticService:
                             message="已到达日期筛选边界，主页内容读取结束",
                             tone="success" if records else "warning",
                         )
+
+                    if card.is_more_trigger:
+                        # “余下 3 篇”展开后可能变成“余下 1 篇”，按日期组防重更稳定。
+                        trigger_key = (
+                            str(card.date_text).strip(),
+                            str(card.published_date).strip(),
+                        )
+                        if trigger_key in expanded_more_keys:
+                            trace(
+                                "more-trigger-skipped",
+                                "当前日期组的剩余文章入口已经点击过",
+                                marker=list(card.marker),
+                                dateGroupKey=list(trigger_key),
+                                remainingCount=card.remaining_count,
+                            )
+                            continue
+                        if card.click_point is None:
+                            trace(
+                                "more-trigger-not-visible",
+                                "剩余文章入口当前没有可点击的可视坐标",
+                                marker=list(card.marker),
+                                dateGroupKey=list(trigger_key),
+                                remainingCount=card.remaining_count,
+                            )
+                            continue
+
+                        expanded_more_keys.add(trigger_key)
+                        click_x, click_y = card.click_point
+                        trace(
+                            "more-trigger-found",
+                            "识别到当前日期组的剩余文章入口",
+                            marker=list(card.marker),
+                            dateGroupKey=list(trigger_key),
+                            remainingCount=card.remaining_count,
+                            clickPoint=[click_x, click_y],
+                        )
+                        clicker.click_point(home_window.handle, click_x, click_y)
+                        trace(
+                            "more-trigger-clicked",
+                            "已点击剩余文章入口，准备重新读取可视区域",
+                            marker=list(card.marker),
+                            dateGroupKey=list(trigger_key),
+                            remainingCount=card.remaining_count,
+                            clickPoint=[click_x, click_y],
+                        )
+                        publish(
+                            f"已展开余下 {card.remaining_count} 篇，正在重新读取当前页面"
+                        )
+                        self._sleep_if_positive(
+                            self._config.window.scroll_initial_delay_seconds
+                        )
+                        snapshot = self._read_snapshot(
+                            snapshot_reader,
+                            home_window,
+                            stage="after-more-trigger",
+                            trace=trace,
+                        )
+                        expanded_more = True
+                        break
 
                     record = _card_record(
                         card,
@@ -239,6 +302,9 @@ class WindowClickFlowDiagnosticService:
                             message=f"已达到主页内容读取上限 {limit} 条",
                             tone="success",
                         )
+
+                if expanded_more:
+                    continue
 
                 if should_stop():
                     continue

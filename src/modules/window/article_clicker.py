@@ -39,18 +39,32 @@ class ArticleClicker:
         del uia_click, screen_click
 
     def click(self, target: ArticleTarget) -> ClickResult:
+        return self.click_point(
+            target.home_window_handle,
+            target.click_x,
+            target.click_y,
+        )
+
+    def click_point(
+        self,
+        home_window_handle: int,
+        click_x: int,
+        click_y: int,
+    ) -> ClickResult:
+        """向主页指定屏幕坐标发送一次后台点击，不移动系统鼠标。"""
+
         try:
             # 主页文章点击统一发给微信窗口/子窗口，不调用系统鼠标，避免抢占用户当前鼠标。
             self._native_click(
-                target.home_window_handle,
-                target.click_x,
-                target.click_y,
+                int(home_window_handle),
+                int(click_x),
+                int(click_y),
             )
             return ClickResult(
                 method="win32_post_message",
-                target_handle=target.home_window_handle,
-                click_x=target.click_x,
-                click_y=target.click_y,
+                target_handle=int(home_window_handle),
+                click_x=int(click_x),
+                click_y=int(click_y),
             )
         except Exception as native_error:
             raise RuntimeError(f"Win32 点击失败：{native_error}") from native_error

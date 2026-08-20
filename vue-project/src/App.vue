@@ -70,6 +70,7 @@ type NavItem = {
 type RuntimeLogLevel = 'INFO' | 'SUCCESS' | 'WARN' | 'ERROR'
 type LogFilterLevel = 'ALL' | RuntimeLogLevel
 type TaskDateFilterMode = 'all' | 'range' | 'before' | 'after'
+type OfflineArchiveMode = 'standard' | 'beta'
 type TaskDateRangeValue = [string, string] | null
 type LogDisplayRow = {
   id: string
@@ -207,6 +208,8 @@ const downloadSelections = ref({
   commentInfo: true,
   skipCollectedRecords: true,
 })
+const offlineArchiveMode = ref<OfflineArchiveMode>('standard')
+const offlineArchiveModeOpen = ref(false)
 const mainTaskSelectionDefaultsApplied = ref(false)
 let pywebviewStatusRetryTimer: number | undefined
 let pywebviewStatusRetryCount = 0
@@ -527,8 +530,17 @@ const stats = computed(() => buildArchiveSummaryStats(archiveSummary.value, form
 
 const mandatoryDownloadOption = { key: 'articleDetail', label: '文章详情', locked: true } as const
 
+const offlineArchiveModeOptions = [
+  { value: 'standard', label: '离线归档' },
+  { value: 'beta', label: '离线归档 (beta)' },
+] satisfies Array<{ value: OfflineArchiveMode; label: string }>
+
+const selectedOfflineArchiveModeLabel = computed(() => (
+  offlineArchiveModeOptions.find((option) => option.value === offlineArchiveMode.value)?.label ?? '离线归档'
+))
+const offlineArchiveSelected = computed(() => downloadSelections.value.offlineArchive)
+
 const downloadOptions = [
-  { key: 'offlineArchive', label: '离线归档', locked: false },
   { key: 'commentInfo', label: '评论信息', locked: false },
   { key: 'skipCollectedRecords', label: '跳过已采集记录', locked: false },
 ] as const
@@ -620,6 +632,16 @@ function handleDownloadSelectionChange() {
     return
   }
 
+  mainTaskSelectionDefaultsApplied.value = true
+}
+
+function handleOfflineArchiveModeChange(value: OfflineArchiveMode) {
+  if (taskSettingsLocked.value) {
+    return
+  }
+
+  offlineArchiveMode.value = value
+  offlineArchiveModeOpen.value = false
   mainTaskSelectionDefaultsApplied.value = true
 }
 
@@ -1273,6 +1295,54 @@ onBeforeUnmount(() => {
             <div class="task-body task-body-content">
               <h2>获取指定内容</h2>
               <div class="download-options" aria-label="选择获取内容">
+                <div
+                  :class="[
+                    'download-option',
+                    'download-option-combo',
+                    {
+                      selected: offlineArchiveSelected,
+                      locked: taskSettingsLocked,
+                    },
+                  ]"
+                >
+                  <ACheckbox
+                    v-model:checked="downloadSelections.offlineArchive"
+                    class="offline-archive-checkbox"
+                    :disabled="taskSettingsLocked"
+                    :title="taskSettingsLocked ? '任务运行期间不能修改' : ''"
+                    @change="handleDownloadSelectionChange"
+                  >
+                    {{ selectedOfflineArchiveModeLabel }}
+                  </ACheckbox>
+                  <ADropdown
+                    v-model:open="offlineArchiveModeOpen"
+                    :trigger="['click']"
+                    :disabled="taskSettingsLocked"
+                    placement="bottomRight"
+                    overlay-class-name="offline-archive-mode-dropdown"
+                  >
+                    <AButton
+                      class="offline-archive-mode-trigger"
+                      :disabled="taskSettingsLocked"
+                      aria-label="选择离线归档模式"
+                    >
+                      <DownOutlined
+                        :class="['download-select-chevron', { 'is-open': offlineArchiveModeOpen }]"
+                      />
+                    </AButton>
+                    <template #overlay>
+                      <AMenu :selected-keys="[offlineArchiveMode]">
+                        <AMenuItem
+                          v-for="option in offlineArchiveModeOptions"
+                          :key="option.value"
+                          @click="handleOfflineArchiveModeChange(option.value)"
+                        >
+                          {{ option.label }}
+                        </AMenuItem>
+                      </AMenu>
+                    </template>
+                  </ADropdown>
+                </div>
                 <ACheckbox
                   v-for="option in downloadOptions"
                   :key="option.key"
@@ -2374,6 +2444,70 @@ input:focus-visible {
   padding-inline-end: 0;
 }
 
+.download-option-combo {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 28px;
+  align-items: center;
+  gap: 4px;
+  padding-inline-end: 4px;
+}
+
+.offline-archive-checkbox {
+  min-width: 0;
+  color: inherit;
+  font-size: inherit;
+}
+
+.offline-archive-checkbox :deep(span:last-child) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.offline-archive-mode-trigger {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  min-width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  color: rgba(53, 127, 217, 0.86);
+  background: transparent;
+  box-shadow: none;
+}
+
+.offline-archive-mode-trigger:hover,
+.offline-archive-mode-trigger:focus-visible {
+  color: rgba(35, 101, 184, 0.96);
+  background: rgba(217, 236, 255, 0.52);
+}
+
+.download-select-chevron {
+  font-size: 11px;
+  transition: transform 160ms ease;
+}
+
+.download-select-chevron.is-open {
+  transform: rotate(180deg);
+}
+
+:global(.offline-archive-mode-dropdown.ant-dropdown .ant-dropdown-menu) {
+  min-width: calc(168px * var(--app-scale));
+  padding: calc(4px * var(--app-scale));
+  border-radius: calc(6px * var(--app-scale));
+}
+
+:global(.offline-archive-mode-dropdown.ant-dropdown .ant-dropdown-menu .ant-dropdown-menu-item) {
+  min-height: calc(32px * var(--app-scale));
+  padding: calc(5px * var(--app-scale)) calc(12px * var(--app-scale));
+  border-radius: calc(4px * var(--app-scale));
+  font-size: calc(14px * var(--app-scale));
+  font-weight: 400;
+  line-height: 1.25;
+}
+
 .download-option:hover {
   background: rgba(233, 246, 247, 0.58);
 }
@@ -2460,6 +2594,16 @@ input:focus-visible {
   border-color: rgba(117, 148, 187, 0.2);
   color: rgba(178, 190, 210, 0.68);
   background: rgba(31, 43, 59, 0.62);
+}
+
+.dark .offline-archive-mode-trigger {
+  color: rgba(170, 204, 235, 0.88);
+}
+
+.dark .offline-archive-mode-trigger:hover,
+.dark .offline-archive-mode-trigger:focus-visible {
+  color: #d7e7f2;
+  background: rgba(61, 96, 136, 0.36);
 }
 
 .control-panel {

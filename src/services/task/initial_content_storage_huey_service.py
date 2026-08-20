@@ -374,8 +374,11 @@ class InitialContentStorageHueyService:
             article_tab = tabs.wait_for_opened_article_tab(
                 baseline=baseline,
                 timeout_seconds=settings.title_timeout_seconds,
-                poll_interval_seconds=settings.title_poll_interval_seconds,
                 stable_delay_seconds=settings.title_stable_delay_seconds,
+                poll_initial_interval_seconds=(
+                    settings.title_poll_initial_interval_seconds
+                ),
+                poll_max_interval_seconds=settings.title_poll_max_interval_seconds,
             )
             append_step(
                 "文章标签",
